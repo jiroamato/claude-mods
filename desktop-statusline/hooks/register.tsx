@@ -7,7 +7,7 @@ import type { Effort, GitInfo } from '../types'
 // surface, drawn as one band above the prompt. Colours are theme keys, so
 // the band follows the app's light and dark palettes and its accent:
 //
-//   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33%   $1.23   12m 4s
+//   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33% │ $1.23 │ 12m 4s
 
 const tick = atom({ plugin: 'desktop-statusline', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
@@ -37,7 +37,7 @@ const METER_HEIGHT = 10
 const METER_STROKE = 1
 const METER_OUTLINE = '#8a8a8a'
 const METER_FILL = '#c19c00'
-// The hairline between model, effort and folder: one pixel wide, a solid
+// The hairline between the band's figures: one pixel wide, a solid
 // mid grey a few shades off the band's background, muted like the meter's
 // outline rather than a theme key, so it reads the same in light and dark.
 const DIVIDER_WIDTH = 1
@@ -250,23 +250,27 @@ export const register: Register = on => {
 
         <Box flexGrow={1} />
 
-        {/* Live figures: context, cost, elapsed. */}
-        <Box flexDirection="row" alignItems="center" columnGap={1}>
-          <Svg
-            source={meterSvg(percent)}
-            alt={percent === undefined ? 'context: no reading yet' : `context ${percent}% used`}
-            width={METER_WIDTH}
-            height={METER_HEIGHT}
-          />
-          <Text color={percent === undefined ? 'inactive' : 'text'}>
-            {percent === undefined ? '--%' : `${percent}%`}
-          </Text>
-        </Box>
+        {/* Live figures: context, cost, elapsed, a hairline between each. */}
+        <Box flexDirection="row" alignItems="center" columnGap={2}>
+          <Box flexDirection="row" alignItems="center" columnGap={1}>
+            <Svg
+              source={meterSvg(percent)}
+              alt={percent === undefined ? 'context: no reading yet' : `context ${percent}% used`}
+              width={METER_WIDTH}
+              height={METER_HEIGHT}
+            />
+            <Text color={percent === undefined ? 'inactive' : 'text'}>
+              {percent === undefined ? '--%' : `${percent}%`}
+            </Text>
+          </Box>
 
-        {usd !== undefined && <Text color="text">${usd.toFixed(2)}</Text>}
+          {usd !== undefined && divider()}
+          {usd !== undefined && <Text color="text">${usd.toFixed(2)}</Text>}
 
-        <Box width={ELAPSED_COLUMNS} justifyContent="flex-end">
-          <Text color="secondaryText">{formatDuration(elapsed)}</Text>
+          {divider()}
+          <Box width={ELAPSED_COLUMNS} justifyContent="flex-end">
+            <Text color="secondaryText">{formatDuration(elapsed)}</Text>
+          </Box>
         </Box>
       </Box>
     )

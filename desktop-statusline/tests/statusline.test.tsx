@@ -43,6 +43,10 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   const slot = await ui.find({ type: 'Box', text: /^1m 0s$/ })
   expect(slot?.props).toMatchObject({ width: 7, justifyContent: 'flex-end' })
 
+  // Meter │ cost │ elapsed, no effort known yet so none on the left.
+  const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
+  expect(dividers).toHaveLength(3)
+
   await ui.unmount()
 })
 
@@ -76,8 +80,10 @@ test('draws a hairline between the model, the effort and the folder', async ($, 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
 
   expect(await ui.find({ type: 'Text', text: 'high' })).toBeDefined()
+  // Two on the left, one on the right between the meter and the timer: no
+  // cost has been read yet, so no hairline is drawn for it.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
-  expect(dividers).toHaveLength(2)
+  expect(dividers).toHaveLength(3)
   for (const one of dividers) {
     expect(one.props).toMatchObject({ width: 1, height: 14 })
     expect(String(one.props.source)).toMatch(/fill="#5a5a5a"\/>/)
@@ -104,6 +110,10 @@ test('shows a placeholder bar and no cost before the first response', async ($, 
   expect(await ui.find({ type: 'Text', text: '--%' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /\$/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: '5s' })).toBeDefined()
+  // One before the folder, one between the meter and the timer: the cost
+  // brings its own hairline, so none is drawn for it yet.
+  const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
+  expect(dividers).toHaveLength(2)
 
   await ui.unmount()
 })
