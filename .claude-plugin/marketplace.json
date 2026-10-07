@@ -1,0 +1,22 @@
+{
+  "name": "claude-mods",
+  "owner": {
+    "name": "Jiro Amato",
+    "email": "amato.miguel@gmail.com",
+    "url": "https://github.com/jiroamato"
+  },
+  "metadata": {
+    "description": "Jiro's mods for Claude Code: live UI plugins built on function hooks.",
+    "version": "1.0.0"
+  },
+  "plugins": [
+    {
+      "name": "desktop-statusline",
+      "source": "./desktop-statusline",
+      "description": "Status bar above the prompt in the Claude desktop app: model, effort, folder, git branch, context meter, cost and elapsed time.",
+      "version": "0.1.0",
+      "category": "productivity",
+      "tags": ["status-line", "desktop", "ui"]
+    }
+  ]
+}

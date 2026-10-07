@@ -1,0 +1,21 @@
+{
+  "name": "desktop-statusline",
+  "version": "0.1.0",
+  "description": "Status bar above the prompt on the desktop surface: model, effort, folder, git branch, context usage, cost and elapsed time",
+  "author": {
+    "name": "Jiro Amato",
+    "email": "amato.miguel@gmail.com"
+  },
+  "homepage": "https://github.com/jiroamato/claude-mods",
+  "repository": "https://github.com/jiroamato/claude-mods",
+  "license": "MIT",
+  "keywords": [
+    "status-line",
+    "status-bar",
+    "desktop",
+    "context",
+    "cost",
+    "git"
+  ],
+  "types": "./types/index.d.ts"
+}

@@ -1,0 +1,27 @@
+name: ci
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  plugins:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+      - name: Install Claude Code
+        run: npm install -g @anthropic-ai/claude-code
+      - name: Validate marketplace
+        run: claude plugin validate --strict .
+      - name: Validate and test each plugin
+        run: |
+          for dir in */; do
+            [ -f "$dir/.claude-plugin/plugin.json" ] || continue
+            echo "== $dir"
+            claude plugin validate --strict "$dir"
+            claude plugin test "$dir"
+          done
