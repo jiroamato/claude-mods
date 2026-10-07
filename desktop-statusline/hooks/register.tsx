@@ -37,15 +37,15 @@ const METER_HEIGHT = 10
 const METER_STROKE = 1
 const METER_OUTLINE = '#8a8a8a'
 const METER_FILL = '#c19c00'
-// The hairline between model, effort and folder: one pixel wide, a shade
-// over whatever the band's background is, so it reads in light and dark.
+// The hairline between model, effort and folder: one pixel wide, a solid
+// mid grey a few shades off the band's background, muted like the meter's
+// outline rather than a theme key, so it reads the same in light and dark.
 const DIVIDER_WIDTH = 1
 const DIVIDER_HEIGHT = 14
-const DIVIDER_COLOR = '#808080'
-const DIVIDER_OPACITY = 0.18
+const DIVIDER_COLOR = '#5a5a5a'
 const DIVIDER_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" viewBox="0 0 ${DIVIDER_WIDTH} ${DIVIDER_HEIGHT}">` +
-  `<rect width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" fill="${DIVIDER_COLOR}" fill-opacity="${DIVIDER_OPACITY}"/>` +
+  `<rect width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" fill="${DIVIDER_COLOR}"/>` +
   `</svg>`
 const GIT_REFRESH_EVERY_TICKS = 15
 // The widest reading the timer draws (`59m 59s`, `23h 59m`), so the slot

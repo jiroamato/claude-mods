@@ -80,7 +80,7 @@ test('draws a hairline between the model, the effort and the folder', async ($, 
   expect(dividers).toHaveLength(2)
   for (const one of dividers) {
     expect(one.props).toMatchObject({ width: 1, height: 14 })
-    expect(String(one.props.source)).toMatch(/fill="#808080" fill-opacity="0.18"/)
+    expect(String(one.props.source)).toMatch(/fill="#5a5a5a"\/>/)
   }
 
   await ui.unmount()
