@@ -23,32 +23,39 @@ so a `statusLine` command in your settings keeps working there.
 
 ## Install in the Claude desktop app
 
-The desktop app, the terminal and the VS Code extension on one computer share
-the same plugin configuration, so the marketplace is registered once and the
-plugin is then installed from the app's own plugin browser.
+Everything happens inside the app. No terminal needed.
 
-**1. Register the marketplace.** The app's plugin browser lists plugins from the
-marketplaces you have added, so add this one first. Open any terminal and run:
+**1. Open the plugin browser.** In the Claude desktop app, open the **Code**
+tab. Click the **+** button next to the prompt box, choose **Plugins**, then
+**Add plugin**. The plugin browser opens, listing plugins from the
+marketplaces on your computer.
 
-```bash
-claude plugin marketplace add jiroamato/claude-mods
+**2. Add this marketplace.** This plugin lives in its own marketplace, so add it
+once. In the plugin browser, choose **Add marketplace** and paste the
+repository URL into the **Marketplace URL** field:
+
+```
+https://github.com/jiroamato/claude-mods
 ```
 
-**2. Install the plugin from the app.** In the Claude desktop app, open the
-Code tab and click the **+** button next to the prompt box. Choose
-**Plugins**, then **Add plugin**. The plugin browser opens with the plugins
-from your marketplaces; pick **desktop-statusline** and install it at user
-scope, so it is on in every project.
+Confirm, and the app fetches the catalogue. **claude-mods** now shows up
+alongside your other marketplaces.
 
-**3. Start a new session.** The band appears above the prompt. Later versions
-arrive with `claude plugin update`, or from the same plugin browser.
+**3. Install the plugin.** Find **desktop-statusline** in the browser and click
+**Install**. Choose the **user** scope if the app asks, so the band is on in
+every project rather than one folder.
 
-To turn it off or remove it later, use **+ > Plugins > Manage plugins**.
+**4. Start a new session.** Open a fresh Code session and the band appears
+above the prompt. Running sessions keep what they had until they end.
 
-### Install from the terminal instead
+**Later.** Turn it off, update it or remove it from **+ > Plugins > Manage
+plugins**. New versions published here arrive through the same place.
 
-Both steps can also be done from a terminal, and the result is the same since
-the app reads the same configuration:
+<details>
+<summary>Prefer the terminal?</summary>
+
+The terminal and the desktop app share one plugin configuration, so these two
+commands give the same result:
 
 ```bash
 claude plugin marketplace add jiroamato/claude-mods
@@ -57,6 +64,8 @@ claude plugin marketplace add jiroamato/claude-mods
 ```bash
 claude plugin install desktop-statusline@claude-mods
 ```
+
+</details>
 
 ## Develop
 
