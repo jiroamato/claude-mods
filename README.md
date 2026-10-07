@@ -21,7 +21,34 @@ the figures a terminal status line shows, drawn in the app's own theme colours:
 It draws on the desktop surface only. In the terminal it stays out of the way,
 so a `statusLine` command in your settings keeps working there.
 
-## Install
+## Install in the Claude desktop app
+
+The desktop app, the terminal and the VS Code extension on one computer share
+the same plugin configuration, so the marketplace is registered once and the
+plugin is then installed from the app's own plugin browser.
+
+**1. Register the marketplace.** The app's plugin browser lists plugins from the
+marketplaces you have added, so add this one first. Open any terminal and run:
+
+```bash
+claude plugin marketplace add jiroamato/claude-mods
+```
+
+**2. Install the plugin from the app.** In the Claude desktop app, open the
+Code tab and click the **+** button next to the prompt box. Choose
+**Plugins**, then **Add plugin**. The plugin browser opens with the plugins
+from your marketplaces; pick **desktop-statusline** and install it at user
+scope, so it is on in every project.
+
+**3. Start a new session.** The band appears above the prompt. Later versions
+arrive with `claude plugin update`, or from the same plugin browser.
+
+To turn it off or remove it later, use **+ > Plugins > Manage plugins**.
+
+### Install from the terminal instead
+
+Both steps can also be done from a terminal, and the result is the same since
+the app reads the same configuration:
 
 ```bash
 claude plugin marketplace add jiroamato/claude-mods
@@ -30,9 +57,6 @@ claude plugin marketplace add jiroamato/claude-mods
 ```bash
 claude plugin install desktop-statusline@claude-mods
 ```
-
-Open a new session and the band appears above the prompt. Later versions arrive
-with `claude plugin update`.
 
 ## Develop
 
