@@ -41,7 +41,7 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   expect(await ui.find({ type: 'Text', text: /\$1\.23/ })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: '1m 0s' })).toBeDefined()
   const slot = await ui.find({ type: 'Box', text: /^1m 0s$/ })
-  expect(slot?.props).toMatchObject({ width: 7, justifyContent: 'flex-end' })
+  expect(slot?.props).toMatchObject({ width: 7, justifyContent: 'flex-start' })
 
   // Meter │ cost │ elapsed, no effort known yet so none on the left.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
@@ -85,8 +85,8 @@ test('draws a hairline between the model, the effort and the folder', async ($, 
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
   expect(dividers).toHaveLength(3)
   for (const one of dividers) {
-    expect(one.props).toMatchObject({ width: 1, height: 14 })
-    expect(String(one.props.source)).toMatch(/fill="#5a5a5a"\/>/)
+    expect(one.props).toMatchObject({ width: 2, height: 14 })
+    expect(String(one.props.source)).toMatch(/fill="#333333"\/>/)
   }
 
   await ui.unmount()

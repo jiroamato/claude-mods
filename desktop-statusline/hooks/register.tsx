@@ -37,19 +37,21 @@ const METER_HEIGHT = 10
 const METER_STROKE = 1
 const METER_OUTLINE = '#8a8a8a'
 const METER_FILL = '#c19c00'
-// The hairline between the band's figures: one pixel wide, a solid
-// mid grey a few shades off the band's background, muted like the meter's
-// outline rather than a theme key, so it reads the same in light and dark.
-const DIVIDER_WIDTH = 1
+// The hairline between the band's figures: two pixels wide, a solid dark
+// grey a few shades off the dark band's background, so it sits back as a
+// faint seam rather than a drawn line.
+const DIVIDER_WIDTH = 2
 const DIVIDER_HEIGHT = 14
-const DIVIDER_COLOR = '#5a5a5a'
+const DIVIDER_COLOR = '#333333'
 const DIVIDER_SVG =
   `<svg xmlns="http://www.w3.org/2000/svg" width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" viewBox="0 0 ${DIVIDER_WIDTH} ${DIVIDER_HEIGHT}">` +
   `<rect width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" fill="${DIVIDER_COLOR}"/>` +
   `</svg>`
 const GIT_REFRESH_EVERY_TICKS = 15
 // The widest reading the timer draws (`59m 59s`, `23h 59m`), so the slot
-// holds its width as the digits change and nothing to its left shifts.
+// holds its width as the digits change and nothing to its left shifts. The
+// reading sits at the slot's left, so its gap from the hairline matches the
+// other figures' and the spare width falls against the band's edge.
 const ELAPSED_COLUMNS = 7
 
 function asEffort(value: unknown): Effort | null {
@@ -268,7 +270,7 @@ export const register: Register = on => {
           {usd !== undefined && <Text color="text">${usd.toFixed(2)}</Text>}
 
           {divider()}
-          <Box width={ELAPSED_COLUMNS} justifyContent="flex-end">
+          <Box width={ELAPSED_COLUMNS} justifyContent="flex-start">
             <Text color="secondaryText">{formatDuration(elapsed)}</Text>
           </Box>
         </Box>
