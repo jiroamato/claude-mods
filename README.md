@@ -25,31 +25,33 @@ so a `statusLine` command in your settings keeps working there.
 
 Everything happens inside the app. No terminal needed.
 
-**1. Open the plugin browser.** In the Claude desktop app, open the **Code**
-tab. Click the **+** button next to the prompt box, choose **Plugins**, then
-**Add plugin**. The plugin browser opens, listing plugins from the
-marketplaces on your computer.
+**1. Open the plugin settings.** In the Claude desktop app, open **Settings**
+and choose **Plugins** in the sidebar, under *Customize*.
 
-**2. Add this marketplace.** This plugin lives in its own marketplace, so add it
-once. In the plugin browser, choose **Add marketplace** and paste the
-repository URL into the **Marketplace URL** field:
+**2. Add this marketplace.** Click the **Add** button at the top right, then
+**Add marketplace**, then **Add from a repository**. Paste the repository URL:
 
 ```
 https://github.com/jiroamato/claude-mods
 ```
 
-Confirm, and the app fetches the catalogue. **claude-mods** now shows up
-alongside your other marketplaces.
+Press **Sync**. The app fetches the catalogue and **claude-mods** joins your
+marketplaces.
 
-**3. Install the plugin.** Find **desktop-statusline** in the browser and click
-**Install**. Choose the **user** scope if the app asks, so the band is on in
-every project rather than one folder.
+**3. Install the plugin.** **Desktop statusline** by Jiro Amato now appears in
+the list. Click its **Add** button and pick a scope:
+
+- **Install for me** puts it in `~/.claude/`, so the band is on in every
+  project on this machine. This is the one to choose for a status bar.
+- **Install for project (shared)** or **(personal)** limits it to the current
+  project instead.
 
 **4. Start a new session.** Open a fresh Code session and the band appears
 above the prompt. Running sessions keep what they had until they end.
 
-**Later.** Turn it off, update it or remove it from **+ > Plugins > Manage
-plugins**. New versions published here arrive through the same place.
+**Later.** Enable, disable or remove it from the same **Plugins** page, through
+the menu at the end of its row. Marketplaces are managed under **Add >
+Manage marketplaces**, and new versions published here arrive through a sync.
 
 <details>
 <summary>Prefer the terminal?</summary>
