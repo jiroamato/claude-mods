@@ -10,9 +10,7 @@ plugins built on function hooks.
 A status bar above the prompt in the Claude desktop app's Code tab. It mirrors
 the figures a terminal status line shows, drawn in the app's own theme colours:
 
-```
-Fable 5.1  high   construct-land | main •          [▮▮▮▮      ] 33%   $1.23   12m 4s
-```
+![The desktop-statusline band: Fable 5.1, high effort, claude-mods | main, a context meter at 27%, $6.58, 2h 24m](docs/desktop-statusline.png)
 
 - **Model** in the Claude accent, with the session's reasoning **effort** beside it,
   coloured from quiet (low) to warning and error tones (x-high, max).
