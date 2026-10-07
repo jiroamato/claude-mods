@@ -7,7 +7,7 @@ import type { Effort, GitInfo } from '../types'
 // surface, drawn as one band above the prompt. Colours are theme keys, so
 // the band follows the app's light and dark palettes and its accent:
 //
-//   Fable 5.1  high   construct-land | main •          [▮▮▮▮      ] 33%   $1.23   12m 4s
+//   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33%   $1.23   12m 4s
 
 const tick = atom({ plugin: 'desktop-statusline', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
@@ -37,6 +37,16 @@ const METER_HEIGHT = 10
 const METER_STROKE = 1
 const METER_OUTLINE = '#8a8a8a'
 const METER_FILL = '#c19c00'
+// The hairline between model, effort and folder: one pixel wide, a shade
+// over whatever the band's background is, so it reads in light and dark.
+const DIVIDER_WIDTH = 1
+const DIVIDER_HEIGHT = 14
+const DIVIDER_COLOR = '#808080'
+const DIVIDER_OPACITY = 0.18
+const DIVIDER_SVG =
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" viewBox="0 0 ${DIVIDER_WIDTH} ${DIVIDER_HEIGHT}">` +
+  `<rect width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" fill="${DIVIDER_COLOR}" fill-opacity="${DIVIDER_OPACITY}"/>` +
+  `</svg>`
 const GIT_REFRESH_EVERY_TICKS = 15
 // The widest reading the timer draws (`59m 59s`, `23h 59m`), so the slot
 // holds its width as the digits change and nothing to its left shifts.
@@ -213,24 +223,30 @@ export const register: Register = on => {
     const usd = usage.cost?.usd
     const elapsed = now - usage.startedAt
 
+    const hasPlace = folder !== '' || repo !== null
+    const divider = () => (
+      <Svg source={DIVIDER_SVG} alt="divider" width={DIVIDER_WIDTH} height={DIVIDER_HEIGHT} />
+    )
+
     return (
       <Box flexDirection="row" flexWrap="wrap" alignItems="center" paddingX={1} columnGap={3}>
-        {/* Identity: what is answering, how hard, and where. */}
+        {/* Identity: what is answering, how hard, and where, a hairline between each. */}
         <Box flexDirection="row" alignItems="center" columnGap={2}>
           <Text color="claude" bold>
             {prettyModel(model)}
           </Text>
+          {level !== null && divider()}
           {level !== null && <Text color={EFFORT_COLOR[level]}>{EFFORT_LABEL[level]}</Text>}
+          {hasPlace && divider()}
+          {hasPlace && (
+            <Box flexDirection="row" alignItems="center" columnGap={1}>
+              {folder !== '' && <Text color="text">{folder}</Text>}
+              {folder !== '' && repo !== null && <Text color="inactive">|</Text>}
+              {repo !== null && <Text color="secondaryText">{repo.branch}</Text>}
+              {repo?.isDirty && <Text color="warning">•</Text>}
+            </Box>
+          )}
         </Box>
-
-        {(folder !== '' || repo !== null) && (
-          <Box flexDirection="row" alignItems="center" columnGap={1}>
-            {folder !== '' && <Text color="text">{folder}</Text>}
-            {folder !== '' && repo !== null && <Text color="inactive">|</Text>}
-            {repo !== null && <Text color="secondaryText">{repo.branch}</Text>}
-            {repo?.isDirty && <Text color="warning">•</Text>}
-          </Box>
-        )}
 
         <Box flexGrow={1} />
 
