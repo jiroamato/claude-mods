@@ -2,16 +2,29 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, Register } from 'claude-code'
 
 import type { Effort, GitInfo } from '../types'
+import { buildSnapshot } from './context'
+import { ContextPane, HoverCard, PANE_ID, PANE_TITLE } from './panel'
+import { deniedTools, editDeny, KEPT_TOOLS, toolRows } from './tools'
 
-// Mirrors ~/.claude/statusline.py (the CLI status line) on the desktop
+// Mirrors a terminal status line on the desktop
 // surface, drawn as one band above the prompt. Colours are theme keys, so
 // the band follows the app's light and dark palettes and its accent:
 //
 //   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33% │ $1.23 │ 12m 4s
+//
+// Hovering the meter reveals a map of what fills the context window. The
+// percentage opens the Context pane, which lists the built-in tools, each of
+// which can be removed from the window and put back, and the skills.
 
 const tick = atom({ plugin: 'desktop-statusline', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
 const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, null)
+const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, null)
+const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
+const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
+const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
+/** Descriptions of the built-in tools seen in any session, by name. */
+const KNOWN_TOOLS_KEY = 'tool-descriptions'
 
 const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const EFFORT_LABEL: Record<Effort, string> = {
@@ -53,6 +66,12 @@ const GIT_REFRESH_EVERY_TICKS = 15
 // reading sits at the slot's left, so its gap from the hairline matches the
 // other figures' and the spare width falls against the band's edge.
 const ELAPSED_COLUMNS = 7
+// The pane's map, in CSS pixels: the docked pane's default width less its padding.
+const PANE_MAP_WIDTH = 410
+// How long the pane takes to redraw after a change, before scrolling it.
+const PANE_SETTLE_MS = 300
+// How long after a press in the pane a jump of its window is the desktop's.
+const PRESS_JUMP_WINDOW_MS = 2000
 
 function asEffort(value: unknown): Effort | null {
   if (typeof value !== 'string') return null
@@ -169,7 +188,80 @@ async function configuredEffort($: EngineInterface): Promise<Effort | null> {
   }
 }
 
+/** The user settings file, which `/permissions` and the settings UI also write. */
+async function settingsPath($: EngineInterface): Promise<string> {
+  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
+  if (configDir) return `${configDir}/settings.json`
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? '~'
+
+  return `${home}/.claude/settings.json`
+}
+
+async function readSettingsText($: EngineInterface): Promise<string> {
+  const path = await settingsPath($)
+
+  return (await $.fs.exists(path)) ? String(await $.fs.read(path)) : ''
+}
+
+/** Re-reads which tools the user settings deny, from the file itself. */
+async function refreshRemoved($: EngineInterface): Promise<void> {
+  try {
+    const text = await readSettingsText($)
+    const names = deniedTools(text.trim() === '' ? {} : JSON.parse(text))
+    await update($, removed, () => names)
+  } catch {
+    // An unreadable settings file leaves the last reading in place.
+  }
+}
+
+/** Reads the context window broken down, for the hover card and the pane. */
+async function refreshContext($: EngineInterface): Promise<void> {
+  try {
+    const usage = await $.session.usage({ breakdown: 'summary' })
+    const breakdown = usage.context.breakdown
+    if (!breakdown) return
+    const [messages, commands] = await Promise.all([$.session.messages(), $.command.list()])
+    const snapshot = buildSnapshot(breakdown, messages, commands)
+    await update($, context, () => snapshot)
+  } catch {
+    // No breakdown yet (no session bound); the next turn tries again.
+  }
+}
+
+/**
+ * Removes a built-in tool, or puts it back: the deny rule in the user settings
+ * for new sessions, and the tool's schema moved out of (or back into) this
+ * session's context at once.
+ */
+async function setRemoved($: EngineInterface, name: string, isRemoved: boolean): Promise<void> {
+  try {
+    const path = await settingsPath($)
+    const text = await readSettingsText($)
+    const next = editDeny(text, name, isRemoved)
+    if (next !== text) await $.fs.write(path, next)
+  } catch (error) {
+    $.ui.toast(`Could not update settings.json: ${String(error)}`)
+
+    return
+  }
+  await update($, removed, names =>
+    isRemoved ? [...names.filter(one => one !== name), name] : names.filter(one => one !== name),
+  )
+  const seen = await read($, tools)
+  if (name in seen) {
+    $.ui.invalidate('tool.describe')
+  } else {
+    await update($, putBack, names =>
+      isRemoved ? names.filter(one => one !== name) : [...names.filter(one => one !== name), name],
+    )
+  }
+  await refreshContext($)
+}
+
 export const register: Register = on => {
+  /** When a Remove or Put back was last pressed in the pane, in epoch ms. */
+  let lastPaneToggleAt = Number.NEGATIVE_INFINITY
+
   on('session.start', async ($, e, next) => {
     const started = await next(e)
 
@@ -177,6 +269,8 @@ export const register: Register = on => {
       const configured = await configuredEffort($)
       await update($, effort, current => current ?? configured)
       await refreshGit($)
+      await refreshRemoved($)
+      await refreshContext($)
     })()
 
     $.clock.every(1000, () => {
@@ -201,26 +295,104 @@ export const register: Register = on => {
 
   // A turn may have committed, switched branch or touched files: re-read git.
   on('turn.complete', async ($, e, next) => {
-    if (e.agentId === undefined) void refreshGit($)
+    if (e.agentId === undefined) {
+      void refreshGit($)
+      void refreshContext($)
+    }
 
     return next(e)
+  })
+
+  // Every built-in tool's description, as the model reads it; a tool removed
+  // in the pane is moved behind ToolSearch, out of the context window.
+  on('tool.describe', async ($, e, next) => {
+    const described = await next(e)
+    if (e.provider.plugin !== 'engine') return described
+    const isDeferred = e.isDeferred === true
+    const before = await read($, tools)
+    const was = before[e.tool]
+    if (was?.description !== e.description || was?.isDeferred !== isDeferred) {
+      await update($, tools, all => ({
+        ...all,
+        [e.tool]: { description: e.description, isDeferred },
+      }))
+    }
+    const known = ((await $.store.get(KNOWN_TOOLS_KEY)) ?? {}) as Record<string, string>
+    if (known[e.tool] !== e.description) {
+      await $.store.set(KNOWN_TOOLS_KEY, { ...known, [e.tool]: e.description })
+    }
+    const names = await read($, removed)
+    const isRemoved = names.includes(e.tool) && !KEPT_TOOLS.includes(e.tool)
+
+    return isRemoved ? { ...described, isDeferred: true } : described
+  })
+
+  // A removed tool the model loads through ToolSearch anyway is refused.
+  on('tool.call', async ($, e, next) => {
+    const names = await read($, removed)
+    if (names.includes(e.tool) && !KEPT_TOOLS.includes(e.tool)) {
+      return {
+        deny: `${e.tool} was removed from the context; it can be put back in the Context pane.`,
+      }
+    }
+
+    return next(e)
+  })
+
+  // The desktop answers a press in the pane by jumping its window to the end,
+  // reported as the person's own scroll; the window stays where they had it.
+  on('ui.scroll', { requestId: PANE_ID }, async ($, e, next) => {
+    const isJump = e.origin.kind === 'person' && !e.pointer && Math.abs(e.by) > e.bodyRows
+    if (isJump && (await $.clock.now()) - lastPaneToggleAt < PRESS_JUMP_WINDOW_MS) return {}
+
+    return next(e)
+  })
+
+  on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
+    if (e.surface !== 'desktop') {
+      const { Text } = $.ui.resolve(e)
+
+      return <Text>The context map draws in the desktop app.</Text>
+    }
+    const ui = $.ui.resolve(e)
+    const [snapshot, seen, names, back] = await Promise.all([
+      read($, context),
+      read($, tools),
+      read($, removed),
+      read($, putBack),
+    ])
+    const known = ((await $.store.get(KNOWN_TOOLS_KEY)) ?? {}) as Record<string, string>
+
+    return ContextPane({
+      ui,
+      snapshot,
+      tools: toolRows(seen, known, names, back, snapshot?.toolTokens ?? 0),
+      mapWidth: PANE_MAP_WIDTH,
+      onToggle: (name, isRemoved) =>
+        void (async () => {
+          lastPaneToggleAt = await $.clock.now()
+          await setRemoved($, name, isRemoved)
+        })(),
+    })
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
     // The CLI already has its own status line; this band is for the desktop.
     if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
 
-    const { Box, Svg, Text } = $.ui.resolve(e)
+    const ui = $.ui.resolve(e)
+    const { Box, Button, Svg, Text } = ui
 
     // Subscribes this drawing to the once-a-second tick.
     await read($, tick)
-    const [model, cwd, usage, repo, level, now] = await Promise.all([
+    const [model, cwd, usage, repo, level, now, snapshot] = await Promise.all([
       $.session.model(),
       $.session.cwd(),
       $.session.usage(),
       read($, git),
       read($, effort),
       $.clock.now(),
+      read($, context),
     ])
 
     const folder = basename(cwd)
@@ -257,16 +429,46 @@ export const register: Register = on => {
 
         {/* Live figures: context, cost, elapsed, a hairline between each. */}
         <Box flexDirection="row" alignItems="center" columnGap={2}>
+          {/* Hovering the meter reveals the context map; the percentage opens the pane. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
-            <Svg
-              source={meterSvg(percent)}
-              alt={percent === undefined ? 'context: no reading yet' : `context ${percent}% used`}
-              width={METER_WIDTH}
-              height={METER_HEIGHT}
+            <Box key="context-meter" flexDirection="row" alignItems="center">
+              <Box
+                position="absolute"
+                bottom={2}
+                right={0}
+                display="none"
+                hover={{ display: 'flex' }}
+                flexDirection="column"
+                borderStyle="round"
+                borderColor="inactive"
+                backgroundColor="background"
+                paddingX={1}
+              >
+                {HoverCard({ ui, snapshot })}
+              </Box>
+              <Svg
+                source={meterSvg(percent)}
+                alt={percent === undefined ? 'context: no reading yet' : `context ${percent}% used`}
+                width={METER_WIDTH}
+                height={METER_HEIGHT}
+              />
+            </Box>
+            <Button
+              key="open-context"
+              plain
+              label={percent === undefined ? '--%' : `${percent}%`}
+              onPress={() =>
+                void (async () => {
+                  // The settings may have been edited by hand since the session began.
+                  await refreshRemoved($)
+                  await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+                  await $.clock.sleep(PANE_SETTLE_MS)
+                  await $.ui.scroll({ in: PANE_ID, to: 'start' })
+                })().catch(() => {
+                  // Unloaded or closed meanwhile; the next press opens it again.
+                })
+              }
             />
-            <Text color={percent === undefined ? 'inactive' : 'text'}>
-              {percent === undefined ? '--%' : `${percent}%`}
-            </Text>
           </Box>
 
           {usd !== undefined && divider()}
