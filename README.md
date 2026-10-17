@@ -40,7 +40,7 @@ so a `statusLine` command in your settings keeps working there.
 Everything happens inside the app. No terminal needed.
 
 **1. Open the plugin settings.** In the Claude desktop app, open **Settings**
-and choose **Plugins** in the sidebar, under *Customize*.
+and choose **Plugins** in the sidebar, under _Customize_.
 
 **2. Add this marketplace.** Click the **Add** button at the top right, then
 **Add marketplace**, then **Add from a repository**. Paste the repository URL:

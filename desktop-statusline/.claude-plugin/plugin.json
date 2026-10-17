@@ -9,13 +9,6 @@
   "homepage": "https://github.com/jiroamato/claude-mods",
   "repository": "https://github.com/jiroamato/claude-mods",
   "license": "MIT",
-  "keywords": [
-    "status-line",
-    "status-bar",
-    "desktop",
-    "context",
-    "cost",
-    "git"
-  ],
+  "keywords": ["status-line", "status-bar", "desktop", "context", "cost", "git"],
   "types": "./types/index.d.ts"
 }

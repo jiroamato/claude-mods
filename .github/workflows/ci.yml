@@ -6,6 +6,17 @@ on:
   pull_request:
 
 jobs:
+  format:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          node-version: 22
+      # Pinned: a new Prettier release may format differently.
+      - name: Check formatting
+        run: npx --yes prettier@3.9.10 --check .
+
   plugins:
     strategy:
       # One failing OS should not hide whether the others pass.
@@ -18,12 +29,13 @@ jobs:
         # The plugin loop is POSIX shell; Windows runners default to PowerShell.
         shell: bash
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
         with:
           node-version: 22
+      # Function hooks are early access, so the engine is pinned and bumped on purpose.
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code
+        run: npm install -g @anthropic-ai/claude-code@2.1.302
       - name: Validate marketplace
         run: claude plugin validate --strict .
       - name: Validate and test each plugin

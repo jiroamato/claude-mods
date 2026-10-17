@@ -34,7 +34,9 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
 
   const meter = (await ui.findAll({ type: 'Svg' })).find(one => one.props.alt !== 'divider')
   expect(meter?.props).toMatchObject({ alt: 'context 33% used', width: 64, height: 10 })
-  expect(String(meter?.props.source)).toMatch(/<rect x="1" y="1" width="20" height="8" fill="#c19c00"/)
+  expect(String(meter?.props.source)).toMatch(
+    /<rect x="1" y="1" width="20" height="8" fill="#c19c00"/,
+  )
   expect(String(meter?.props.source)).toMatch(/stroke="#8a8a8a"/)
   expect(await ui.find({ type: 'Text', text: /33%/ })).toBeDefined()
 
@@ -72,7 +74,13 @@ test('draws a hairline between the model, the effort and the folder', async ($, 
     ],
   }))
   on('process.run', async () => ({
-    value: { exitCode: 1, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
+    value: {
+      exitCode: 1,
+      stdout: '',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
   }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   await $.session.start({ cwd: '/home/me/project', surface: 'desktop', isInteractive: true })

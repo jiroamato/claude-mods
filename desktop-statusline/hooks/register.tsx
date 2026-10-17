@@ -71,7 +71,10 @@ function basename(path: string): string {
 /** `claude-fable-5-1` -> `Fable 5.1`; a name already spelled for display is kept. */
 function prettyModel(model: string): string {
   if (/\s/.test(model) || /[A-Z]/.test(model)) return model
-  const parts = model.replace(/^claude-/, '').split('-').filter(Boolean)
+  const parts = model
+    .replace(/^claude-/, '')
+    .split('-')
+    .filter(Boolean)
   if (parts.length === 0) return model
   const words: string[] = []
   const digits: string[] = []

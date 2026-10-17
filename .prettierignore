@@ -1,0 +1,5 @@
+# Written by release-please from the commits on main.
+CHANGELOG.md
+.release-please-manifest.json
+# The engine's typings, laid beside each plugin when it loads.
+**/.claude-plugin/types/
