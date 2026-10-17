@@ -35,7 +35,7 @@ export function HoverCard(props: {
   const { Box, Svg, Text } = props.ui
   const snapshot = props.snapshot
   if (!snapshot) {
-    return <Text color="secondaryText">Reading the context window…</Text>
+    return <Text color="secondaryText">The map appears after Claude's first reply.</Text>
   }
   const largest = snapshot.blocks.slice(0, CARD_ITEMS)
 
@@ -56,7 +56,7 @@ export function HoverCard(props: {
       />
       <Box flexDirection="column">
         {largest.map(block => (
-          <Box flexDirection="row" alignItems="center" columnGap={1}>
+          <Box key={`item-${block.label}`} flexDirection="row" alignItems="center" columnGap={1}>
             <Svg
               source={swatch(BLOCK_COLOR[block.kind])}
               alt={block.kind}
@@ -110,13 +110,11 @@ export function ContextPane(props: {
           <Svg
             source={treemapSvg(snapshot.blocks, props.mapWidth, PANE_MAP_HEIGHT)}
             alt="context map"
-            width={props.mapWidth}
-            height={PANE_MAP_HEIGHT}
             isInteractive
           />
         </Box>
       ) : (
-        <Text color="secondaryText">Reading the context window…</Text>
+        <Text color="secondaryText">The map appears after Claude's first reply.</Text>
       )}
 
       <Box flexDirection="column">
@@ -124,8 +122,9 @@ export function ContextPane(props: {
           Tools
         </Text>
         <Text color="secondaryText">
-          Removing a tool takes its schema out of this session now and denies it in
-          ~/.claude/settings.json, so new sessions start without it.
+          Remove takes a tool out of this session's context at once (Claude can no longer call it)
+          and adds it to permissions.deny in your user settings, so new sessions in every project
+          start without it. Put back undoes both.
         </Text>
         {props.error && <Text color="error">{props.error}</Text>}
       </Box>
@@ -169,7 +168,7 @@ export function ContextPane(props: {
         <Text color="secondaryText">No skills listed.</Text>
       )}
       {snapshot?.skills.map(skill => (
-        <Box flexDirection="column">
+        <Box key={`skill-${skill.name}`} flexDirection="column">
           <Box flexDirection="row" columnGap={1}>
             <Box flexGrow={1} flexShrink={1}>
               <Text color="text" bold>

@@ -4,7 +4,7 @@ export type GitInfo = { branch: string; isDirty: boolean } | null
 
 /** What one tile of the context map stands for. */
 export type BlockKind =
-  'system' | 'tools' | 'mcp' | 'agents' | 'memory' | 'skills' | 'conversation' | 'result' | 'free'
+  'system' | 'tools' | 'mcp' | 'agents' | 'memory' | 'skills' | 'conversation' | 'result'
 
 /** One tile of the context map: a category, or one tool result within the messages. */
 export type ContextBlock = { label: string; kind: BlockKind; tokens: number }

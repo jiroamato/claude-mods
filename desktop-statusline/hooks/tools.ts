@@ -63,7 +63,7 @@ export const KEPT_TOOLS: readonly string[] = ['ToolSearch']
 /** The schema size assumed for a tool the catalog does not measure. */
 const DEFAULT_SCHEMA_CHARS = 600
 /** Characters per token, for schema JSON and English prose alike. */
-const CHARS_PER_TOKEN = 3.6
+export const CHARS_PER_TOKEN = 3.6
 const SUMMARY_MAX = 90
 
 /** A bare built-in tool name, as a deny rule spells a whole tool (`NotebookEdit`). */
@@ -121,7 +121,7 @@ export function toolRows(
     rows.push({
       name,
       summary: summarize(name, tool.description),
-      tokens: tool.isDeferred && !isRemoved ? 0 : estimateTokens(name, tool.description),
+      tokens: tool.isDeferred ? 0 : estimateTokens(name, tool.description),
       status: isRemoved ? 'removed' : tool.isDeferred ? 'deferred' : 'in',
     })
   }
@@ -157,22 +157,60 @@ export function deniedTools(settings: unknown): string[] {
   return deny.filter((rule): rule is string => typeof rule === 'string' && isBareToolName(rule))
 }
 
+/** Why the settings file was left untouched: it holds something the panel will not rewrite. */
+export class SettingsShapeError extends Error {}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value)
+}
+
+/** The settings a file holds: `{}` when it is empty; a byte-order mark is ignored. */
+export function parseSettings(text: string): Record<string, unknown> {
+  const body = text.replace(/^\uFEFF/, '')
+  if (body.trim() === '') return {}
+  let parsed: unknown
+  try {
+    parsed = JSON.parse(body)
+  } catch {
+    throw new SettingsShapeError(
+      'settings.json is not plain JSON (comments?), so it was left as is.',
+    )
+  }
+  if (!isPlainObject(parsed)) {
+    throw new SettingsShapeError('settings.json does not hold an object, so it was left as is.')
+  }
+
+  return parsed
+}
+
 /**
  * The settings file's text with `name` added to or dropped from
- * `permissions.deny`, everything else kept; the file's indentation is kept too.
+ * `permissions.deny`, everything else kept, and the file's byte-order mark,
+ * line endings and indentation too. A `permissions` that is not an object, or
+ * a `deny` that is not a list, is refused rather than rewritten.
  */
-export function editDeny(text: string, name: string, isDenied: boolean): string {
-  const settings = (text.trim() === '' ? {} : JSON.parse(text)) as Record<string, unknown>
-  if (typeof settings !== 'object' || settings === null || Array.isArray(settings)) {
-    throw new Error('settings.json does not hold an object')
+export function editDeny(text: string, name: string, shouldDeny: boolean): string {
+  const settings = parseSettings(text)
+  const permissions = settings.permissions ?? {}
+  if (!isPlainObject(permissions)) {
+    throw new SettingsShapeError(
+      'permissions in settings.json is not an object, so it was left as is.',
+    )
   }
-  const permissions = (settings.permissions ?? {}) as Record<string, unknown>
-  const deny = Array.isArray(permissions.deny) ? [...(permissions.deny as unknown[])] : []
-  if (deny.includes(name) === isDenied) return text
+  const deny = permissions.deny ?? []
+  if (!Array.isArray(deny)) {
+    throw new SettingsShapeError(
+      'permissions.deny in settings.json is not a list, so it was left as is.',
+    )
+  }
+  if (deny.includes(name) === shouldDeny) return text
   const next = deny.filter(rule => rule !== name)
-  if (isDenied) next.push(name)
+  if (shouldDeny) next.push(name)
   settings.permissions = { ...permissions, deny: next }
-  const indent = /\n([ \t]+)"/.exec(text)?.[1] ?? '  '
 
-  return `${JSON.stringify(settings, null, indent)}\n`
+  const bom = text.startsWith('\uFEFF') ? '\uFEFF' : ''
+  const eol = text.includes('\r\n') ? '\r\n' : '\n'
+  const indent = /^\uFEFF?\s*\{\r?\n([ \t]+)"/.exec(text)?.[1] ?? '  '
+
+  return `${bom}${JSON.stringify(settings, null, indent).replace(/\n/g, eol)}${eol}`
 }

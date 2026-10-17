@@ -11,7 +11,6 @@ export const BLOCK_COLOR: Record<BlockKind, string> = {
   skills: '#b99a2a',
   conversation: '#8b6fd6',
   result: '#c95a5a',
-  free: '#3a3a37',
 }
 
 type Tile = ContextBlock & { x: number; y: number; w: number; h: number }
@@ -102,7 +101,7 @@ export function treemapSvg(blocks: readonly ContextBlock[], w: number, h: number
     const y = tile.y + gap / 2
     const tw = Math.max(0, tile.w - gap)
     const th = Math.max(0, tile.h - gap)
-    const ink = tile.kind === 'free' ? '#9a988f' : '#ffffff'
+    const ink = '#ffffff'
     const name = escapeXml(tile.label)
     body +=
       `<g><title>${name}: ${formatTokens(tile.tokens)} tokens</title>` +

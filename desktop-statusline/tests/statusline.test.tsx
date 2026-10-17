@@ -33,7 +33,7 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   expect(await ui.find({ type: 'Text', text: 'construct-land' })).toBeDefined()
 
   const meter = (await ui.findAll({ type: 'Svg' })).find(one =>
-    /^context /.test(String(one.props.alt)),
+    /^context(: no reading yet| \d+% used)$/.test(String(one.props.alt)),
   )
   expect(meter?.props).toMatchObject({ alt: 'context 33% used', width: 64, height: 10 })
   expect(String(meter?.props.source)).toMatch(
@@ -115,7 +115,7 @@ test('shows a placeholder bar and no cost before the first response', async ($, 
   expect(await ui.find({ type: 'Text', text: 'Opus 5.5' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: 'project' })).toBeDefined()
   const meter = (await ui.findAll({ type: 'Svg' })).find(one =>
-    /^context/.test(String(one.props.alt)),
+    /^context(: no reading yet| \d+% used)$/.test(String(one.props.alt)),
   )
   expect(meter?.props).toMatchObject({ alt: 'context: no reading yet' })
   expect(String(meter?.props.source)).toMatch(/width="0" height="8" fill="#c19c00"/)

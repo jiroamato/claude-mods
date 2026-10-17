@@ -4,7 +4,14 @@ import type { EngineInterface, Register } from 'claude-code'
 import type { Effort, GitInfo } from '../types'
 import { buildSnapshot } from './context'
 import { ContextPane, HoverCard, PANE_ID, PANE_TITLE } from './panel'
-import { deniedTools, editDeny, KEPT_TOOLS, toolRows } from './tools'
+import {
+  deniedTools,
+  editDeny,
+  KEPT_TOOLS,
+  parseSettings,
+  SettingsShapeError,
+  toolRows,
+} from './tools'
 
 // Mirrors a terminal status line on the desktop
 // surface, drawn as one band above the prompt. Colours are theme keys, so
@@ -24,8 +31,8 @@ const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
 const toolError = atom({ plugin: 'desktop-statusline', key: 'toolError' } as const, null)
-/** Descriptions of the built-in tools seen in any session, by name. */
-const KNOWN_TOOLS_KEY = 'tool-descriptions'
+/** The store key under which a built-in tool's description is kept across sessions. */
+const KNOWN_TOOL_PREFIX = 'tool-description:'
 
 const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
 const EFFORT_LABEL: Record<Effort, string> = {
@@ -193,9 +200,22 @@ async function configuredEffort($: EngineInterface): Promise<Effort | null> {
 async function settingsPath($: EngineInterface): Promise<string> {
   const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
   if (configDir) return `${configDir}/settings.json`
-  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME')) ?? '~'
+  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
+  if (!home)
+    throw new SettingsShapeError('Cannot find your home folder, so settings.json was not changed.')
 
   return `${home}/.claude/settings.json`
+}
+
+// Reads and writes of the settings file run one at a time, so two quick presses
+// cannot both read the file before either writes it.
+let settingsQueue: Promise<unknown> = Promise.resolve()
+
+function serially<T>(task: () => Promise<T>): Promise<T> {
+  const run = settingsQueue.then(task, task)
+  settingsQueue = run.catch(() => undefined)
+
+  return run
 }
 
 async function readSettingsText($: EngineInterface): Promise<string> {
@@ -204,15 +224,22 @@ async function readSettingsText($: EngineInterface): Promise<string> {
   return (await $.fs.exists(path)) ? String(await $.fs.read(path)) : ''
 }
 
-/** Re-reads which tools the user settings deny, from the file itself. */
-async function refreshRemoved($: EngineInterface): Promise<void> {
-  try {
-    const text = await readSettingsText($)
-    const names = deniedTools(text.trim() === '' ? {} : JSON.parse(text))
-    await update($, removed, () => names)
-  } catch {
-    // An unreadable settings file leaves the last reading in place.
-  }
+/**
+ * Re-reads which tools the user settings deny, from the file itself, and
+ * re-describes the tools when that changed, so a hand edit applies here too.
+ */
+function refreshRemoved($: EngineInterface): Promise<void> {
+  return serially(async () => {
+    try {
+      const names = deniedTools(parseSettings(await readSettingsText($)))
+      const before = await read($, removed)
+      if (names.length === before.length && names.every(one => before.includes(one))) return
+      await update($, removed, () => names)
+      $.ui.invalidate('tool.describe')
+    } catch {
+      // An unreadable settings file leaves the last reading in place.
+    }
+  })
 }
 
 /** Reads the context window broken down, for the hover card and the pane. */
@@ -225,7 +252,7 @@ async function refreshContext($: EngineInterface): Promise<void> {
     const snapshot = buildSnapshot(breakdown, messages, commands)
     await update($, context, () => snapshot)
   } catch {
-    // No breakdown yet (no session bound); the next turn tries again.
+    // The session could not be read just now; the next turn tries again.
   }
 }
 
@@ -234,35 +261,68 @@ async function refreshContext($: EngineInterface): Promise<void> {
  * for new sessions, and the tool's schema moved out of (or back into) this
  * session's context at once.
  */
-async function setRemoved($: EngineInterface, name: string, isRemoved: boolean): Promise<void> {
-  try {
-    const path = await settingsPath($)
-    const text = await readSettingsText($)
-    const next = editDeny(text, name, isRemoved)
-    if (next !== text) await $.fs.write(path, next)
-  } catch (error) {
-    await update($, toolError, () => `Could not update settings.json: ${String(error)}`)
+async function setRemoved($: EngineInterface, name: string, shouldRemove: boolean): Promise<void> {
+  const isWritten = await serially(async () => {
+    try {
+      const path = await settingsPath($)
+      const text = await readSettingsText($)
+      const next = editDeny(text, name, shouldRemove)
+      if (next !== text) await $.fs.write(path, next)
+    } catch (error) {
+      const reason =
+        error instanceof SettingsShapeError
+          ? error.message
+          : `Could not update settings.json: ${String(error)}`
+      await update($, toolError, () => reason)
 
-    return
-  }
-  await update($, toolError, () => null)
-  await update($, removed, names =>
-    isRemoved ? [...names.filter(one => one !== name), name] : names.filter(one => one !== name),
-  )
+      return false
+    }
+    await update($, toolError, () => null)
+    await update($, removed, names =>
+      shouldRemove
+        ? [...names.filter(one => one !== name), name]
+        : names.filter(one => one !== name),
+    )
+
+    return true
+  })
+  if (!isWritten) return
   const seen = await read($, tools)
   if (name in seen) {
     $.ui.invalidate('tool.describe')
   } else {
     await update($, putBack, names =>
-      isRemoved ? names.filter(one => one !== name) : [...names.filter(one => one !== name), name],
+      shouldRemove
+        ? names.filter(one => one !== name)
+        : [...names.filter(one => one !== name), name],
     )
   }
   await refreshContext($)
 }
 
+/**
+ * Opens the Context pane at its top, with the deny list and the map read
+ * afresh: the settings may have been edited by hand since the session began,
+ * and the window may have moved since the last turn (a /compact).
+ */
+async function openPane($: EngineInterface): Promise<void> {
+  try {
+    // Focused, so the first click in the pane presses its button: an
+    // unfocused pane spends that click on taking the focus.
+    await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
+    await Promise.all([refreshRemoved($), refreshContext($)])
+    await $.clock.sleep(PANE_SETTLE_MS)
+    await $.ui.scroll({ in: PANE_ID, to: 'start' })
+  } catch {
+    // Unloaded or closed meanwhile; the next press opens it again.
+  }
+}
+
 export const register: Register = on => {
   /** When a Remove or Put back was last pressed in the pane, in epoch ms. */
   let lastPaneToggleAt = Number.NEGATIVE_INFINITY
+  /** Descriptions of built-in tools seen in any session, read from the store at start. */
+  const knownTools: Record<string, string> = {}
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -274,6 +334,17 @@ export const register: Register = on => {
       await refreshRemoved($)
       await refreshContext($)
     })()
+    void (async () => {
+      for (const key of await $.store.keys()) {
+        if (!key.startsWith(KNOWN_TOOL_PREFIX)) continue
+        const description = await $.store.get(key)
+        if (typeof description === 'string') {
+          knownTools[key.slice(KNOWN_TOOL_PREFIX.length)] = description
+        }
+      }
+    })().catch(() => {
+      // No store here: tools removed in earlier sessions fall back to the catalog.
+    })
 
     $.clock.every(1000, () => {
       void (async () => {
@@ -310,36 +381,34 @@ export const register: Register = on => {
   on('tool.describe', async ($, e, next) => {
     const described = await next(e)
     if (e.provider.plugin !== 'engine') return described
-    const isDeferred = e.isDeferred === true
-    const before = await read($, tools)
-    const was = before[e.tool]
-    if (was?.description !== e.description || was?.isDeferred !== isDeferred) {
-      await update($, tools, all => ({
-        ...all,
-        [e.tool]: { description: e.description, isDeferred },
-      }))
+    const description = described.description
+    const isDeferred = described.isDeferred ?? e.isDeferred === true
+    const was = (await read($, tools))[e.tool]
+    if (was?.description !== description || was?.isDeferred !== isDeferred) {
+      await update($, tools, all => ({ ...all, [e.tool]: { description, isDeferred } }))
     }
-    const known = ((await $.store.get(KNOWN_TOOLS_KEY)) ?? {}) as Record<string, string>
-    if (known[e.tool] !== e.description) {
-      await $.store.set(KNOWN_TOOLS_KEY, { ...known, [e.tool]: e.description })
+    if (knownTools[e.tool] !== description) {
+      knownTools[e.tool] = description
+      await $.store.set(`${KNOWN_TOOL_PREFIX}${e.tool}`, description)
     }
-    const names = await read($, removed)
-    const isRemoved = names.includes(e.tool) && !KEPT_TOOLS.includes(e.tool)
+    const isRemoved = (await read($, removed)).includes(e.tool) && !KEPT_TOOLS.includes(e.tool)
 
     return isRemoved ? { ...described, isDeferred: true } : described
   })
 
-  // A removed tool the model loads through ToolSearch anyway is refused.
+  // A removed tool the model loads through ToolSearch anyway is refused. When
+  // the state cannot be read the call goes ahead: this guard never blocks work
+  // the person did not ask to block.
   on('tool.call', async ($, e, next) => {
     const names = await read($, removed)
     if (names.includes(e.tool) && !KEPT_TOOLS.includes(e.tool)) {
       return {
-        deny: `${e.tool} was removed from the context; it can be put back in the Context pane.`,
+        deny: `The user removed ${e.tool} from this session; do not retry it. They can put it back in the Context pane.`,
       }
     }
 
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   // The desktop answers a press in the pane by jumping its window to the end,
   // reported as the person's own scroll; the window stays where they had it.
@@ -348,7 +417,7 @@ export const register: Register = on => {
     if (isJump && (await $.clock.now()) - lastPaneToggleAt < PRESS_JUMP_WINDOW_MS) return {}
 
     return next(e)
-  })
+  }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
     if (e.surface !== 'desktop') {
@@ -364,18 +433,19 @@ export const register: Register = on => {
       read($, putBack),
       read($, toolError),
     ])
-    const known = ((await $.store.get(KNOWN_TOOLS_KEY)) ?? {}) as Record<string, string>
 
     return ContextPane({
       ui,
       snapshot,
-      tools: toolRows(seen, known, names, back),
+      tools: toolRows(seen, knownTools, names, back),
       mapWidth: PANE_MAP_WIDTH,
       error,
-      onToggle: (name, isRemoved) =>
+      onToggle: (name, shouldRemove) =>
         void (async () => {
           lastPaneToggleAt = await $.clock.now()
-          await setRemoved($, name, isRemoved)
+          await setRemoved($, name, shouldRemove)
+          // A slow write may outlast the window; the desktop's jump follows the redraw.
+          lastPaneToggleAt = await $.clock.now()
         })().catch(error => update($, toolError, () => String(error))),
     })
   })
@@ -461,19 +531,7 @@ export const register: Register = on => {
               key="open-context"
               plain
               label={percent === undefined ? '--%' : `${percent}%`}
-              onPress={() =>
-                void (async () => {
-                  // The settings may have been edited by hand since the session began.
-                  await refreshRemoved($)
-                  // Focused, so the first click in the pane presses its button: an
-                  // unfocused pane spends that click on taking the focus.
-                  await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
-                  await $.clock.sleep(PANE_SETTLE_MS)
-                  await $.ui.scroll({ in: PANE_ID, to: 'start' })
-                })().catch(() => {
-                  // Unloaded or closed meanwhile; the next press opens it again.
-                })
-              }
+              onPress={() => openPane($)}
             />
           </Box>
 

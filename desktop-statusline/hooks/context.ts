@@ -6,13 +6,12 @@ import type {
 } from 'claude-code'
 
 import type { BlockKind, ContextBlock, ContextSnapshot } from '../types'
-import { firstSentence } from './tools'
+import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
 /** How many tool results the map names on their own, the rest folded into the conversation. */
 const RESULTS_SHOWN = 6
 /** A tool result smaller than this stays in the conversation's tile. */
 const RESULT_MIN_TOKENS = 1000
-const CHARS_PER_TOKEN = 3.6
 const SKILL_LINE_MAX = 110
 
 // /context's rows by the label it prints. The breakdown marks only whether a
@@ -27,6 +26,16 @@ const KIND_BY_CATEGORY: Record<string, BlockKind> = {
   'Memory files': 'memory',
   Skills: 'skills',
   Messages: 'conversation',
+}
+
+// Where a skill comes from, in words, by the engine's name for the source.
+const SKILL_SOURCE: Record<string, string> = {
+  userSettings: 'your settings',
+  projectSettings: 'this project',
+  policySettings: 'your organization',
+  'built-in': 'Claude Code',
+  mcp: 'an MCP server',
+  syncedSkills: 'claude.ai',
 }
 
 function basename(path: string): string {
@@ -103,7 +112,7 @@ export function buildSnapshot(
     .map(one => ({
       name: one.name,
       tokens: one.tokens,
-      source: one.pluginName ?? String(one.source),
+      source: one.pluginName ?? SKILL_SOURCE[String(one.source)] ?? String(one.source),
       description: firstSentence(descriptions.get(one.name) ?? '', SKILL_LINE_MAX),
     }))
     .sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name))

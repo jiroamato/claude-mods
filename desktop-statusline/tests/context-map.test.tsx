@@ -113,16 +113,23 @@ const DEPLOY = {
 } as const
 
 /** The engine around the plugin: a settings file in memory, the usage and the transcript. */
-function engine(on: On, settings: { text: string; isLocked?: boolean }) {
+type SettingsFile = { text: string; isLocked?: boolean; path?: RegExp; writes?: number }
+
+function engine(
+  on: On,
+  settings: SettingsFile,
+  env: Record<string, string> = { HOME: '/home/me' },
+) {
   const clock = mock.clock(on, { now: 1_000 })
   mock.store(on)
-  mock.env(on, { HOME: '/home/me' })
+  mock.env(on, env)
   on('fs.exists', async () => ({ value: true }))
   on('fs.read', async () => ({ value: settings.text }))
   on('fs.write', async (_$, e) => {
-    expect(e.path).toMatch(SETTINGS_PATH)
+    expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)
     if (settings.isLocked) return { deny: 'EPERM: settings.json is read-only' }
     settings.text = e.text
+    settings.writes = (settings.writes ?? 0) + 1
 
     return { value: undefined }
   })
@@ -241,7 +248,7 @@ test('the snapshot splits the messages into their largest tool results', () => {
     {
       name: 'deploy',
       tokens: 300,
-      source: 'userSettings',
+      source: 'your settings',
       description: 'Ships the app to production.',
     },
     { name: 'review', tokens: 120, source: 'reviewer', description: '' },
@@ -289,11 +296,12 @@ test('hovering the meter reveals the context map; the percentage opens the pane'
   expect(card?.text).toMatch(/Context 46%/)
   expect(card?.text).toMatch(/Bash: npm test -- --verbose/)
 
-  await band.press({ key: 'open-context' })
+  const pressed = band.press({ key: 'open-context' })
+  // The press reads the settings and the map before it waits; let the time pass.
+  for (let step = 0; step < 10; step += 1) await clock.advance(100)
+  await pressed
   // Focused, or the desktop spends the first click in it on the focus.
   expect(opened).toMatchObject({ id: 'context-map', title: 'Context', focus: true })
-  // The pane is scrolled to its top once it has drawn.
-  await clock.advance(1_000)
 
   await band.unmount()
 })
@@ -319,15 +327,16 @@ test('removing a tool denies it in the settings and moves it out of the window a
   })
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
+  const before = invalidated
   await pane.press({ key: 'toggle-Bash' })
   expect(JSON.parse(settings.text).permissions.deny).toEqual(['EnterPlanMode', 'Bash'])
-  expect(invalidated).toBe(1)
+  expect(invalidated).toBe(before + 1)
   expect(await $.tool.describe(bash)).toEqual({
     description: 'Executes a command.',
     isDeferred: true,
   })
   expect(await $.tool.call({ tool: 'Bash', tool_use_id: 'u1', command: 'ls' })).toMatchObject({
-    deny: expect.stringContaining('Bash was removed'),
+    deny: expect.stringContaining('The user removed Bash from this session'),
   })
   expect((await pane.find({ key: 'toggle-Bash' }))?.props).toMatchObject({ label: 'Put back' })
 
@@ -383,4 +392,105 @@ test('a settings file that cannot be written says so in the pane and removes not
   expect((await pane.find({ key: 'toggle-Grep' }))?.props).toMatchObject({ label: 'Remove' })
 
   await pane.unmount()
+})
+
+test('editDeny refuses settings it would have to reshape', () => {
+  expect(() => editDeny('{"permissions": "x"}', 'Bash', true)).toThrow(/not an object/)
+  expect(() => editDeny('{"permissions": ["Read"]}', 'Bash', true)).toThrow(/not an object/)
+  expect(() => editDeny('{"permissions": {"deny": "Write"}}', 'Bash', true)).toThrow(/not a list/)
+  expect(() => editDeny('{ // mine\n}', 'Bash', true)).toThrow(/not plain JSON/)
+  expect(() => editDeny('[1]', 'Bash', true)).toThrow(/does not hold an object/)
+})
+
+test('editDeny keeps the byte-order mark, the line endings and the top-level indent', () => {
+  const text = '\uFEFF{\r\n\t"env": {\r\n\t\t"A": "1"\r\n\t}\r\n}\r\n'
+  const out = editDeny(text, 'Bash', true)
+  expect(out.startsWith('\uFEFF{\r\n\t"env"')).toBe(true)
+  expect(out.endsWith('}\r\n')).toBe(true)
+  expect(out.includes('\n') && !/[^\r]\n/.test(out)).toBe(true)
+  expect(JSON.parse(out.slice(1))).toEqual({ env: { A: '1' }, permissions: { deny: ['Bash'] } })
+})
+
+test('the settings live under CLAUDE_CONFIG_DIR when it is set', async ($, on) => {
+  const settings = { text: '{}', path: /[\\/]cfg[\\/]settings\.json$/ }
+  engine(on, settings, { CLAUDE_CONFIG_DIR: '/cfg', HOME: '/home/me' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  await $.tool.describe({ tool: 'Grep', description: 'Searches.', provider: ENGINE })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  await pane.press({ key: 'toggle-Grep' })
+  expect(JSON.parse(settings.text).permissions.deny).toEqual(['Grep'])
+
+  await pane.unmount()
+})
+
+test('two presses at once both land in the settings file', async ($, on) => {
+  const settings: SettingsFile = { text: '{}' }
+  engine(on, settings)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  await $.tool.describe({ tool: 'Grep', description: 'Searches.', provider: ENGINE })
+  await $.tool.describe({ tool: 'Glob', description: 'Finds files.', provider: ENGINE })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  await Promise.all([pane.press({ key: 'toggle-Grep' }), pane.press({ key: 'toggle-Glob' })])
+  expect(JSON.parse(settings.text).permissions.deny.sort()).toEqual(['Glob', 'Grep'])
+  expect(settings.writes).toBe(2)
+
+  await pane.unmount()
+})
+
+test('MCP tools are not listed and ToolSearch is never removed', async ($, on) => {
+  engine(on, { text: '{"permissions": {"deny": ["ToolSearch"]}}' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const search = { tool: 'ToolSearch', description: 'Loads tools.', provider: ENGINE }
+  expect(await $.tool.describe(search)).toEqual({ description: 'Loads tools.' })
+  await $.tool.describe({
+    tool: 'mcp__docs__lookup',
+    description: 'Looks things up.',
+    provider: { plugin: 'mcp:docs', tier: 'user' },
+  })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  expect(await pane.find({ key: 'tool-ToolSearch' })).toBeUndefined()
+  expect(await pane.find({ key: 'tool-mcp__docs__lookup' })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+test('a deny added by hand is picked up when the pane opens', async ($, on) => {
+  const settings = { text: '{}' }
+  const clock = engine(on, settings)
+  let invalidated = 0
+  on('ui.invalidate', async () => {
+    invalidated += 1
+
+    return { value: undefined }
+  })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const grep = { tool: 'Grep', description: 'Searches.', provider: ENGINE }
+  await $.tool.describe(grep)
+
+  settings.text = '{"permissions": {"deny": ["Grep"]}}'
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const pressed = band.press({ key: 'open-context' })
+  // The press reads the settings and the map before it waits; let the time pass.
+  for (let step = 0; step < 10; step += 1) await clock.advance(100)
+  await pressed
+  expect(invalidated).toBe(1)
+  expect(await $.tool.describe(grep)).toEqual({ description: 'Searches.', isDeferred: true })
+
+  await band.unmount()
+})
+
+test('the card says when there is no map yet', async ($, on) => {
+  // No session has started, so no breakdown has been read.
+  engine(on, { text: '{}' })
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+  expect(
+    await band.find({ type: 'Text', text: /The map appears after Claude's first reply/ }),
+  ).toBeDefined()
+
+  await band.unmount()
 })

@@ -32,6 +32,28 @@ the figures a terminal status line shows, its text in the app's own theme colour
 - **Context meter**: a hollow rounded rectangle that fills as the context window does.
 - **Cost** so far and **elapsed** session time. Seconds are dropped past an hour.
 
+#### Context map
+
+Hover the context meter for a map of what fills the context window: the system
+prompt, tool schemas, MCP tools, memory files and skills, with the conversation
+split into its largest tool results, so a log dump crowding everything out stands
+out. Result sizes are estimated from their text.
+
+![The hover card above the meter: a treemap of the context window and its largest pieces](docs/context-map-hover.png)
+
+Click the percentage beside the meter to open the **Context** pane. It lists every
+built-in tool with a one-line summary and its approximate size, then the skills.
+
+- **Remove** takes a tool out of the open session at once (its schema leaves the
+  context and Claude can no longer call it) and adds its name to `permissions.deny`
+  in your user settings (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR`), so new
+  sessions in every project start without it.
+- **Put back** undoes both. A tool the session started without comes back in the
+  next session. Deleting the name from `permissions.deny` by hand works too.
+- Skills are listed read-only for now.
+
+![The Context pane: the map, then each built-in tool with Remove or Put back](docs/context-pane.png)
+
 It draws on the desktop surface only. In the terminal it stays out of the way,
 so a `statusLine` command in your settings keeps working there.
 
@@ -94,6 +116,10 @@ desktop-statusline/
   .claude-plugin/plugin.json   manifest
   hooks/hooks.json             names the hooks module
   hooks/register.tsx           the mod: hooks, state and the band's tree
+  hooks/panel.tsx              the context map's hover card and pane
+  hooks/context.ts             the window broken down into the map's tiles
+  hooks/tools.ts               tool summaries, sizes and the settings deny edit
+  hooks/treemap.ts             the treemap layout and its SVG
   types/index.d.ts             its state contract
   tests/                       run with `claude plugin test`
 ```
