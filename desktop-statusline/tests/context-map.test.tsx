@@ -347,7 +347,7 @@ test('removing a tool denies it in the settings and moves it out of the window a
   await pane.unmount()
 })
 
-test('the pane keeps its place when the desktop jumps it to the end after a press', async ($, on) => {
+test('the pane refuses the jump to its last row the desktop reports as a scroll', async ($, on) => {
   engine(on, { text: '{}' })
   let moved = 0
   on('ui.scroll', async () => {
@@ -356,25 +356,23 @@ test('the pane keeps its place when the desktop jumps it to the end after a pres
     return {}
   })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
-  await $.tool.describe({ tool: 'Grep', description: 'Searches.', provider: ENGINE })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const jump = {
+  const window = {
     component: 'Pane',
     requestId: 'context-map',
-    offset: 300,
-    by: 290,
     bodyRows: 40,
     contentRows: 340,
-    origin: { kind: 'person' },
   } as const
+  const person = { kind: 'person' } as const
 
-  await $.ui.scroll(jump)
-  expect(moved).toBe(1)
-  await pane.press({ key: 'toggle-Grep' })
-  await $.ui.scroll(jump)
-  expect(moved).toBe(1)
-  await $.ui.scroll({ ...jump, by: 3, offset: 13 })
-  expect(moved).toBe(2)
+  // The desktop's jump: straight to the last row, by neither a page nor every row.
+  await $.ui.scroll({ ...window, origin: person, by: 290, offset: 300 })
+  expect(moved).toBe(0)
+  // A wheel tick, a page key and End all go through.
+  await $.ui.scroll({ ...window, origin: person, by: 3, offset: 13 })
+  await $.ui.scroll({ ...window, origin: person, by: 40, offset: 53 })
+  await $.ui.scroll({ ...window, origin: person, by: 340, offset: 300 })
+  expect(moved).toBe(3)
 
   await pane.unmount()
 })

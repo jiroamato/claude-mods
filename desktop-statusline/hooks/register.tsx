@@ -78,8 +78,6 @@ const ELAPSED_COLUMNS = 7
 const PANE_MAP_WIDTH = 410
 // How long the pane takes to redraw after a change, before scrolling it.
 const PANE_SETTLE_MS = 300
-// How long after a press in the pane a jump of its window is the desktop's.
-const PRESS_JUMP_WINDOW_MS = 2000
 
 function asEffort(value: unknown): Effort | null {
   if (typeof value !== 'string') return null
@@ -319,8 +317,6 @@ async function openPane($: EngineInterface): Promise<void> {
 }
 
 export const register: Register = on => {
-  /** When a Remove or Put back was last pressed in the pane, in epoch ms. */
-  let lastPaneToggleAt = Number.NEGATIVE_INFINITY
   /** Descriptions of built-in tools seen in any session, read from the store at start. */
   const knownTools: Record<string, string> = {}
 
@@ -410,13 +406,20 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // The desktop answers a press in the pane by jumping its window to the end,
-  // reported as the person's own scroll; the window stays where they had it.
+  // The desktop sometimes moves the pane's window straight to its last row as
+  // it redraws (after a press, or a wheel tick), reported as the person's own
+  // scroll. No key or wheel moves it that way (End moves by every row, a page
+  // key by a page), so such a move is refused and the window stays put.
   on('ui.scroll', { requestId: PANE_ID }, async ($, e, next) => {
-    const isJump = e.origin.kind === 'person' && !e.pointer && Math.abs(e.by) > e.bodyRows
-    if (isJump && (await $.clock.now()) - lastPaneToggleAt < PRESS_JUMP_WINDOW_MS) return {}
+    const lastOffset = Math.max(0, e.contentRows - e.bodyRows)
+    const isRedrawJump =
+      e.origin.kind === 'person' &&
+      !e.pointer &&
+      Math.abs(e.by) > e.bodyRows &&
+      Math.abs(e.by) !== e.contentRows &&
+      e.offset === lastOffset
 
-    return next(e)
+    return isRedrawJump ? {} : next(e)
   }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
@@ -441,12 +444,9 @@ export const register: Register = on => {
       mapWidth: PANE_MAP_WIDTH,
       error,
       onToggle: (name, shouldRemove) =>
-        void (async () => {
-          lastPaneToggleAt = await $.clock.now()
-          await setRemoved($, name, shouldRemove)
-          // A slow write may outlast the window; the desktop's jump follows the redraw.
-          lastPaneToggleAt = await $.clock.now()
-        })().catch(error => update($, toolError, () => String(error))),
+        void setRemoved($, name, shouldRemove).catch(error =>
+          update($, toolError, () => String(error)),
+        ),
     })
   })
 
