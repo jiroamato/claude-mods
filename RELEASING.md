@@ -1,8 +1,8 @@
 # Releasing
 
 Releases are driven by [release-please](https://github.com/googleapis/release-please). Each
-plugin is versioned and released on its own, tagged `<plugin>-v<version>`
-(`desktop-statusline-v0.1.0`).
+plugin is versioned and released on its own. `desktop-statusline`'s releases are tagged and
+named by version alone (`v0.1.0`).
 
 **Nothing releases by itself.** release-please only opens a release PR on `main`. A release is
 cut solely when the maintainer merges that PR. Merging ordinary PRs never releases.
@@ -11,7 +11,7 @@ cut solely when the maintainer merges that PR. Merging ordinary PRs never releas
 
 1. Conventional commits land on `main` through squash-merged PRs.
 2. For each plugin with `feat` or `fix` commits touching its folder since its last release,
-   release-please opens or updates a release PR, `chore(main): release <plugin> <version>`. It
+   release-please opens or updates a release PR, `chore(main): release <version>`. It
    bumps the version in the plugin's `.claude-plugin/plugin.json`, in its entry in
    `.claude-plugin/marketplace.json` and in `.release-please-manifest.json`, and adds the
    release to the plugin's `CHANGELOG.md`.
@@ -33,8 +33,9 @@ Guard generated files check rejects PRs that do.
 ## Adding a plugin
 
 Add an entry for its folder under `packages` in `release-please-config.json`, copying
-`desktop-statusline`'s and changing the names and the `jsonpath` filter. Its first release PR
-proposes `initial-version`.
+`desktop-statusline`'s and changing the names and the `jsonpath` filter, but leave out
+`include-component-in-tag`: only one package can own the bare `v<version>` tags, so every other
+plugin is tagged `<plugin>-v<version>`. Its first release PR proposes `initial-version`.
 
 ## One-time repository setup
 
