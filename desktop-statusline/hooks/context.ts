@@ -65,11 +65,9 @@ export function buildSnapshot(
   commands: readonly CommandInfo[],
 ): ContextSnapshot {
   const blocks: ContextBlock[] = []
-  let toolTokens = 0
   for (const row of breakdown.categories) {
     if (row.kind !== 'used' || row.tokens <= 0) continue
     const kind = KIND_BY_CATEGORY[row.name] ?? 'system'
-    if (kind === 'tools') toolTokens += row.tokens
     if (kind !== 'conversation') {
       blocks.push({ label: row.name, kind, tokens: row.tokens })
       continue
@@ -115,7 +113,6 @@ export function buildSnapshot(
     window: breakdown.rawMaxTokens,
     percent: breakdown.percentage,
     blocks: blocks.sort((a, b) => b.tokens - a.tokens),
-    toolTokens,
     skills,
   }
 }

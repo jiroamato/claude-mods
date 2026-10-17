@@ -23,6 +23,7 @@ const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, 
 const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
+const toolError = atom({ plugin: 'desktop-statusline', key: 'toolError' } as const, null)
 /** Descriptions of the built-in tools seen in any session, by name. */
 const KNOWN_TOOLS_KEY = 'tool-descriptions'
 
@@ -240,10 +241,11 @@ async function setRemoved($: EngineInterface, name: string, isRemoved: boolean):
     const next = editDeny(text, name, isRemoved)
     if (next !== text) await $.fs.write(path, next)
   } catch (error) {
-    $.ui.toast(`Could not update settings.json: ${String(error)}`)
+    await update($, toolError, () => `Could not update settings.json: ${String(error)}`)
 
     return
   }
+  await update($, toolError, () => null)
   await update($, removed, names =>
     isRemoved ? [...names.filter(one => one !== name), name] : names.filter(one => one !== name),
   )
@@ -355,24 +357,26 @@ export const register: Register = on => {
       return <Text>The context map draws in the desktop app.</Text>
     }
     const ui = $.ui.resolve(e)
-    const [snapshot, seen, names, back] = await Promise.all([
+    const [snapshot, seen, names, back, error] = await Promise.all([
       read($, context),
       read($, tools),
       read($, removed),
       read($, putBack),
+      read($, toolError),
     ])
     const known = ((await $.store.get(KNOWN_TOOLS_KEY)) ?? {}) as Record<string, string>
 
     return ContextPane({
       ui,
       snapshot,
-      tools: toolRows(seen, known, names, back, snapshot?.toolTokens ?? 0),
+      tools: toolRows(seen, known, names, back),
       mapWidth: PANE_MAP_WIDTH,
+      error,
       onToggle: (name, isRemoved) =>
         void (async () => {
           lastPaneToggleAt = await $.clock.now()
           await setRemoved($, name, isRemoved)
-        })(),
+        })().catch(error => update($, toolError, () => String(error))),
     })
   })
 
@@ -461,7 +465,9 @@ export const register: Register = on => {
                 void (async () => {
                   // The settings may have been edited by hand since the session began.
                   await refreshRemoved($)
-                  await $.ui.open({ id: PANE_ID, title: PANE_TITLE })
+                  // Focused, so the first click in the pane presses its button: an
+                  // unfocused pane spends that click on taking the focus.
+                  await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
                   await $.clock.sleep(PANE_SETTLE_MS)
                   await $.ui.scroll({ in: PANE_ID, to: 'start' })
                 })().catch(() => {

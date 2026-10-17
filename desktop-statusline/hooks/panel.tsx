@@ -90,6 +90,8 @@ export function ContextPane(props: {
   snapshot: ContextSnapshot | null
   tools: ToolRow[]
   mapWidth: number
+  /** Why the last Remove or Put back failed, if it did. */
+  error: string | null
   onToggle: (name: string, isRemoved: boolean) => void
 }) {
   const { Box, Button, Svg, Text } = props.ui
@@ -125,6 +127,7 @@ export function ContextPane(props: {
           Removing a tool takes its schema out of this session now and denies it in
           ~/.claude/settings.json, so new sessions start without it.
         </Text>
+        {props.error && <Text color="error">{props.error}</Text>}
       </Box>
       {props.tools.map(tool => {
         const isRemoved = tool.status === 'removed'

@@ -107,16 +107,12 @@ export type ToolRow = { name: string; summary: string; tokens: number; status: T
  * session started without because the settings deny it, or that was put back.
  * `known` holds the descriptions of tools seen in earlier sessions, so a tool
  * removed then still has its one-liner.
- *
- * Token figures of the tools in the window are scaled so they add up to
- * `toolTokens`, the figure /context gives them together.
  */
 export function toolRows(
   seen: Readonly<Record<string, SeenTool>>,
   known: Readonly<Record<string, string>>,
   removed: readonly string[],
   putBack: readonly string[],
-  toolTokens: number,
 ): ToolRow[] {
   const rows: ToolRow[] = []
   for (const [name, tool] of Object.entries(seen)) {
@@ -125,7 +121,7 @@ export function toolRows(
     rows.push({
       name,
       summary: summarize(name, tool.description),
-      tokens: estimateTokens(name, tool.description),
+      tokens: tool.isDeferred && !isRemoved ? 0 : estimateTokens(name, tool.description),
       status: isRemoved ? 'removed' : tool.isDeferred ? 'deferred' : 'in',
     })
   }
@@ -138,13 +134,6 @@ export function toolRows(
       tokens: estimateTokens(name, known[name]),
       status: removed.includes(name) ? 'removed' : 'back-next-session',
     })
-  }
-
-  const inWindow = rows.filter(one => one.status === 'in')
-  const estimated = inWindow.reduce((sum, one) => sum + one.tokens, 0)
-  const scale = toolTokens > 0 && estimated > 0 ? toolTokens / estimated : 1
-  for (const one of rows) {
-    one.tokens = one.status === 'deferred' ? 0 : Math.round(one.tokens * scale)
   }
 
   const order: Record<ToolStatus, number> = {

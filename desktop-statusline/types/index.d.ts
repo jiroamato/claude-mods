@@ -19,8 +19,6 @@ export type ContextSnapshot = {
   percent: number
   /** Every used category, the messages split into their largest tool results. */
   blocks: ContextBlock[]
-  /** The built-in tools' schemas in the window, in tokens (/context's System tools). */
-  toolTokens: number
   /** Each listed skill with its listing's tokens. */
   skills: { name: string; tokens: number; source: string; description: string }[]
 }
@@ -45,6 +43,8 @@ declare module 'claude-code' {
       removed: string[]
       /** Tools put back during this session that it started without. */
       putBack: string[]
+      /** Why the last Remove or Put back failed, until the next one succeeds. */
+      toolError: string | null
     }
   }
 }

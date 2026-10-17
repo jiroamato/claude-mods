@@ -113,7 +113,7 @@ const DEPLOY = {
 } as const
 
 /** The engine around the plugin: a settings file in memory, the usage and the transcript. */
-function engine(on: On, settings: { text: string }) {
+function engine(on: On, settings: { text: string; isLocked?: boolean }) {
   const clock = mock.clock(on, { now: 1_000 })
   mock.store(on)
   mock.env(on, { HOME: '/home/me' })
@@ -121,6 +121,7 @@ function engine(on: On, settings: { text: string }) {
   on('fs.read', async () => ({ value: settings.text }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(SETTINGS_PATH)
+    if (settings.isLocked) return { deny: 'EPERM: settings.json is read-only' }
     settings.text = e.text
 
     return { value: undefined }
@@ -188,7 +189,7 @@ test('summarize prefers the catalog, else the first sentence of the description'
   expect(summarize('Mystery', undefined)).toBe('A built-in tool.')
 })
 
-test('toolRows scales the tools in the window to the measured total and orders by status', () => {
+test('toolRows orders the tools by status, then by size', () => {
   const rows = toolRows(
     {
       Bash: { description: 'b'.repeat(1_000), isDeferred: false },
@@ -200,7 +201,6 @@ test('toolRows scales the tools in the window to the measured total and orders b
     {},
     ['Write', 'EnterPlanMode', 'Unknown'],
     [],
-    3_000,
   )
   // In the window first, largest first; then loaded on demand; then removed.
   expect(rows.map(one => [one.name, one.status])).toEqual([
@@ -210,13 +210,15 @@ test('toolRows scales the tools in the window to the measured total and orders b
     ['EnterPlanMode', 'removed'],
     ['Write', 'removed'],
   ])
-  const inWindow = rows.filter(one => one.status === 'in')
-  expect(inWindow.reduce((sum, one) => sum + one.tokens, 0)).toBeGreaterThanOrEqual(2_999)
+  // Name, description and Grep's measured schema at 3.6 characters a token.
+  expect(rows.find(one => one.name === 'Grep')?.tokens).toBe(
+    Math.round((4 + 400 + 2776 + 40) / 3.6),
+  )
   expect(rows.find(one => one.name === 'Monitor')?.tokens).toBe(0)
 })
 
 test('a tool put back that the session started without waits for a new session', () => {
-  const rows = toolRows({}, { ListPlugins: 'Lists plugins.' }, [], ['ListPlugins'], 0)
+  const rows = toolRows({}, { ListPlugins: 'Lists plugins.' }, [], ['ListPlugins'])
   expect(rows).toEqual([
     expect.objectContaining({
       name: 'ListPlugins',
@@ -228,7 +230,7 @@ test('a tool put back that the session started without waits for a new session',
 
 test('the snapshot splits the messages into their largest tool results', () => {
   const snapshot = buildSnapshot(breakdown(), MESSAGES, [DEPLOY])
-  expect(snapshot).toMatchObject({ used: 92_000, window: 200_000, percent: 46, toolTokens: 20_000 })
+  expect(snapshot).toMatchObject({ used: 92_000, window: 200_000, percent: 46 })
   expect(snapshot.blocks[0]).toMatchObject({ label: 'Bash: npm test -- --verbose', kind: 'result' })
   expect(snapshot.blocks.some(one => one.label.startsWith('Read'))).toBe(false)
   const messages = snapshot.blocks.filter(
@@ -288,7 +290,8 @@ test('hovering the meter reveals the context map; the percentage opens the pane'
   expect(card?.text).toMatch(/Bash: npm test -- --verbose/)
 
   await band.press({ key: 'open-context' })
-  expect(opened).toMatchObject({ id: 'context-map', title: 'Context' })
+  // Focused, or the desktop spends the first click in it on the focus.
+  expect(opened).toMatchObject({ id: 'context-map', title: 'Context', focus: true })
   // The pane is scrolled to its top once it has drawn.
   await clock.advance(1_000)
 
@@ -363,6 +366,21 @@ test('the pane keeps its place when the desktop jumps it to the end after a pres
   expect(moved).toBe(1)
   await $.ui.scroll({ ...jump, by: 3, offset: 13 })
   expect(moved).toBe(2)
+
+  await pane.unmount()
+})
+
+test('a settings file that cannot be written says so in the pane and removes nothing', async ($, on) => {
+  const settings = { text: '{}\n', isLocked: true }
+  engine(on, settings)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  await $.tool.describe({ tool: 'Grep', description: 'Searches.', provider: ENGINE })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  await pane.press({ key: 'toggle-Grep' })
+  expect(settings.text).toBe('{}\n')
+  expect(await pane.find({ type: 'Text', text: /Could not update settings\.json/ })).toBeDefined()
+  expect((await pane.find({ key: 'toggle-Grep' }))?.props).toMatchObject({ label: 'Remove' })
 
   await pane.unmount()
 })
