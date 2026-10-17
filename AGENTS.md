@@ -33,10 +33,11 @@ claude-mods is a Claude Code plugin marketplace: each top-level folder with a
 
 ## Release automation
 
-Releases are release-please, per plugin, tagged `<plugin>-v<version>`. Nothing releases by itself:
+Releases are release-please, per plugin. `desktop-statusline` is tagged `v<version>`; any other plugin
+would be tagged `<plugin>-v<version>` (see `RELEASING.md`). Nothing releases by itself:
 
 1. A squash-merged `feat` or `fix` whose files touch `<plugin>/` makes release-please open or update
-   `chore(main): release <plugin> <version>`. `docs`, `chore`, `ci`, `style` and `test` commits,
+   `chore(main): release <version>`. `docs`, `chore`, `ci`, `style` and `test` commits,
    and commits outside a plugin folder, release nothing.
 2. That PR bumps the version in `<plugin>/.claude-plugin/plugin.json`, the plugin's entry in
    `.claude-plugin/marketplace.json` and `.release-please-manifest.json`, and writes `<plugin>/CHANGELOG.md`.
