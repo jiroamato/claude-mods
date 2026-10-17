@@ -4,7 +4,8 @@ Thanks for wanting to contribute.
 
 ## Workflow
 
-1. Fork the repo and create a branch named `type/short-name` (`feat/context-map`, `fix/meter-width`).
+1. Fork the repo and create a branch from `dev` named `type/short-name` (`feat/context-map`,
+   `fix/meter-width`).
 2. Make your changes, then run the same checks CI runs until they are all green:
 
    ```bash
@@ -18,14 +19,14 @@ Thanks for wanting to contribute.
 
 3. Load the plugin in a real session and check it on the surface it draws on. For
    `desktop-statusline` that means the Claude desktop app, in light and dark themes.
-4. Open a pull request against `main` with a [Conventional Commits](https://www.conventionalcommits.org)
+4. Open a pull request against `dev` with a [Conventional Commits](https://www.conventionalcommits.org)
    title, `type(scope): summary`. When the change is inside a plugin, the scope is its folder
    name (`fix(desktop-statusline): keep the timer from shifting the meter`).
 
 CI checks formatting, validates the marketplace, then validates and tests each plugin on
 Ubuntu, macOS and Windows. Pull requests are squash-merged with the PR title as the commit
-title, so the title is what lands on `main`, and for `feat` and `fix` it becomes the line in
-the release notes.
+title, so the title is what lands on `dev`, and for `feat` and `fix` it becomes the line in
+the release notes once `dev` is promoted to `main`.
 
 ## Repo conventions
 

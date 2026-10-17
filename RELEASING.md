@@ -4,20 +4,25 @@ Releases are driven by [release-please](https://github.com/googleapis/release-pl
 plugin is versioned and released on its own. `desktop-statusline`'s releases are tagged and
 named by version alone (`v0.1.0`).
 
-**Nothing releases by itself.** release-please only opens a release PR on `main`. A release is
-cut solely when the maintainer merges that PR. Merging ordinary PRs never releases.
+**Nothing releases by itself.** Work collects on `dev`, and release-please runs only on pushes
+to `main`, where it opens a release PR. A release is cut solely when the maintainer merges that
+PR. Merging ordinary PRs never releases.
 
 ## Steady state
 
-1. Conventional commits land on `main` through squash-merged PRs.
-2. For each plugin with `feat` or `fix` commits touching its folder since its last release,
+1. Conventional commits land on `dev` through squash-merged PRs.
+2. The maintainer promotes `dev` with a PR from `dev` into `main`, merged with a merge commit so
+   every commit reaches `main` on its own and gets its own changelog line.
+3. For each plugin with `feat` or `fix` commits touching its folder since its last release,
    release-please opens or updates a release PR, `chore(main): release <version>`. It
    bumps the version in the plugin's `.claude-plugin/plugin.json`, in its entry in
    `.claude-plugin/marketplace.json` and in `.release-please-manifest.json`, and adds the
    release to the plugin's `CHANGELOG.md`.
-3. The maintainer reviews and merges the release PR. That is the go decision.
-4. `.github/workflows/release-please.yml` tags the merge commit and publishes the GitHub
+4. The maintainer reviews and merges the release PR. That is the go decision.
+5. `.github/workflows/release-please.yml` tags the merge commit and publishes the GitHub
    release with the same notes as the changelog.
+6. The maintainer merges `main` back into `dev` with a PR from `main`, merged with a merge
+   commit, so `dev` carries the new versions and changelogs.
 
 Installed copies update on the next marketplace sync: the desktop app and `claude plugin`
 compare the `version` in `plugin.json` with what is installed.

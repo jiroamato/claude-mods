@@ -23,20 +23,25 @@ claude-mods is a Claude Code plugin marketplace: each top-level folder with a
 
 ## Git workflow
 
-- Branch from `main` as `type/short-name`; type is one of `feat|fix|refactor|perf|docs|test|chore|ci|build|style|revert`.
-- Every change reaches `main` through a PR, squash-merged with the PR title as the commit title. The PR
-  title is what lands, so make it Conventional Commits: `type(scope): summary`, the scope being the
-  plugin folder when the change is inside one (`fix(desktop-statusline): ...`).
-- Stacked PRs merge bottom-up: merge the base, rebase the next branch onto `main` from its own first
-  commit (`git rebase --onto origin/main <old-base>`), force-push with lease, retarget it to `main`,
+- Work collects on `dev`; `main` is what releases. Branch from `dev` as `type/short-name`; type is one
+  of `feat|fix|refactor|perf|docs|test|chore|ci|build|style|revert`.
+- Every change reaches `dev` through a PR (`gh pr create --base dev`: `main` stays the default branch),
+  squash-merged with the PR title as the commit title. The PR title is what lands, so make it
+  Conventional Commits: `type(scope): summary`, the scope being the plugin folder when the change is
+  inside one (`fix(desktop-statusline): ...`).
+- `dev` reaches `main` through a PR from `dev` merged with a merge commit, so each squashed commit
+  arrives on `main` intact for release-please to read.
+- Stacked PRs merge bottom-up: merge the base, rebase the next branch onto `dev` from its own first
+  commit (`git rebase --onto origin/dev <old-base>`), force-push with lease, retarget it to `dev`,
   wait for green, merge.
 
 ## Release automation
 
 Releases are release-please, per plugin. `desktop-statusline` is tagged `v<version>`; any other plugin
-would be tagged `<plugin>-v<version>` (see `RELEASING.md`). Nothing releases by itself:
+would be tagged `<plugin>-v<version>` (see `RELEASING.md`). It runs only on pushes to `main`, and
+nothing releases by itself:
 
-1. A squash-merged `feat` or `fix` whose files touch `<plugin>/` makes release-please open or update
+1. A `feat` or `fix` whose files touch `<plugin>/` reaching `main` makes release-please open or update
    `chore(main): release <version>`. `docs`, `chore`, `ci`, `style` and `test` commits,
    and commits outside a plugin folder, release nothing.
 2. That PR bumps the version in `<plugin>/.claude-plugin/plugin.json`, the plugin's entry in
@@ -45,6 +50,8 @@ would be tagged `<plugin>-v<version>` (see `RELEASING.md`). Nothing releases by 
 3. Merging it is the go decision: `.github/workflows/release-please.yml` tags the commit and publishes
    the GitHub release with the changelog's notes. Installed copies update on the next marketplace sync,
    which compares the `version` field.
+4. Merge `main` back into `dev` (a PR from `main`, merged with a merge commit) so `dev` carries the new
+   versions and changelog.
 
 Below 1.0.0 a `feat` bumps the patch and a breaking change the minor. The `version` fields,
 `CHANGELOG.md` files and `.release-please-manifest.json` belong to release-please; leave them as they
