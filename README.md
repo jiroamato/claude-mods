@@ -116,6 +116,8 @@ To hack on it live, point a session at the folder: `claude --plugin-dir
 ./desktop-statusline`, or set `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of
 `~/.claude/settings.json`. Saving a file reloads the mod in that session.
 
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
+
 ## License
 
 MIT
