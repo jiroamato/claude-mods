@@ -38,7 +38,8 @@ the release notes.
 - For UI changes, attach a screenshot of the plugin as it draws.
 - Do not commit the engine's generated typings (`<plugin>/.claude-plugin/types/`).
 - Leave the `version` fields in `plugin.json` and `marketplace.json` alone, and do not
-  hand-edit `CHANGELOG.md`. The maintainer sets versions and cuts releases.
+  hand-edit any `CHANGELOG.md` or `.release-please-manifest.json`. release-please writes them,
+  and releases are cut by the maintainer merging its release PR; see [RELEASING.md](RELEASING.md).
 
 ## Questions
 
