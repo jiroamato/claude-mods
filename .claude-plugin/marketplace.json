@@ -13,7 +13,7 @@
     {
       "name": "desktop-statusline",
       "source": "./desktop-statusline",
-      "description": "Status bar above the prompt in the Claude desktop app: model, effort, folder, git branch, context meter, cost and elapsed time.",
+      "description": "Status bar above the prompt in the Claude desktop app: model, effort, folder, git branch, context meter, cost and elapsed time. Hover the meter for a map of the context window; remove built-in tools from it.",
       "version": "0.1.0",
       "category": "productivity",
       "tags": [
