@@ -319,6 +319,12 @@ async function openPane($: EngineInterface): Promise<void> {
 export const register: Register = on => {
   /** Descriptions of built-in tools seen in any session, read from the store at start. */
   const knownTools: Record<string, string> = {}
+  /**
+   * Bumped as the pane opens, so the meter's hover area is drawn anew: the
+   * pane moves the band under a resting pointer, and the desktop would keep the
+   * card revealed until the pointer next crossed the meter.
+   */
+  let meterDrawing = 0
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -505,7 +511,7 @@ export const register: Register = on => {
         <Box flexDirection="row" alignItems="center" columnGap={2}>
           {/* Hovering the meter reveals the context map; the percentage opens the pane. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
-            <Box key="context-meter" flexDirection="row" alignItems="center">
+            <Box key={`context-meter-${meterDrawing}`} flexDirection="row" alignItems="center">
               <Box
                 position="absolute"
                 bottom={2}
@@ -531,7 +537,11 @@ export const register: Register = on => {
               key="open-context"
               plain
               label={percent === undefined ? '--%' : `${percent}%`}
-              onPress={() => openPane($)}
+              onPress={() => {
+                meterDrawing += 1
+                void update($, tick, n => n + 1)
+                void openPane($)
+              }}
             />
           </Box>
 
