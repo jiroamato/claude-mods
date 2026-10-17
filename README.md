@@ -37,7 +37,8 @@ the figures a terminal status line shows, its text in the app's own theme colour
 Hover the context meter for a map of what fills the context window: the system
 prompt, tool schemas, MCP tools, memory files and skills, with the conversation
 split into its largest tool results, so a log dump crowding everything out stands
-out. Result sizes are estimated from their text.
+out. The categories are counted as `/context` counts them, so the two agree;
+result sizes within the conversation are estimated from their text.
 
 ![The hover card above the meter: a treemap of the context window and its largest pieces](docs/context-map-hover.png)
 

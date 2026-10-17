@@ -142,7 +142,7 @@ function engine(
         window: 200_000,
         tokens: 92_000,
         percent: 46,
-        ...(e?.breakdown ? { breakdown: breakdown() } : {}),
+        ...(e?.breakdown === 'full' ? { breakdown: breakdown() } : {}),
       },
       rateLimits: [],
     },

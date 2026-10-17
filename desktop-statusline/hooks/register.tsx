@@ -240,10 +240,13 @@ function refreshRemoved($: EngineInterface): Promise<void> {
   })
 }
 
-/** Reads the context window broken down, for the hover card and the pane. */
+/**
+ * Reads the context window broken down, for the hover card and the pane,
+ * counted with the token-count API as /context counts it so the two agree.
+ */
 async function refreshContext($: EngineInterface): Promise<void> {
   try {
-    const usage = await $.session.usage({ breakdown: 'summary' })
+    const usage = await $.session.usage({ breakdown: 'full' })
     const breakdown = usage.context.breakdown
     if (!breakdown) return
     const [messages, commands] = await Promise.all([$.session.messages(), $.command.list()])
