@@ -16,7 +16,11 @@
       "description": "Status bar above the prompt in the Claude desktop app: model, effort, folder, git branch, context meter, cost and elapsed time.",
       "version": "0.1.0",
       "category": "productivity",
-      "tags": ["status-line", "desktop", "ui"]
+      "tags": [
+        "status-line",
+        "desktop",
+        "ui"
+      ]
     }
   ]
 }
