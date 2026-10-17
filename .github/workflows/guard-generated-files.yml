@@ -1,0 +1,59 @@
+name: Guard generated files
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened]
+    branches: [main]
+    # Never create a run for a release PR. The job-level author exemption below
+    # cannot do this: it is evaluated inside a run, and a GITHUB_TOKEN PR's run
+    # is created in action_required and never starts.
+    paths-ignore:
+      - .release-please-manifest.json
+      - .claude-plugin/marketplace.json
+      - '*/CHANGELOG.md'
+      - '*/.claude-plugin/plugin.json'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: guard-generated-files-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    name: Generated files must not be hand-edited
+    runs-on: ubuntu-latest
+    if: >-
+      github.event.pull_request.user.login != 'github-actions[bot]' &&
+      github.event.pull_request.user.login != 'release-please[bot]'
+    steps:
+      - uses: actions/checkout@v7
+        with:
+          fetch-depth: 0
+
+      - name: Check the PR does not modify release-please's files
+        env:
+          BASE_SHA: ${{ github.event.pull_request.base.sha }}
+          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+        run: |
+          set -eu
+          # --diff-filter=M: only modifications count. The one legitimate human
+          # write to these files is the PR that creates them; every write after
+          # that belongs to release-please.
+          violated=$(git diff --name-only --diff-filter=M "${BASE_SHA}...${HEAD_SHA}" |
+            grep -xE '\.release-please-manifest\.json|[^/]+/CHANGELOG\.md' || true)
+
+          if [ -n "$violated" ]; then
+            {
+              echo "::error::This PR modifies files release-please generates: $(echo $violated)"
+              echo
+              echo "Each plugin's CHANGELOG.md and .release-please-manifest.json are written"
+              echo "by release-please from the conventional commits on main. Do not hand-edit"
+              echo "them. Give your PR a feat or fix title and release-please adds it to the"
+              echo "next release PR. See RELEASING.md."
+            } >&2
+            exit 1
+          fi
+
+          echo "No release-please files modified. OK."
