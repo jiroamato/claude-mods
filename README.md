@@ -1,4 +1,18 @@
-# claude-mods
+<h1 align="center">claude-mods</h1>
+<p align="center">
+  <a href="https://github.com/jiroamato/claude-mods/actions/workflows/ci.yml"
+    ><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jiroamato/claude-mods/ci.yml?branch=main&style=flat-square&label=ci"
+  /></a>
+  <a href="https://github.com/jiroamato/claude-mods/releases"
+    ><img alt="Release" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjiroamato%2Fclaude-mods%2Fmain%2Fdesktop-statusline%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=desktop-statusline%20v&label=release&style=flat-square"
+  /></a>
+  <a href="https://claude.ai/download"
+    ><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows-blue?style=flat-square"
+  /></a>
+  <a href="https://x.com/Jiro0x"
+    ><img alt="X" src="https://img.shields.io/badge/X-@Jiro0x-black?style=flat-square"
+  /></a>
+</p>
 
 A plugin marketplace of mods for [Claude Code](https://code.claude.com): live UI
 plugins built on function hooks.
