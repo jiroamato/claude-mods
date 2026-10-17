@@ -1,4 +1,18 @@
-# claude-mods
+<h1 align="center">claude-mods</h1>
+<p align="center">
+  <a href="https://github.com/jiroamato/claude-mods/actions/workflows/ci.yml"
+    ><img alt="CI" src="https://img.shields.io/github/actions/workflow/status/jiroamato/claude-mods/ci.yml?branch=main&style=flat-square&label=ci"
+  /></a>
+  <a href="https://github.com/jiroamato/claude-mods/releases"
+    ><img alt="Release" src="https://img.shields.io/badge/dynamic/json?url=https%3A%2F%2Fraw.githubusercontent.com%2Fjiroamato%2Fclaude-mods%2Fmain%2Fdesktop-statusline%2F.claude-plugin%2Fplugin.json&query=%24.version&prefix=desktop-statusline%20v&label=release&style=flat-square"
+  /></a>
+  <a href="https://claude.ai/download"
+    ><img alt="Platform" src="https://img.shields.io/badge/platform-macOS%20%7C%20Windows%20%7C%20Linux%20(beta)-blue?style=flat-square"
+  /></a>
+  <a href="https://x.com/Jiro0x"
+    ><img alt="X" src="https://img.shields.io/badge/X-@Jiro0x-black?style=flat-square"
+  /></a>
+</p>
 
 A plugin marketplace of mods for [Claude Code](https://code.claude.com): live UI
 plugins built on function hooks.
@@ -8,7 +22,7 @@ plugins built on function hooks.
 ### desktop-statusline
 
 A status bar above the prompt in the Claude desktop app's Code tab. It mirrors
-the figures a terminal status line shows, drawn in the app's own theme colours:
+the figures a terminal status line shows, its text in the app's own theme colours:
 
 ![The desktop-statusline band above the prompt box: Opus 5.5, high effort, claude-mods | main, a context meter at 9%, $1.25, 8m 28s, with hairlines between each figure](docs/desktop-statusline-above-prompt.png)
 
@@ -84,7 +98,7 @@ desktop-statusline/
   tests/                       run with `claude plugin test`
 ```
 
-Validate, test and type-check a plugin from its folder:
+Validate, test and type-check a plugin by passing its folder:
 
 ```bash
 claude plugin validate --strict desktop-statusline
@@ -101,6 +115,8 @@ ignored by git.
 To hack on it live, point a session at the folder: `claude --plugin-dir
 ./desktop-statusline`, or set `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of
 `~/.claude/settings.json`. Saving a file reloads the mod in that session.
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow.
 
 ## License
 
