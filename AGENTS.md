@@ -25,9 +25,10 @@ claude-mods is a Claude Code plugin marketplace: each top-level folder with a
 
 - Work collects on `dev`; `main` is what releases. Branch from `dev` as `type/short-name`; type is one
   of `feat|fix|refactor|perf|docs|test|chore|ci|build|style|revert`.
-- Every change reaches `dev` through a PR, squash-merged with the PR title as the commit title. The PR
-  title is what lands, so make it Conventional Commits: `type(scope): summary`, the scope being the
-  plugin folder when the change is inside one (`fix(desktop-statusline): ...`).
+- Every change reaches `dev` through a PR (`gh pr create --base dev`: `main` stays the default branch),
+  squash-merged with the PR title as the commit title. The PR title is what lands, so make it
+  Conventional Commits: `type(scope): summary`, the scope being the plugin folder when the change is
+  inside one (`fix(desktop-statusline): ...`).
 - `dev` reaches `main` through a PR from `dev` merged with a merge commit, so each squashed commit
   arrives on `main` intact for release-please to read.
 - Stacked PRs merge bottom-up: merge the base, rebase the next branch onto `dev` from its own first
