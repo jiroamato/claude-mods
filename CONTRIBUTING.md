@@ -5,24 +5,29 @@ Thanks for wanting to contribute.
 ## Workflow
 
 1. Fork the repo and create a branch named `type/short-name` (`feat/context-map`, `fix/meter-width`).
-2. Make your changes, then validate and test every plugin you touched until both are green:
+2. Make your changes, then run the same checks CI runs until they are all green:
 
    ```bash
+   claude plugin validate --strict .
    claude plugin validate --strict <plugin>
    claude plugin test <plugin>
+   npx --yes prettier@3.9.10 --check .
    ```
+
+   `npx --yes prettier@3.9.10 --write .` fixes the formatting.
 
 3. Load the plugin in a real session and check it on the surface it draws on. For
    `desktop-statusline` that means the Claude desktop app, in light and dark themes.
 4. Open a pull request against `main` with a [Conventional Commits](https://www.conventionalcommits.org)
-   title, `type(scope): summary`, where the scope is the plugin's folder name
-   (`fix(desktop-statusline): keep the timer from shifting the meter`).
+   title, `type(scope): summary`. When the change is inside a plugin, the scope is its folder
+   name (`fix(desktop-statusline): keep the timer from shifting the meter`).
 
-CI validates the marketplace, then validates and tests each plugin on Ubuntu, macOS and
-Windows. Pull requests are squash-merged, so the PR title is the commit that lands on `main`
-and the line that shows up in the release notes.
+CI checks formatting, validates the marketplace, then validates and tests each plugin on
+Ubuntu, macOS and Windows. Pull requests are squash-merged with the PR title as the commit
+title, so the title is what lands on `main`, and for `feat` and `fix` it becomes the line in
+the release notes.
 
-## Repo Conventions
+## Repo conventions
 
 - Each plugin lives in its own self-contained folder with its manifest, hooks module, state
   contract and tests. A new plugin also gets an entry in `.claude-plugin/marketplace.json` and
