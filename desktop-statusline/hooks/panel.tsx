@@ -31,6 +31,9 @@ const SHARE_COLUMNS = 6
 const DETAIL_INDENT = SWATCH_WIDTH + SWATCH_GAP + LABEL_PAD
 // A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
+// A one-pixel rule between the pieces an open row lists, in the border's own faint colour.
+const HAIRLINE = 0.05
+const RULE = 'promptBorderShimmer'
 // One drawing holds at most 100000 characters of code; a section is cut well short of that.
 const SECTION_TEXT_MAX = 40_000
 
@@ -220,6 +223,32 @@ const STATUS_NOTE: Record<ToolRow['status'], string> = {
   'back-next-session': 'back in a new session',
 }
 
+/** What an open row says before it lists its pieces: small and muted, so the list leads. */
+function Intro(props: { ui: Ui; text: string }) {
+  const { Text } = props.ui
+
+  return (
+    <Text color="subtle" size="footnote">
+      {props.text}
+    </Text>
+  )
+}
+
+/** The pieces an open row lists, a faint rule between each so one reads apart from the next. */
+function Ruled(props: { ui: Ui; children: JSX.Element[] }) {
+  const { Box } = props.ui
+
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      {props.children.flatMap((child, index) =>
+        index === 0
+          ? [child]
+          : [<Box height={HAIRLINE} flexShrink={0} backgroundColor={RULE} />, child],
+      )}
+    </Box>
+  )
+}
+
 /** A name with a line under it and its tokens, as the rows' pieces are listed. */
 function ItemLine(props: {
   ui: Ui
@@ -239,7 +268,7 @@ function ItemLine(props: {
           {item.name}
         </Text>
         {detail !== '' && (
-          <Text color="secondaryText" wrap={props.note === undefined ? 'truncate-end' : 'wrap'}>
+          <Text color="subtle" wrap={props.note === undefined ? 'truncate-end' : 'wrap'}>
             {detail}
           </Text>
         )}
@@ -286,43 +315,47 @@ function ToolLines(props: ContextPaneProps & { rows: ToolRow[]; isExplained: boo
 
   return (
     <Box flexDirection="column" rowGap={1}>
-      {props.isExplained && (
-        <Text color="secondaryText">
-          Remove takes a tool out of this session's context at once (Claude can no longer call it)
-          and adds it to permissions.deny in your user settings, so new sessions in every project
-          start without it. Put back undoes both.
-        </Text>
-      )}
-      {props.rows.map(tool => {
-        const isRemoved = tool.status === 'removed'
-        const note = STATUS_NOTE[tool.status]
+      {props.isExplained &&
+        Intro({
+          ui: props.ui,
+          text:
+            "Remove takes a tool out of this session's context at once (Claude can no longer call " +
+            'it) and adds it to permissions.deny in your user settings, so new sessions in every ' +
+            'project start without it. Put back undoes both.',
+        })}
+      {Ruled({
+        ui: props.ui,
+        children: props.rows.map(tool => {
+          const isRemoved = tool.status === 'removed'
+          const note = STATUS_NOTE[tool.status]
 
-        return (
-          <Box key={`tool-${tool.name}`} flexDirection="row" alignItems="center" columnGap={1}>
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              {/* In a narrow pane the note drops under the name whole, rather than a word a line. */}
-              <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
-                <Text color={isRemoved ? 'inactive' : 'text'} bold strikethrough={isRemoved}>
-                  {tool.name}
-                </Text>
-                {note !== '' && <Text color="inactive">{note}</Text>}
+          return (
+            <Box key={`tool-${tool.name}`} flexDirection="row" alignItems="center" columnGap={1}>
+              <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+                {/* In a narrow pane the note drops under the name whole, rather than a word a line. */}
+                <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
+                  <Text color={isRemoved ? 'inactive' : 'text'} bold strikethrough={isRemoved}>
+                    {tool.name}
+                  </Text>
+                  {note !== '' && <Text color="inactive">{note}</Text>}
+                </Box>
+                <Text color="subtle">{tool.summary}</Text>
               </Box>
-              <Text color="secondaryText">{tool.summary}</Text>
+              {Figure({
+                ui: props.ui,
+                columns: TOKENS_COLUMNS,
+                text: tool.status === 'deferred' ? '0' : `~${formatTokens(tool.tokens)}`,
+                dim: isRemoved,
+              })}
+              <Button
+                key={`toggle-${tool.name}`}
+                label={isRemoved ? 'Put back' : 'Remove'}
+                variant={isRemoved ? 'primary' : 'secondary'}
+                onPress={() => props.onToggle(tool.name, !isRemoved)}
+              />
             </Box>
-            {Figure({
-              ui: props.ui,
-              columns: TOKENS_COLUMNS,
-              text: tool.status === 'deferred' ? '0' : `~${formatTokens(tool.tokens)}`,
-              dim: isRemoved,
-            })}
-            <Button
-              key={`toggle-${tool.name}`}
-              label={isRemoved ? 'Put back' : 'Remove'}
-              variant={isRemoved ? 'primary' : 'secondary'}
-              onPress={() => props.onToggle(tool.name, !isRemoved)}
-            />
-          </Box>
-        )
+          )
+        }),
       })}
     </Box>
   )
@@ -375,10 +408,12 @@ function PromptLines(props: ContextPaneProps & { snapshot: ContextSnapshot }) {
 
   return (
     <Box flexDirection="column" rowGap={1}>
-      <Text color="secondaryText">
-        The system prompt as this session composes it, section by section. Sizes are estimated from
-        each section's text.
-      </Text>
+      {Intro({
+        ui: props.ui,
+        text:
+          'The system prompt as this session composes it, section by section. Sizes are ' +
+          "estimated from each section's text.",
+      })}
       {props.snapshot.prompt.map(section => {
         const id = `prompt-${slug(section.id)}`
         const isOpen = props.expanded.includes(id)
@@ -420,18 +455,22 @@ function SkillLines(props: ContextPaneProps & { snapshot: ContextSnapshot }) {
 
   return (
     <Box flexDirection="column" rowGap={1}>
-      <Text color="secondaryText">
-        Each skill's listing as the model sees it. Removing skills is not supported yet.
-      </Text>
-      {skills.map(skill => (
-        <Box key={`skill-${skill.name}`} flexDirection="column">
-          {ItemLine({
-            ui: props.ui,
-            item: { name: skill.name, tokens: skill.tokens, detail: '' },
-            note: skill.description || `From ${skill.source}.`,
-          })}
-        </Box>
-      ))}
+      {Intro({
+        ui: props.ui,
+        text: "Each skill's listing as the model sees it. Removing skills is not supported yet.",
+      })}
+      {Ruled({
+        ui: props.ui,
+        children: skills.map(skill => (
+          <Box key={`skill-${skill.name}`} flexDirection="column">
+            {ItemLine({
+              ui: props.ui,
+              item: { name: skill.name, tokens: skill.tokens, detail: '' },
+              note: skill.description || `From ${skill.source}.`,
+            })}
+          </Box>
+        )),
+      })}
     </Box>
   )
 }
@@ -441,8 +480,8 @@ function ItemLines(props: { ui: Ui; items: ContextItem[]; intro?: string }) {
 
   return (
     <Box flexDirection="column" rowGap={1}>
-      {props.intro && <Text color="secondaryText">{props.intro}</Text>}
-      {props.items.map(item => ItemLine({ ui: props.ui, item }))}
+      {props.intro && Intro({ ui: props.ui, text: props.intro })}
+      {Ruled({ ui: props.ui, children: props.items.map(item => ItemLine({ ui: props.ui, item })) })}
     </Box>
   )
 }
@@ -465,10 +504,12 @@ function rowDetail(props: ContextPaneProps, row: ContextRow): JSX.Element | null
 
       return (
         <Box flexDirection="column" rowGap={1}>
-          <Text color="secondaryText">
-            Loaded only when Claude searches for them, so their schemas stay out of the window until
-            then.
-          </Text>
+          {Intro({
+            ui: props.ui,
+            text:
+              'Loaded only when Claude searches for them, so their schemas stay out of the window ' +
+              'until then.',
+          })}
           {ToolLines({ ...props, rows, isExplained: false })}
         </Box>
       )
