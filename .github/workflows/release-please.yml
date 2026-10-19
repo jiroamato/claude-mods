@@ -14,6 +14,8 @@ jobs:
     steps:
       # Opens or updates one release PR per plugin with changes since its last
       # release. Merging that PR tags the plugin and publishes its GitHub release.
+      # Work collects on dev; only main, which dev is promoted to, is released.
       - uses: googleapis/release-please-action@v5
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
+          target-branch: main
