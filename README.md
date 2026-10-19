@@ -60,7 +60,7 @@ same rows, and each one with something in it opens to list what fills it:
 - **Skills**, read-only for now, **Memory files**, **Custom agents**, and
   **Messages**, which lists the largest tool results in the conversation.
 
-![The Context pane: the /context rows, System tools open with Remove or Put back beside each tool](docs/context-pane.png)
+![The Context pane: the /context rows, System tools (deferred) open with Remove beside each tool](docs/context-pane.png)
 
 It draws on the desktop surface only. In the terminal it stays out of the way,
 so a `statusLine` command in your settings keeps working there.
