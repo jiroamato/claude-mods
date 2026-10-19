@@ -550,9 +550,10 @@ export const register: Register = on => {
                 display="none"
                 hover={{ display: 'flex' }}
                 flexDirection="column"
+                // The desktop's own /context card: its raised surface and its
+                // faint default border, which no borderColor leaves in place.
                 borderStyle="round"
-                borderColor="inactive"
-                backgroundColor="background"
+                backgroundColor="userMessageBackground"
                 paddingX={1}
               >
                 {HoverCard({ ui, snapshot })}

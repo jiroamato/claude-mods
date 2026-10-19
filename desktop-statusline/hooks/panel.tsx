@@ -1,7 +1,7 @@
 import type { ElementTable } from 'claude-code'
 
 import type { ContextItem, ContextRow, ContextSnapshot, McpServer } from '../types'
-import { formatShare, formatTokens } from './context'
+import { FREE, formatShare, formatTokens } from './context'
 import type { ToolRow } from './tools'
 
 /** The pane the meter opens. */
@@ -19,15 +19,17 @@ const SWATCH_HEIGHT = 0.55
 const SWATCH_GAP = 0.25
 // A plain Button pads its label by the `xs` step, about half a column.
 const LABEL_PAD = 0.5
-const BAR_HEIGHT = 0.4
+// The bar is as tall as a swatch; its see-through border takes a pixel off each
+// edge, which leaves the desktop card's 8px pill.
+const BAR_HEIGHT = SWATCH_HEIGHT
 const BAR_GAP = 0.15
 const BAR_MIN_SEGMENT = 0.4
 const TOKENS_COLUMNS = 7
 const SHARE_COLUMNS = 6
 // The swatch, the gap after it and the label's padding, so what a row lists lines up under its name.
 const DETAIL_INDENT = SWATCH_WIDTH + SWATCH_GAP + LABEL_PAD
-// The bar's track, and the free space it leaves.
-const TRACK = 'promptBorderShimmer'
+// A border no one sees: only a Box with a border has rounded corners.
+const CLEAR = '#00000000'
 // One drawing holds at most 100000 characters of code; a section is cut well short of that.
 const SECTION_TEXT_MAX = 40_000
 
@@ -62,18 +64,18 @@ function Header(props: { ui: Ui; snapshot: ContextSnapshot }) {
   return (
     <Box flexDirection="row" alignItems="center" columnGap={2}>
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text color="text" weight="semibold">
+        <Text color="text" size="heading">
           Context window
         </Text>
       </Box>
-      <Text color="secondaryText" tabular>
+      <Text color="subtle" tabular>
         {headerFigures(props.snapshot)}
       </Text>
     </Box>
   )
 }
 
-/** The window as one bar: each row in it, then the free space as bare track. */
+/** The window as one rounded bar: each row in it, then the free space as bare track. */
 function Bar(props: { ui: Ui; snapshot: ContextSnapshot }) {
   const { Box } = props.ui
   const inWindow = props.snapshot.rows.filter(one => one.kind === 'used' || one.kind === 'buffer')
@@ -83,34 +85,52 @@ function Bar(props: { ui: Ui; snapshot: ContextSnapshot }) {
   const grow = (tokens: number) => (tokens / Math.max(1, props.snapshot.window)) * 1000
 
   return (
+    // The rounded border clips the track inside it to a pill; the track sits
+    // within it so the border stays clear rather than ringing the bar.
     <Box
-      flexDirection="row"
       width="100%"
       height={BAR_HEIGHT}
-      columnGap={BAR_GAP}
-      backgroundColor={TRACK}
+      borderStyle="round"
+      borderColor={CLEAR}
+      padding={0}
       overflow="hidden"
     >
-      {inWindow.map(row => (
-        <Box
-          flexGrow={grow(row.tokens)}
-          flexShrink={0}
-          minWidth={BAR_MIN_SEGMENT}
-          backgroundColor={row.color}
-        />
-      ))}
-      {free > 0 && <Box flexGrow={grow(free)} flexShrink={1} />}
+      <Box
+        flexDirection="row"
+        flexGrow={1}
+        columnGap={BAR_GAP}
+        backgroundColor={FREE}
+        overflow="hidden"
+      >
+        {inWindow.map(row => (
+          <Box
+            flexGrow={grow(row.tokens)}
+            flexShrink={0}
+            minWidth={BAR_MIN_SEGMENT}
+            backgroundColor={row.color}
+          />
+        ))}
+        {free > 0 && <Box flexGrow={grow(free)} flexShrink={1} />}
+      </Box>
     </Box>
   )
 }
 
 /** Right-aligned figures in a column of fixed width, so the rows line up. */
-function Figure(props: { ui: Ui; columns: number; text: string; dim?: boolean }) {
+function Figure(props: {
+  ui: Ui
+  columns: number
+  text: string
+  /** Drawn in the text colour, as /context draws a row's share; else muted, as its tokens. */
+  isStrong?: boolean
+  dim?: boolean
+}) {
   const { Box, Text } = props.ui
+  const color = props.dim ? 'inactive' : props.isStrong ? 'text' : 'subtle'
 
   return (
     <Box width={props.columns} justifyContent="flex-end" flexShrink={0}>
-      <Text color={props.dim ? 'inactive' : 'secondaryText'} tabular>
+      <Text color={color} tabular>
         {props.text}
       </Text>
     </Box>
@@ -153,6 +173,7 @@ function RowLine(props: {
         ui: props.ui,
         columns: SHARE_COLUMNS,
         text: row.kind === 'deferred' ? '–' : formatShare(row.tokens, props.window),
+        isStrong: true,
       })}
     </Box>
   )

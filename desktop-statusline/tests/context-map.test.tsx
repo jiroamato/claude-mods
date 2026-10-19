@@ -265,17 +265,18 @@ test('the snapshot lists the rows as /context does, and what fills each', () => 
   const snapshot = buildSnapshot(breakdown(), MESSAGES, [DEPLOY], SECTIONS)
   expect(snapshot).toMatchObject({ used: 93_600, window: 200_000, percent: 46 })
   // In the window largest first, the four largest in the desktop's chart
-  // colours; then the reserve, the free space and what loads on demand.
+  // colours and the rest in its grey; then the reserve, the free space and
+  // what loads on demand, in fainter steps of that grey.
   expect(snapshot.rows.map(one => [one.name, one.color])).toEqual([
     ['Messages', '#5a88de'],
     ['System tools', '#c36136'],
     ['System prompt', '#539b74'],
     ['Skills', '#ba872e'],
-    ['MCP tools', 'subtle'],
-    ['Memory files', 'subtle'],
-    ['Autocompact buffer', 'promptBorder'],
-    ['Free space', 'promptBorderShimmer'],
-    ['MCP tools (deferred)', 'promptBorder'],
+    ['MCP tools', '#97958d'],
+    ['Memory files', '#97958d'],
+    ['Autocompact buffer', '#97958d91'],
+    ['Free space', '#97958d27'],
+    ['MCP tools (deferred)', '#97958d91'],
   ])
   expect(snapshot.results.map(one => one.name)).toEqual(['Bash: npm test -- --verbose'])
   expect(snapshot.mcpLoaded).toEqual([
