@@ -2,12 +2,27 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export type GitInfo = { branch: string; isDirty: boolean } | null
 
-/** What one tile of the context map stands for. */
-export type BlockKind =
-  'system' | 'tools' | 'mcp' | 'agents' | 'memory' | 'skills' | 'conversation' | 'result'
+/** What a /context row is: in the window, the window left, the compaction reserve, or loaded on demand. */
+export type RowKind = 'used' | 'free' | 'buffer' | 'deferred'
 
-/** One tile of the context map: a category, or one tool result within the messages. */
-export type ContextBlock = { label: string; kind: BlockKind; tokens: number }
+/** One row of the breakdown, as /context lists it. */
+export type ContextRow = {
+  /** The row's label as /context prints it (`System tools`, `Free space`). */
+  name: string
+  tokens: number
+  kind: RowKind
+  /** The swatch's colour: a theme key, or a fixed chart colour for the four largest rows. */
+  color: string
+}
+
+/** One piece of a row, listed when the row is expanded. */
+export type ContextItem = { name: string; tokens: number; detail: string }
+
+/** One section of the system prompt, with its text. */
+export type PromptSection = { id: string; title: string; tokens: number; text: string }
+
+/** An MCP server's tools, in the window or loaded on demand. */
+export type McpServer = { name: string; tokens: number; tools: ContextItem[] }
 
 /** The context window broken down, as the hover card and the pane draw it. */
 export type ContextSnapshot = {
@@ -17,10 +32,22 @@ export type ContextSnapshot = {
   window: number
   /** Used over window, a whole percentage. */
   percent: number
-  /** Every used category, the messages split into their largest tool results. */
-  blocks: ContextBlock[]
+  /** /context's rows: in use largest first, then the reserve, the free space, what loads on demand. */
+  rows: ContextRow[]
+  /** The largest tool results within the messages, largest first. */
+  results: ContextItem[]
   /** Each listed skill with its listing's tokens. */
   skills: { name: string; tokens: number; source: string; description: string }[]
+  /** Each memory file, its folder in `detail`. */
+  memoryFiles: ContextItem[]
+  /** The custom agents the Agent tool describes. */
+  agents: ContextItem[]
+  /** MCP tools in the window, by server. */
+  mcpLoaded: McpServer[]
+  /** MCP tools loaded on demand, by server. */
+  mcpDeferred: McpServer[]
+  /** The system prompt's sections, in the order they are sent. */
+  prompt: PromptSection[]
 }
 
 /** A built-in tool as the engine described it to the model this session. */
@@ -37,6 +64,8 @@ declare module 'claude-code' {
       effort: Effort | null
       /** The context window broken down, refreshed after every turn; null until read. */
       context: ContextSnapshot | null
+      /** Which of the pane's rows and sections are open, by key. */
+      expanded: string[]
       /** The built-in tools of this session, by name, as `tool.describe` saw them. */
       tools: Record<string, SeenTool>
       /** Built-in tools denied by bare name in the user settings, read from the file. */

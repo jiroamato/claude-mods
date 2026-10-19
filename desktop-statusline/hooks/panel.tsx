@@ -1,78 +1,168 @@
 import type { ElementTable } from 'claude-code'
 
-import type { ContextSnapshot } from '../types'
-import { BLOCK_COLOR, formatTokens, treemapSvg } from './treemap'
+import type { ContextItem, ContextRow, ContextSnapshot, McpServer } from '../types'
+import { formatShare, formatTokens } from './context'
 import type { ToolRow } from './tools'
 
 /** The pane the meter opens. */
 export const PANE_ID = 'context-map'
 export const PANE_TITLE = 'Context'
 
-// The desktop draws a hover card as a popover about 360px wide, so the card
-// stacks the map above the list; sizes in CSS pixels.
-const CARD_MAP_WIDTH = 330
-const CARD_MAP_HEIGHT = 150
-const CARD_ITEMS = 6
-const PANE_MAP_HEIGHT = 140
-const SWATCH = 9
+type Ui = ElementTable<'desktop'>
 
-function swatch(color: string): string {
+// Sizes in cells: across in character widths, down in rows. The desktop draws
+// a hover card as a popover at most 360px wide, which holds about 40 columns.
+const CARD_COLUMNS = 40
+const SWATCH_WIDTH = 1.4
+const SWATCH_HEIGHT = 0.55
+const BAR_HEIGHT = 0.4
+const BAR_GAP = 0.15
+const BAR_MIN_SEGMENT = 0.4
+const TOKENS_COLUMNS = 7
+const SHARE_COLUMNS = 6
+// The swatch and the gap after it, so a row's contents line up under its name.
+const DETAIL_INDENT = SWATCH_WIDTH + 1
+// The bar's track, and the free space it leaves.
+const TRACK = 'promptBorder'
+// One drawing holds at most 100000 characters of code; a section is cut well short of that.
+const SECTION_TEXT_MAX = 40_000
+
+const CLOSED = '▸'
+const OPEN = '▾'
+
+/** The pane's rows whose pieces it can list, by /context's label. */
+const SYSTEM_TOOLS = 'System tools'
+const SYSTEM_TOOLS_DEFERRED = 'System tools (deferred)'
+
+function slug(text: string): string {
+  return text
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-|-$/g, '')
+}
+
+function headerFigures(snapshot: ContextSnapshot): string {
+  return `${formatTokens(snapshot.used)} / ${formatTokens(snapshot.window)} (${snapshot.percent}%)`
+}
+
+function Swatch(props: { ui: Ui; color: string }) {
+  const { Box } = props.ui
+
+  return <Box width={SWATCH_WIDTH} height={SWATCH_HEIGHT} backgroundColor={props.color} />
+}
+
+/** `Context window   72.6k / 1M (7%)`. */
+function Header(props: { ui: Ui; snapshot: ContextSnapshot }) {
+  const { Box, Text } = props.ui
+
   return (
-    `<svg xmlns="http://www.w3.org/2000/svg" width="${SWATCH}" height="${SWATCH}" viewBox="0 0 ${SWATCH} ${SWATCH}">` +
-    `<rect width="${SWATCH}" height="${SWATCH}" rx="2" fill="${color}"/></svg>`
+    <Box flexDirection="row" alignItems="center" columnGap={2}>
+      <Box flexGrow={1} flexShrink={1}>
+        <Text color="text" weight="semibold">
+          Context window
+        </Text>
+      </Box>
+      <Text color="secondaryText" tabular>
+        {headerFigures(props.snapshot)}
+      </Text>
+    </Box>
   )
 }
 
-function summaryLine(snapshot: ContextSnapshot): string {
-  return `${formatTokens(snapshot.used)} of ${formatTokens(snapshot.window)} tokens`
-}
-
-/** The card the meter reveals on hover: the map, the largest pieces, how to open the pane. */
-export function HoverCard(props: {
-  ui: ElementTable<'desktop'>
-  snapshot: ContextSnapshot | null
-}) {
-  const { Box, Svg, Text } = props.ui
-  const snapshot = props.snapshot
-  if (!snapshot) {
-    return <Text color="secondaryText">The map appears after Claude's first reply.</Text>
-  }
-  const largest = snapshot.blocks.slice(0, CARD_ITEMS)
+/** The window as one bar: each row in it, then the free space as bare track. */
+function Bar(props: { ui: Ui; snapshot: ContextSnapshot }) {
+  const { Box } = props.ui
+  const inWindow = props.snapshot.rows.filter(one => one.kind === 'used' || one.kind === 'buffer')
+  const free = props.snapshot.rows.find(one => one.kind === 'free')?.tokens ?? 0
+  // Each segment grows by its share of the window, in thousandths: a Box's
+  // flexGrow is capped, where a token count is not.
+  const grow = (tokens: number) => (tokens / Math.max(1, props.snapshot.window)) * 1000
 
   return (
-    <Box flexDirection="column" rowGap={1}>
-      <Box flexDirection="row" columnGap={2}>
-        <Text color="text" bold>
-          Context {snapshot.percent}%
-        </Text>
-        <Text color="secondaryText">{summaryLine(snapshot)}</Text>
-      </Box>
-      <Svg
-        source={treemapSvg(snapshot.blocks, CARD_MAP_WIDTH, CARD_MAP_HEIGHT)}
-        alt="context map"
-        width={CARD_MAP_WIDTH}
-        height={CARD_MAP_HEIGHT}
-        isInteractive
-      />
-      <Box flexDirection="column">
-        {largest.map(block => (
-          <Box key={`item-${block.label}`} flexDirection="row" alignItems="center" columnGap={1}>
-            <Svg
-              source={swatch(BLOCK_COLOR[block.kind])}
-              alt={block.kind}
-              width={SWATCH}
-              height={SWATCH}
-            />
-            <Box flexGrow={1} flexShrink={1}>
-              <Text color="text" wrap="truncate-end">
-                {block.label}
-              </Text>
-            </Box>
-            <Text color="secondaryText">{formatTokens(block.tokens)}</Text>
+    <Box
+      flexDirection="row"
+      width="100%"
+      height={BAR_HEIGHT}
+      columnGap={BAR_GAP}
+      backgroundColor={TRACK}
+      overflow="hidden"
+    >
+      {inWindow.map(row => (
+        <Box
+          flexGrow={grow(row.tokens)}
+          flexShrink={0}
+          minWidth={BAR_MIN_SEGMENT}
+          backgroundColor={row.color}
+        />
+      ))}
+      {free > 0 && <Box flexGrow={grow(free)} flexShrink={1} />}
+    </Box>
+  )
+}
+
+/** Right-aligned figures in a column of fixed width, so the rows line up. */
+function Figure(props: { ui: Ui; columns: number; text: string; dim?: boolean }) {
+  const { Box, Text } = props.ui
+
+  return (
+    <Box width={props.columns} justifyContent="flex-end" flexShrink={0}>
+      <Text color={props.dim ? 'inactive' : 'secondaryText'} tabular>
+        {props.text}
+      </Text>
+    </Box>
+  )
+}
+
+/** One /context row: swatch, label, tokens, share of the window (none for what loads on demand). */
+function RowLine(props: {
+  ui: Ui
+  row: ContextRow
+  window: number
+  /** The label, a Button when the row opens; else the row's name. */
+  label?: JSX.Element
+}) {
+  const { Box, Text } = props.ui
+  const row = props.row
+
+  return (
+    <Box flexDirection="row" alignItems="center" columnGap={1}>
+      {Swatch({ ui: props.ui, color: row.color })}
+      <Box flexGrow={1} flexShrink={1}>
+        {props.label ?? (
+          // A plain Button pads its label by `xs`; so does this, so the names line up.
+          <Box paddingX="xs">
+            <Text color="text" wrap="truncate-end">
+              {row.name}
+            </Text>
           </Box>
-        ))}
+        )}
       </Box>
-      <Text color="inactive">Click the percentage to manage tools and see skills.</Text>
+      {Figure({ ui: props.ui, columns: TOKENS_COLUMNS, text: formatTokens(row.tokens) })}
+      {Figure({
+        ui: props.ui,
+        columns: SHARE_COLUMNS,
+        text: row.kind === 'deferred' ? '–' : formatShare(row.tokens, props.window),
+      })}
+    </Box>
+  )
+}
+
+/** The card the meter reveals on hover: /context's rows, as its card lists them. */
+export function HoverCard(props: { ui: Ui; snapshot: ContextSnapshot | null }) {
+  const { Box, Text } = props.ui
+  const snapshot = props.snapshot
+  if (!snapshot) {
+    return <Text color="secondaryText">The breakdown appears after Claude's first reply.</Text>
+  }
+
+  return (
+    <Box flexDirection="column" rowGap={1} width={CARD_COLUMNS}>
+      {Header({ ui: props.ui, snapshot })}
+      {Bar({ ui: props.ui, snapshot })}
+      <Box flexDirection="column">
+        {snapshot.rows.map(row => RowLine({ ui: props.ui, row, window: snapshot.window }))}
+      </Box>
+      <Text color="inactive">Click the percentage to open each row and remove tools.</Text>
     </Box>
   )
 }
@@ -84,56 +174,82 @@ const STATUS_NOTE: Record<ToolRow['status'], string> = {
   'back-next-session': 'back in a new session',
 }
 
-/** The pane: the map, then every built-in tool with a switch, then the skills. */
-export function ContextPane(props: {
-  ui: ElementTable<'desktop'>
+/** A name with a line under it and its tokens, as the rows' pieces are listed. */
+function ItemLine(props: { ui: Ui; item: ContextItem; note?: string }) {
+  const { Box, Text } = props.ui
+  const item = props.item
+  const detail = props.note ?? item.detail
+
+  return (
+    <Box flexDirection="row" columnGap={1}>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+        <Text color="text" wrap="truncate-end">
+          {item.name}
+        </Text>
+        {detail !== '' && (
+          <Text color="secondaryText" wrap="truncate-end">
+            {detail}
+          </Text>
+        )}
+      </Box>
+      {Figure({ ui: props.ui, columns: TOKENS_COLUMNS, text: `~${formatTokens(item.tokens)}` })}
+      <Box width={SHARE_COLUMNS} flexShrink={0} />
+    </Box>
+  )
+}
+
+/** A Button that opens and closes what is under it: its label, then the chevron. */
+function Toggle(props: {
+  ui: Ui
+  id: string
+  label: string
+  isOpen: boolean
+  isBold?: boolean
+  onPress: () => void
+}) {
+  const { Button, Text } = props.ui
+
+  return (
+    <Button key={props.id} plain onPress={props.onPress}>
+      <Text color="text" weight={props.isBold ? 'semibold' : undefined}>
+        {props.label}
+      </Text>{' '}
+      <Text color="inactive">{props.isOpen ? OPEN : CLOSED}</Text>
+    </Button>
+  )
+}
+
+/** Props the pane is drawn from. */
+export type ContextPaneProps = {
+  ui: Ui
   snapshot: ContextSnapshot | null
   tools: ToolRow[]
-  mapWidth: number
+  /** Keys of the rows and sections that are open. */
+  expanded: readonly string[]
   /** Why the last Remove or Put back failed, if it did. */
   error: string | null
   onToggle: (name: string, isRemoved: boolean) => void
-}) {
-  const { Box, Button, Svg, Text } = props.ui
-  const snapshot = props.snapshot
+  onExpand: (key: string) => void
+}
+
+function ToolLines(props: ContextPaneProps & { rows: ToolRow[]; isExplained: boolean }) {
+  const { Box, Button, Text } = props.ui
 
   return (
-    <Box flexDirection="column" rowGap={1} paddingX={1}>
-      {snapshot ? (
-        <Box flexDirection="column" rowGap={1}>
-          <Box flexDirection="row" columnGap={2}>
-            <Text color="text" bold>
-              {snapshot.percent}% used
-            </Text>
-            <Text color="secondaryText">{summaryLine(snapshot)}</Text>
-          </Box>
-          <Svg
-            source={treemapSvg(snapshot.blocks, props.mapWidth, PANE_MAP_HEIGHT)}
-            alt="context map"
-            isInteractive
-          />
-        </Box>
-      ) : (
-        <Text color="secondaryText">The map appears after Claude's first reply.</Text>
-      )}
-
-      <Box flexDirection="column">
-        <Text color="text" bold>
-          Tools
-        </Text>
+    <Box flexDirection="column" rowGap={1}>
+      {props.isExplained && (
         <Text color="secondaryText">
           Remove takes a tool out of this session's context at once (Claude can no longer call it)
           and adds it to permissions.deny in your user settings, so new sessions in every project
           start without it. Put back undoes both.
         </Text>
-        {props.error && <Text color="error">{props.error}</Text>}
-      </Box>
-      {props.tools.map(tool => {
+      )}
+      {props.rows.map(tool => {
         const isRemoved = tool.status === 'removed'
         const note = STATUS_NOTE[tool.status]
 
         return (
-          <Box key={`tool-${tool.name}`} flexDirection="row" alignItems="center" columnGap={2}>
+          <Box key={`tool-${tool.name}`} flexDirection="row" alignItems="center" columnGap={1}>
             <Box flexDirection="column" flexGrow={1} flexShrink={1}>
               <Box flexDirection="row" columnGap={1}>
                 <Text color={isRemoved ? 'inactive' : 'text'} bold strikethrough={isRemoved}>
@@ -143,9 +259,12 @@ export function ContextPane(props: {
               </Box>
               <Text color="secondaryText">{tool.summary}</Text>
             </Box>
-            <Text color={isRemoved ? 'inactive' : 'text'}>
-              {tool.status === 'deferred' ? '0' : `~${formatTokens(tool.tokens)}`}
-            </Text>
+            {Figure({
+              ui: props.ui,
+              columns: TOKENS_COLUMNS,
+              text: tool.status === 'deferred' ? '0' : `~${formatTokens(tool.tokens)}`,
+              dim: isRemoved,
+            })}
             <Button
               key={`toggle-${tool.name}`}
               label={isRemoved ? 'Put back' : 'Remove'}
@@ -155,31 +274,247 @@ export function ContextPane(props: {
           </Box>
         )
       })}
+    </Box>
+  )
+}
 
-      <Box flexDirection="column">
-        <Text color="text" bold>
-          Skills
-        </Text>
-        <Text color="secondaryText">
-          Each skill's listing as the model sees it. Removing skills is not supported yet.
-        </Text>
-      </Box>
-      {snapshot && snapshot.skills.length === 0 && (
-        <Text color="secondaryText">No skills listed.</Text>
-      )}
-      {snapshot?.skills.map(skill => (
-        <Box key={`skill-${skill.name}`} flexDirection="column">
-          <Box flexDirection="row" columnGap={1}>
-            <Box flexGrow={1} flexShrink={1}>
-              <Text color="text" bold>
-                {skill.name}
-              </Text>
+function ServerLines(props: ContextPaneProps & { servers: McpServer[]; group: string }) {
+  const { Box, Text } = props.ui
+
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      {props.servers.map(server => {
+        const id = `mcp-${props.group}-${slug(server.name)}`
+        const isOpen = props.expanded.includes(id)
+        const count = `${server.tools.length} ${server.tools.length === 1 ? 'tool' : 'tools'}`
+
+        return (
+          <Box key={id} flexDirection="column">
+            <Box flexDirection="row" alignItems="center" columnGap={1}>
+              <Box flexDirection="row" flexGrow={1} flexShrink={1} columnGap={1}>
+                {Toggle({
+                  ui: props.ui,
+                  id: `open-${id}`,
+                  label: server.name,
+                  isOpen,
+                  onPress: () => props.onExpand(id),
+                })}
+                <Text color="inactive">{count}</Text>
+              </Box>
+              {Figure({
+                ui: props.ui,
+                columns: TOKENS_COLUMNS,
+                text: `~${formatTokens(server.tokens)}`,
+              })}
+              <Box width={SHARE_COLUMNS} flexShrink={0} />
             </Box>
-            <Text color="text">~{formatTokens(skill.tokens)}</Text>
+            {isOpen && (
+              <Box flexDirection="column" paddingLeft={2}>
+                {server.tools.map(tool => ItemLine({ ui: props.ui, item: tool }))}
+              </Box>
+            )}
           </Box>
-          <Text color="secondaryText">{skill.description || `From ${skill.source}.`}</Text>
+        )
+      })}
+    </Box>
+  )
+}
+
+function PromptLines(props: ContextPaneProps & { snapshot: ContextSnapshot }) {
+  const { Box, Code, Text } = props.ui
+
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      <Text color="secondaryText">
+        The system prompt as this session composes it, section by section. Sizes are estimated from
+        each section's text.
+      </Text>
+      {props.snapshot.prompt.map(section => {
+        const id = `prompt-${slug(section.id)}`
+        const isOpen = props.expanded.includes(id)
+        const text =
+          section.text.length > SECTION_TEXT_MAX
+            ? `${section.text.slice(0, SECTION_TEXT_MAX)}\n\n[${section.text.length - SECTION_TEXT_MAX} more characters]`
+            : section.text
+
+        return (
+          <Box key={id} flexDirection="column" rowGap={1}>
+            <Box flexDirection="row" alignItems="center" columnGap={1}>
+              <Box flexDirection="row" flexGrow={1} flexShrink={1} columnGap={1}>
+                {Toggle({
+                  ui: props.ui,
+                  id: `open-${id}`,
+                  label: section.title,
+                  isOpen,
+                  onPress: () => props.onExpand(id),
+                })}
+                <Text color="inactive" wrap="truncate-end">
+                  {section.id}
+                </Text>
+              </Box>
+              {Figure({
+                ui: props.ui,
+                columns: TOKENS_COLUMNS,
+                text: `~${formatTokens(section.tokens)}`,
+              })}
+              <Box width={SHARE_COLUMNS} flexShrink={0} />
+            </Box>
+            {isOpen && <Code source={text} wrap="wrap" />}
+          </Box>
+        )
+      })}
+    </Box>
+  )
+}
+
+function SkillLines(props: ContextPaneProps & { snapshot: ContextSnapshot }) {
+  const { Box, Text } = props.ui
+  const skills = props.snapshot.skills
+
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      <Text color="secondaryText">
+        Each skill's listing as the model sees it. Removing skills is not supported yet.
+      </Text>
+      {skills.map(skill => (
+        <Box key={`skill-${skill.name}`} flexDirection="column">
+          {ItemLine({
+            ui: props.ui,
+            item: { name: skill.name, tokens: skill.tokens, detail: '' },
+            note: skill.description || `From ${skill.source}.`,
+          })}
         </Box>
       ))}
+    </Box>
+  )
+}
+
+function ItemLines(props: { ui: Ui; items: ContextItem[]; intro?: string }) {
+  const { Box, Text } = props.ui
+
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      {props.intro && <Text color="secondaryText">{props.intro}</Text>}
+      {props.items.map(item => ItemLine({ ui: props.ui, item }))}
+    </Box>
+  )
+}
+
+/** What a row lists when opened, or null for a row with nothing to list. */
+function rowDetail(props: ContextPaneProps, row: ContextRow): JSX.Element | null {
+  const { Box, Text } = props.ui
+  const snapshot = props.snapshot
+  const hasDeferredRow = snapshot?.rows.some(one => one.name === SYSTEM_TOOLS_DEFERRED) ?? false
+  switch (row.name) {
+    case SYSTEM_TOOLS: {
+      // Tools removed or put back sit here, with their switch, whatever the engine now counts them as.
+      const rows = props.tools.filter(one => one.status !== 'deferred' || !hasDeferredRow)
+
+      return ToolLines({ ...props, rows, isExplained: true })
+    }
+    case SYSTEM_TOOLS_DEFERRED: {
+      const rows = props.tools.filter(one => one.status === 'deferred')
+      if (rows.length === 0) return null
+
+      return (
+        <Box flexDirection="column" rowGap={1}>
+          <Text color="secondaryText">
+            Loaded only when Claude searches for them, so their schemas stay out of the window until
+            then.
+          </Text>
+          {ToolLines({ ...props, rows, isExplained: false })}
+        </Box>
+      )
+    }
+    case 'MCP tools':
+      return snapshot && snapshot.mcpLoaded.length > 0
+        ? ServerLines({ ...props, servers: snapshot.mcpLoaded, group: 'loaded' })
+        : null
+    case 'MCP tools (deferred)':
+      return snapshot && snapshot.mcpDeferred.length > 0
+        ? ServerLines({ ...props, servers: snapshot.mcpDeferred, group: 'deferred' })
+        : null
+    case 'System prompt':
+      return snapshot && snapshot.prompt.length > 0 ? PromptLines({ ...props, snapshot }) : null
+    case 'Skills':
+      return snapshot && snapshot.skills.length > 0 ? SkillLines({ ...props, snapshot }) : null
+    case 'Memory files':
+      return snapshot && snapshot.memoryFiles.length > 0
+        ? ItemLines({ ui: props.ui, items: snapshot.memoryFiles })
+        : null
+    case 'Custom agents':
+      return snapshot && snapshot.agents.length > 0
+        ? ItemLines({ ui: props.ui, items: snapshot.agents })
+        : null
+    case 'Messages':
+      return snapshot && snapshot.results.length > 0
+        ? ItemLines({
+            ui: props.ui,
+            items: snapshot.results,
+            intro: 'The largest tool results in the conversation, sized from their text.',
+          })
+        : null
+    default:
+      return null
+  }
+}
+
+/** The pane: /context's rows, each opening onto what fills it; tools can be removed there. */
+export function ContextPane(props: ContextPaneProps) {
+  const { Box, Text } = props.ui
+  const snapshot = props.snapshot
+  // Before the first reading, the tools are still listed so they can be removed.
+  const rows: ContextRow[] = snapshot?.rows ?? [
+    { name: SYSTEM_TOOLS, tokens: 0, kind: 'used', color: 'inactive' },
+  ]
+
+  return (
+    <Box flexDirection="column" rowGap={1} paddingX={1}>
+      {snapshot ? (
+        <Box flexDirection="column" rowGap={1}>
+          {Header({ ui: props.ui, snapshot })}
+          {Bar({ ui: props.ui, snapshot })}
+        </Box>
+      ) : (
+        <Text color="secondaryText">The breakdown appears after Claude's first reply.</Text>
+      )}
+      {props.error && <Text color="error">{props.error}</Text>}
+      <Box flexDirection="column">
+        {rows.map(row => {
+          const id = `row-${slug(row.name)}`
+          const detail = rowDetail(props, row)
+          const isOpen = detail !== null && props.expanded.includes(id)
+          const label =
+            detail === null
+              ? undefined
+              : Toggle({
+                  ui: props.ui,
+                  id: `open-${id}`,
+                  label: row.name,
+                  isOpen,
+                  onPress: () => props.onExpand(id),
+                })
+          const line = snapshot ? (
+            RowLine({ ui: props.ui, row, window: snapshot.window, label })
+          ) : (
+            <Box flexDirection="row" alignItems="center" columnGap={1}>
+              {Swatch({ ui: props.ui, color: row.color })}
+              {label}
+            </Box>
+          )
+
+          return (
+            <Box key={id} flexDirection="column">
+              {line}
+              {isOpen && (
+                <Box flexDirection="column" paddingLeft={DETAIL_INDENT} paddingY={1}>
+                  {detail}
+                </Box>
+              )}
+            </Box>
+          )
+        })}
+      </Box>
     </Box>
   )
 }

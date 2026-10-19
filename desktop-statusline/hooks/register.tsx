@@ -1,5 +1,5 @@
 import { atom, read, update } from 'claude-code'
-import type { EngineInterface, Register } from 'claude-code'
+import type { EngineInterface, PromptComposeSection, Register } from 'claude-code'
 
 import type { Effort, GitInfo } from '../types'
 import { buildSnapshot } from './context'
@@ -19,14 +19,16 @@ import {
 //
 //   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33% │ $1.23 │ 12m 4s
 //
-// Hovering the meter reveals a map of what fills the context window. The
-// percentage opens the Context pane, which lists the built-in tools, each of
-// which can be removed from the window and put back, and the skills.
+// Hovering the meter reveals what fills the context window, row by row as
+// /context lists it. The percentage opens the Context pane: the same rows,
+// each opening onto what fills it (the system prompt's sections, the skills,
+// the tools), where a built-in tool can be removed from the window and put back.
 
 const tick = atom({ plugin: 'desktop-statusline', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
 const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, null)
 const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, null)
+const expanded = atom({ plugin: 'desktop-statusline', key: 'expanded' } as const, [])
 const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
@@ -74,8 +76,6 @@ const GIT_REFRESH_EVERY_TICKS = 15
 // reading sits at the slot's left, so its gap from the hairline matches the
 // other figures' and the spare width falls against the band's edge.
 const ELAPSED_COLUMNS = 7
-// The pane's map, in CSS pixels: the docked pane's default width less its padding.
-const PANE_MAP_WIDTH = 410
 // How long the pane takes to redraw after a change, before scrolling it.
 const PANE_SETTLE_MS = 300
 
@@ -240,6 +240,15 @@ function refreshRemoved($: EngineInterface): Promise<void> {
   })
 }
 
+/** The system prompt's sections as the session composes them; none when it cannot be read. */
+async function composedPrompt($: EngineInterface): Promise<readonly PromptComposeSection[]> {
+  try {
+    return (await $.prompt.compose()).sections
+  } catch {
+    return []
+  }
+}
+
 /**
  * Reads the context window broken down, for the hover card and the pane,
  * counted with the token-count API as /context counts it so the two agree.
@@ -249,8 +258,12 @@ async function refreshContext($: EngineInterface): Promise<void> {
     const usage = await $.session.usage({ breakdown: 'full' })
     const breakdown = usage.context.breakdown
     if (!breakdown) return
-    const [messages, commands] = await Promise.all([$.session.messages(), $.command.list()])
-    const snapshot = buildSnapshot(breakdown, messages, commands)
+    const [messages, commands, sections] = await Promise.all([
+      $.session.messages(),
+      $.command.list(),
+      composedPrompt($),
+    ])
+    const snapshot = buildSnapshot(breakdown, messages, commands, sections)
     await update($, context, () => snapshot)
   } catch {
     // The session could not be read just now; the next turn tries again.
@@ -299,6 +312,19 @@ async function setRemoved($: EngineInterface, name: string, shouldRemove: boolea
     )
   }
   await refreshContext($)
+}
+
+/**
+ * Opens or closes one of the pane's rows or sections. A section of the system
+ * prompt opens alone, so the pane never draws more than one at a time.
+ */
+async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
+  await update($, expanded, keys => {
+    if (keys.includes(key)) return keys.filter(one => one !== key)
+    const kept = key.startsWith('prompt-') ? keys.filter(one => !one.startsWith('prompt-')) : keys
+
+    return [...kept, key]
+  })
 }
 
 /**
@@ -435,11 +461,12 @@ export const register: Register = on => {
     if (e.surface !== 'desktop') {
       const { Text } = $.ui.resolve(e)
 
-      return <Text>The context map draws in the desktop app.</Text>
+      return <Text>The context breakdown draws in the desktop app.</Text>
     }
     const ui = $.ui.resolve(e)
-    const [snapshot, seen, names, back, error] = await Promise.all([
+    const [snapshot, open, seen, names, back, error] = await Promise.all([
       read($, context),
+      read($, expanded),
       read($, tools),
       read($, removed),
       read($, putBack),
@@ -450,12 +477,13 @@ export const register: Register = on => {
       ui,
       snapshot,
       tools: toolRows(seen, knownTools, names, back),
-      mapWidth: PANE_MAP_WIDTH,
+      expanded: open,
       error,
       onToggle: (name, shouldRemove) =>
         void setRemoved($, name, shouldRemove).catch(error =>
           update($, toolError, () => String(error)),
         ),
+      onExpand: key => void toggleExpanded($, key),
     })
   })
 
@@ -512,7 +540,7 @@ export const register: Register = on => {
 
         {/* Live figures: context, cost, elapsed, a hairline between each. */}
         <Box flexDirection="row" alignItems="center" columnGap={2}>
-          {/* Hovering the meter reveals the context map; the percentage opens the pane. */}
+          {/* Hovering the meter reveals the breakdown; the percentage opens the pane. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
             <Box key={`context-meter-${meterDrawing}`} flexDirection="row" alignItems="center">
               <Box
