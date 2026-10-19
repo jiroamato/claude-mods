@@ -23,12 +23,13 @@ const RESULTS_SHOWN = 8
 const RESULT_MIN_TOKENS = 500
 const SKILL_LINE_MAX = 110
 
-// The desktop's own /context card colours its four largest rows from a fixed
-// chart palette and the rest in its warm grey (gray-350): solid for the rest of
-// what is in the window, then fainter for the reserve and what loads on demand,
-// and faintest for the free space. On the card's dark surface the faint ones
-// land on its #5f5e5a and #292827; being see-through, they lighten on a light one.
-const CHART = ['#5a88de', '#c36136', '#539b74', '#ba872e'] as const
+// The desktop's own /context card colours its four largest rows from its
+// palette (blue-400, orange-400, aqua-400, yellow-350) and the rest in its warm
+// grey (gray-350): solid for the rest of what is in the window, then fainter for
+// the reserve and what loads on demand, and faintest for the free space. On the
+// card's dark surface the faint ones land on its #5f5e5a and #292827; being
+// see-through, they lighten on a light one.
+const CHART = ['#3987e5', '#d95926', '#199e70', '#c98500'] as const
 const OTHER_USED = '#97958d'
 const RESERVED = '#97958d91'
 export const FREE = '#97958d27'

@@ -517,9 +517,11 @@ export const register: Register = on => {
     )
 
     return (
-      <Box flexDirection="row" flexWrap="wrap" alignItems="center" paddingX={1} columnGap={3}>
-        {/* Identity: what is answering, how hard, and where, a hairline between each. */}
-        <Box flexDirection="row" alignItems="center" columnGap={2}>
+      <Box flexDirection="row" alignItems="center" paddingX={1} columnGap={3}>
+        {/* Identity: what is answering, how hard, and where, a hairline between each.
+            It gives way first: a long branch name is cut short rather than pushing
+            the figures onto a second line. */}
+        <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={1} minWidth={0}>
           <Text color="claude" bold>
             {prettyModel(model)}
           </Text>
@@ -527,10 +529,14 @@ export const register: Register = on => {
           {level !== null && <Text color={EFFORT_COLOR[level]}>{EFFORT_LABEL[level]}</Text>}
           {hasPlace && divider()}
           {hasPlace && (
-            <Box flexDirection="row" alignItems="center" columnGap={1}>
+            <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
               {folder !== '' && <Text color="text">{folder}</Text>}
               {folder !== '' && repo !== null && <Text color="inactive">|</Text>}
-              {repo !== null && <Text color="secondaryText">{repo.branch}</Text>}
+              {repo !== null && (
+                <Text color="secondaryText" wrap="truncate-end">
+                  {repo.branch}
+                </Text>
+              )}
               {repo?.isDirty && <Text color="warning">•</Text>}
             </Box>
           )}
@@ -539,7 +545,7 @@ export const register: Register = on => {
         <Box flexGrow={1} />
 
         {/* Live figures: context, cost, elapsed, a hairline between each. */}
-        <Box flexDirection="row" alignItems="center" columnGap={2}>
+        <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={0}>
           {/* Hovering the meter reveals the breakdown; the percentage opens the pane. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
             <Box key={`context-meter-${meterDrawing}`} flexDirection="row" alignItems="center">

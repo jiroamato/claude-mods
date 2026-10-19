@@ -102,6 +102,40 @@ test('draws a hairline between the model, the effort and the folder', async ($, 
   await ui.unmount()
 })
 
+test('cuts a long branch name short rather than wrapping the band', async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  on('session.model', async () => ({ value: 'Opus 5.5' }))
+  on('session.cwd', async () => ({ value: '/home/me/claude-mods' }))
+  on('session.usage', async () => ({
+    value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] },
+  }))
+  const branch = 'feat/desktop-statusline-context-breakdown-and-a-good-deal-more'
+  on('process.run', async (_$, e) => ({
+    value: {
+      exitCode: 0,
+      stdout: e.argv.includes('rev-parse') ? `${branch}\n` : ' M README.md\n',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: '/home/me/claude-mods', surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+  expect((await ui.find({ type: 'Text', text: branch }))?.props).toMatchObject({
+    wrap: 'truncate-end',
+  })
+  expect(await ui.find({ type: 'Text', text: '•' })).toBeDefined()
+  // The band is one row: nothing in it wraps the figures onto a second line.
+  for (const box of await ui.findAll({ type: 'Box' })) {
+    expect(box.props.flexWrap).toBeUndefined()
+  }
+
+  await ui.unmount()
+})
+
 test('shows a placeholder bar and no cost before the first response', async ($, on) => {
   mock.clock(on, { now: 5_000 })
   on('session.model', async () => ({ value: 'Opus 5.5' }))

@@ -13,16 +13,17 @@ type Ui = ElementTable<'desktop'>
 // Sizes in cells: across in character widths, down in rows. The desktop draws
 // a hover card as a popover at most 360px wide, which holds about 40 columns.
 const CARD_COLUMNS = 40
-const SWATCH_WIDTH = 1.4
-const SWATCH_HEIGHT = 0.55
+// A 10px square, as the desktop's own /context card draws its swatches.
+const SWATCH_WIDTH = 1.24
+const SWATCH_HEIGHT = 0.52
 // The swatch sits this close to its name, as on the desktop's own /context card.
 const SWATCH_GAP = 0.25
 // A plain Button pads its label by the `xs` step, about half a column.
 const LABEL_PAD = 0.5
-// The bar is as tall as a swatch; its see-through border takes a pixel off each
-// edge, which leaves the desktop card's 8px pill.
-const BAR_HEIGHT = SWATCH_HEIGHT
-const BAR_GAP = 0.15
+// The bar's see-through border takes a pixel off each edge, which leaves the
+// desktop card's 8px pill; its segments stand a pixel apart.
+const BAR_HEIGHT = 0.48
+const BAR_GAP = 0.1
 const BAR_MIN_SEGMENT = 0.4
 const TOKENS_COLUMNS = 7
 const SHARE_COLUMNS = 6
@@ -75,10 +76,20 @@ function Header(props: { ui: Ui; snapshot: ContextSnapshot }) {
   )
 }
 
-/** The window as one rounded bar: each row in it, then the free space as bare track. */
+/**
+ * The window as one rounded bar: each row in it, then the free space as bare
+ * track. Neighbouring rows of one colour draw as one segment, as on the
+ * desktop's card, so its greys read as one run rather than a row of slivers.
+ */
 function Bar(props: { ui: Ui; snapshot: ContextSnapshot }) {
   const { Box } = props.ui
-  const inWindow = props.snapshot.rows.filter(one => one.kind === 'used' || one.kind === 'buffer')
+  const inWindow: { color: string; tokens: number }[] = []
+  for (const row of props.snapshot.rows) {
+    if (row.kind !== 'used' && row.kind !== 'buffer') continue
+    const last = inWindow.at(-1)
+    if (last?.color === row.color) last.tokens += row.tokens
+    else inWindow.push({ color: row.color, tokens: row.tokens })
+  }
   const free = props.snapshot.rows.find(one => one.kind === 'free')?.tokens ?? 0
   // Each segment grows by its share of the window, in thousandths: a Box's
   // flexGrow is capped, where a token count is not.

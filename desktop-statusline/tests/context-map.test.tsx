@@ -268,10 +268,10 @@ test('the snapshot lists the rows as /context does, and what fills each', () => 
   // colours and the rest in its grey; then the reserve, the free space and
   // what loads on demand, in fainter steps of that grey.
   expect(snapshot.rows.map(one => [one.name, one.color])).toEqual([
-    ['Messages', '#5a88de'],
-    ['System tools', '#c36136'],
-    ['System prompt', '#539b74'],
-    ['Skills', '#ba872e'],
+    ['Messages', '#3987e5'],
+    ['System tools', '#d95926'],
+    ['System prompt', '#199e70'],
+    ['Skills', '#c98500'],
     ['MCP tools', '#97958d'],
     ['Memory files', '#97958d'],
     ['Autocompact buffer', '#97958d91'],
