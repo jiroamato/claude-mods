@@ -254,3 +254,13 @@ export function buildSnapshot(
     prompt: promptSections(sections),
   }
 }
+
+/**
+ * The breakdown kept in the state, or null while none stands in this version's
+ * shape: a reload keeps what an earlier version of the plugin wrote.
+ */
+export function currentSnapshot(value: unknown): ContextSnapshot | null {
+  const rows = (value as { rows?: unknown } | null)?.rows
+
+  return Array.isArray(rows) ? (value as ContextSnapshot) : null
+}

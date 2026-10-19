@@ -3,6 +3,7 @@ import type { On, PromptComposeSection, SessionContextBreakdown, SessionMessage 
 
 import {
   buildSnapshot,
+  currentSnapshot,
   describeCall,
   formatShare,
   formatTokens,
@@ -614,4 +615,12 @@ test('the card says when there is no breakdown yet', async ($, on) => {
   ).toBeDefined()
 
   await band.unmount()
+})
+
+test('a breakdown an earlier version kept in the state is read as none', () => {
+  // What the treemap version wrote, still in the state after a reload.
+  expect(currentSnapshot({ used: 1, window: 2, percent: 50, blocks: [], skills: [] })).toBeNull()
+  expect(currentSnapshot(null)).toBeNull()
+  const snapshot = buildSnapshot(breakdown(), MESSAGES, [DEPLOY], SECTIONS)
+  expect(currentSnapshot(snapshot)).toBe(snapshot)
 })

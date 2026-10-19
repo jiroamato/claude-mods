@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptComposeSection, Register } from 'claude-code'
 
 import type { Effort, GitInfo } from '../types'
-import { buildSnapshot } from './context'
+import { buildSnapshot, currentSnapshot } from './context'
 import { ContextPane, HoverCard, PANE_ID, PANE_TITLE } from './panel'
 import {
   deniedTools,
@@ -465,7 +465,7 @@ export const register: Register = on => {
     }
     const ui = $.ui.resolve(e)
     const [snapshot, open, seen, names, back, error] = await Promise.all([
-      read($, context),
+      read($, context).then(currentSnapshot),
       read($, expanded),
       read($, tools),
       read($, removed),
@@ -503,7 +503,7 @@ export const register: Register = on => {
       read($, git),
       read($, effort),
       $.clock.now(),
-      read($, context),
+      read($, context).then(currentSnapshot),
     ])
 
     const folder = basename(cwd)
