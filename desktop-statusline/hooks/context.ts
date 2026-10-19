@@ -139,6 +139,23 @@ export function contextRows(breakdown: SessionContextBreakdown): ContextRow[] {
 }
 
 /**
+ * What the window holds as a bar draws it, left to right: each row in it,
+ * neighbouring rows of one colour as one segment, as the desktop's card draws
+ * its greys. The free space is the track left over.
+ */
+export function barSegments(rows: readonly ContextRow[]): { color: string; tokens: number }[] {
+  const segments: { color: string; tokens: number }[] = []
+  for (const row of rows) {
+    if (row.kind !== 'used' && row.kind !== 'buffer') continue
+    const last = segments.at(-1)
+    if (last?.color === row.color) last.tokens += row.tokens
+    else segments.push({ color: row.color, tokens: row.tokens })
+  }
+
+  return segments
+}
+
+/**
  * The largest tool results in the transcript. Sizes are estimated from their
  * text and scaled so the whole transcript adds up to the Messages row.
  */

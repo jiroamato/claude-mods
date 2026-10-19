@@ -1,7 +1,7 @@
 import type { ElementTable } from 'claude-code'
 
 import type { ContextItem, ContextRow, ContextSnapshot, McpServer } from '../types'
-import { FREE, formatShare, formatTokens } from './context'
+import { FREE, barSegments, formatShare, formatTokens } from './context'
 import type { ToolRow } from './tools'
 
 /** The pane the meter opens. */
@@ -20,11 +20,11 @@ const SWATCH_HEIGHT = 0.54
 const SWATCH_GAP = 0.25
 // A plain Button pads its label by the `xs` step, about half a column.
 const LABEL_PAD = 0.5
-// The bar's see-through border takes a pixel off each edge, which leaves the
-// desktop card's 8px pill; its segments stand a pixel apart.
-const BAR_HEIGHT = 0.5
-const BAR_GAP = 0.1
-const BAR_MIN_SEGMENT = 0.4
+// The desktop Context card's bar: 4px tall, its pills a pixel apart, the
+// smallest about 2px wide.
+const BAR_HEIGHT = 0.215
+const BAR_GAP = 0.08
+const BAR_MIN_SEGMENT = 0.25
 const TOKENS_COLUMNS = 7
 const SHARE_COLUMNS = 6
 // The swatch, the gap after it and the label's padding, so what a row lists lines up under its name.
@@ -83,52 +83,34 @@ function Header(props: { ui: Ui; snapshot: ContextSnapshot }) {
 }
 
 /**
- * The window as one rounded bar: each row in it, then the free space as bare
- * track. Neighbouring rows of one colour draw as one segment, as on the
- * desktop's card, so its greys read as one run rather than a row of slivers.
+ * The window as one bar, drawn as the desktop's own Context card draws it: a
+ * rounded pill per segment, a hair from the next, then the free space as a
+ * pill of bare track. Nothing in it is positioned: the desktop draws a
+ * positioned Box on a layer of its own, which shifts its colours.
  */
 function Bar(props: { ui: Ui; snapshot: ContextSnapshot }) {
   const { Box } = props.ui
-  const inWindow: { color: string; tokens: number }[] = []
-  for (const row of props.snapshot.rows) {
-    if (row.kind !== 'used' && row.kind !== 'buffer') continue
-    const last = inWindow.at(-1)
-    if (last?.color === row.color) last.tokens += row.tokens
-    else inWindow.push({ color: row.color, tokens: row.tokens })
-  }
+  const inWindow = barSegments(props.snapshot.rows)
   const free = props.snapshot.rows.find(one => one.kind === 'free')?.tokens ?? 0
   // Each segment grows by its share of the window, in thousandths: a Box's
   // flexGrow is capped, where a token count is not.
   const grow = (tokens: number) => (tokens / Math.max(1, props.snapshot.window)) * 1000
+  // Only a Box with a border has rounded corners; a clear one lets the colour
+  // fill the whole Box, so each pill keeps the bar's full height.
+  const pill = { borderStyle: 'round', borderColor: CLEAR, padding: 0 } as const
 
   return (
-    // The rounded border clips the track inside it to a pill; the track sits
-    // within it so the border stays clear rather than ringing the bar.
-    <Box
-      width="100%"
-      height={BAR_HEIGHT}
-      borderStyle="round"
-      borderColor={CLEAR}
-      padding={0}
-      overflow="hidden"
-    >
-      <Box
-        flexDirection="row"
-        flexGrow={1}
-        columnGap={BAR_GAP}
-        backgroundColor={FREE}
-        overflow="hidden"
-      >
-        {inWindow.map(row => (
-          <Box
-            flexGrow={grow(row.tokens)}
-            flexShrink={0}
-            minWidth={BAR_MIN_SEGMENT}
-            backgroundColor={row.color}
-          />
-        ))}
-        {free > 0 && <Box flexGrow={grow(free)} flexShrink={1} />}
-      </Box>
+    <Box flexDirection="row" width="100%" height={BAR_HEIGHT} columnGap={BAR_GAP}>
+      {inWindow.map(row => (
+        <Box
+          flexGrow={grow(row.tokens)}
+          flexShrink={0}
+          minWidth={BAR_MIN_SEGMENT}
+          {...pill}
+          backgroundColor={row.color}
+        />
+      ))}
+      {free > 0 && <Box flexGrow={grow(free)} flexShrink={1} {...pill} backgroundColor={FREE} />}
     </Box>
   )
 }
