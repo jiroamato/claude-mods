@@ -1,20 +1,12 @@
 import type {
   CommandInfo,
-  ContextMcpTool,
   PromptComposeSection,
   SessionContextBreakdown,
   SessionMessage,
   ToolUseSummary,
 } from 'claude-code'
 
-import type {
-  ContextItem,
-  ContextRow,
-  ContextSnapshot,
-  McpServer,
-  PromptSection,
-  RowKind,
-} from '../types'
+import type { ContextItem, ContextRow, ContextSnapshot, PromptSection, RowKind } from '../types'
 import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
 /** How many tool results the Messages row lists. */
@@ -44,16 +36,6 @@ const SKILL_SOURCE: Record<string, string> = {
   'built-in': 'Claude Code',
   mcp: 'an MCP server',
   syncedSkills: 'claude.ai',
-}
-
-// Where a custom agent is defined, in words.
-const AGENT_SOURCE: Record<string, string> = {
-  userSettings: 'your settings',
-  projectSettings: 'this project',
-  policySettings: 'your organization',
-  localSettings: 'this project (local)',
-  plugin: 'a plugin',
-  'built-in': 'Claude Code',
 }
 
 // The engine's section ids, in words, for the ones that open with no heading.
@@ -91,12 +73,6 @@ function basename(path: string): string {
   const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
 
   return index === -1 ? path : path.slice(index + 1)
-}
-
-function dirname(path: string): string {
-  const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-
-  return index === -1 ? '' : path.slice(0, index)
 }
 
 /** `Bash: npm test`, `Read: register.tsx`: what a tool call was, in a few words. */
@@ -183,25 +159,6 @@ export function largestResults(
     .slice(0, RESULTS_SHOWN)
 }
 
-/** The MCP tools grouped by server, largest server first. */
-export function mcpServers(tools: readonly ContextMcpTool[]): McpServer[] {
-  const servers = new Map<string, McpServer>()
-  for (const tool of tools) {
-    const server = servers.get(tool.serverName) ?? { name: tool.serverName, tokens: 0, tools: [] }
-    const prefix = `mcp__${tool.serverName}__`
-    server.tokens += tool.tokens
-    server.tools.push({
-      name: tool.name.startsWith(prefix) ? tool.name.slice(prefix.length) : tool.name,
-      tokens: tool.tokens,
-      detail: '',
-    })
-    servers.set(tool.serverName, server)
-  }
-  for (const server of servers.values()) server.tools.sort((a, b) => b.tokens - a.tokens)
-
-  return [...servers.values()].sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name))
-}
-
 /** A section's title: its own heading, else its id in words. */
 export function sectionTitle(section: Pick<PromptComposeSection, 'id' | 'text'>): string {
   const heading = /^\s*#{1,3}\s+(.+)$/m.exec(section.text.trimStart().split('\n')[0] ?? '')?.[1]
@@ -255,22 +212,6 @@ export function buildSnapshot(
     rows,
     results: largestResults(messages, messageTokens),
     skills,
-    memoryFiles: breakdown.memoryFiles
-      .map(one => ({
-        name: basename(one.path),
-        tokens: one.tokens,
-        detail: `${one.type} · ${dirname(one.path)}`,
-      }))
-      .sort((a, b) => b.tokens - a.tokens),
-    agents: breakdown.agents
-      .map(one => ({
-        name: one.agentType,
-        tokens: one.tokens,
-        detail: `From ${AGENT_SOURCE[one.source] ?? one.source}.`,
-      }))
-      .sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name)),
-    mcpLoaded: mcpServers(breakdown.mcpTools.filter(one => one.isLoaded)),
-    mcpDeferred: mcpServers(breakdown.mcpTools.filter(one => !one.isLoaded)),
     prompt: promptSections(sections),
   }
 }

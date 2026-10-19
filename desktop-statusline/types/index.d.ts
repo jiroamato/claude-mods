@@ -21,10 +21,10 @@ export type ContextItem = { name: string; tokens: number; detail: string }
 /** One section of the system prompt, with its text. */
 export type PromptSection = { id: string; title: string; tokens: number; text: string }
 
-/** An MCP server's tools, in the window or loaded on demand. */
-export type McpServer = { name: string; tokens: number; tools: ContextItem[] }
+/** The pane's tabs: what the desktop's own Context card cannot show. */
+export type PaneTab = 'tools' | 'prompt' | 'skills' | 'results'
 
-/** The context window broken down, as the hover card and the pane draw it. */
+/** The context window broken down, as the pane draws it. */
 export type ContextSnapshot = {
   /** Tokens in use, as /context counts them. */
   used: number
@@ -38,14 +38,6 @@ export type ContextSnapshot = {
   results: ContextItem[]
   /** Each listed skill with its listing's tokens. */
   skills: { name: string; tokens: number; source: string; description: string }[]
-  /** Each memory file, its folder in `detail`. */
-  memoryFiles: ContextItem[]
-  /** The custom agents the Agent tool describes. */
-  agents: ContextItem[]
-  /** MCP tools in the window, by server. */
-  mcpLoaded: McpServer[]
-  /** MCP tools loaded on demand, by server. */
-  mcpDeferred: McpServer[]
   /** The system prompt's sections, in the order they are sent. */
   prompt: PromptSection[]
 }
@@ -64,8 +56,10 @@ declare module 'claude-code' {
       effort: Effort | null
       /** The context window broken down, refreshed after every turn; null until read. */
       context: ContextSnapshot | null
-      /** Which of the pane's rows and sections are open, by key. */
+      /** Which of the pane's system prompt sections are open, by key. */
       expanded: string[]
+      /** The pane's open tab. */
+      tab: PaneTab
       /** The built-in tools of this session, by name, as `tool.describe` saw them. */
       tools: Record<string, SeenTool>
       /** Built-in tools denied by bare name in the user settings, read from the file. */

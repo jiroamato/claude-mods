@@ -1,9 +1,9 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptComposeSection, Register } from 'claude-code'
 
-import type { Effort, GitInfo } from '../types'
+import type { Effort, GitInfo, PaneTab } from '../types'
 import { buildSnapshot, currentSnapshot } from './context'
-import { ContextPane, HoverCard, PANE_ID, PANE_TITLE } from './panel'
+import { ContextPane, PANE_ID, PANE_TITLE } from './panel'
 import {
   deniedTools,
   editDeny,
@@ -19,16 +19,17 @@ import {
 //
 //   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33% │ $1.23 │ 12m 4s
 //
-// Hovering the meter reveals what fills the context window, row by row as
-// /context lists it. The percentage opens the Context pane: the same rows,
-// each opening onto what fills it (the system prompt's sections, the skills,
-// the tools), where a built-in tool can be removed from the window and put back.
+// The percentage opens the Context details pane, for what the desktop's own
+// Context card cannot show: the built-in tools, which can be removed from the
+// window and put back, the system prompt's text, the skills' listings and the
+// largest tool results.
 
 const tick = atom({ plugin: 'desktop-statusline', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
 const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, null)
 const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, null)
 const expanded = atom({ plugin: 'desktop-statusline', key: 'expanded' } as const, [])
+const tab = atom({ plugin: 'desktop-statusline', key: 'tab' } as const, 'tools' as PaneTab)
 const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
@@ -315,25 +316,22 @@ async function setRemoved($: EngineInterface, name: string, shouldRemove: boolea
 }
 
 /**
- * Opens or closes one of the pane's rows or sections. A section of the system
- * prompt opens alone, so the pane never draws more than one at a time.
+ * Opens or closes one of the system prompt's sections. A section opens alone,
+ * so the pane never draws more than one at a time.
  */
 async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
-  await update($, expanded, keys => {
-    if (keys.includes(key)) return keys.filter(one => one !== key)
-    const kept = key.startsWith('prompt-') ? keys.filter(one => !one.startsWith('prompt-')) : keys
-
-    return [...kept, key]
-  })
+  await update($, expanded, keys => (keys.includes(key) ? [] : [key]))
 }
 
 /**
- * Opens the Context pane at its top, with the deny list and the breakdown read
- * afresh: the settings may have been edited by hand since the session began,
- * and the window may have moved since the last turn (a /compact).
+ * Opens the Context details pane at its top, on its Tools tab, with the deny
+ * list and the breakdown read afresh: the settings may have been edited by hand
+ * since the session began, and the window may have moved since the last turn
+ * (a /compact).
  */
 async function openPane($: EngineInterface): Promise<void> {
   try {
+    await update($, tab, () => 'tools')
     // Focused, so the first click in the pane presses its button: an
     // unfocused pane spends that click on taking the focus.
     await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
@@ -348,12 +346,6 @@ async function openPane($: EngineInterface): Promise<void> {
 export const register: Register = on => {
   /** Descriptions of built-in tools seen in any session, read from the store at start. */
   const knownTools: Record<string, string> = {}
-  /**
-   * Bumped as the pane opens, so the meter's hover area is drawn anew: the
-   * pane moves the band under a resting pointer, and the desktop would keep the
-   * card revealed until the pointer next crossed the meter.
-   */
-  let meterDrawing = 0
 
   on('session.start', async ($, e, next) => {
     const started = await next(e)
@@ -434,7 +426,7 @@ export const register: Register = on => {
     const names = await read($, removed)
     if (names.includes(e.tool) && !KEPT_TOOLS.includes(e.tool)) {
       return {
-        deny: `The user removed ${e.tool} from this session; do not retry it. They can put it back in the Context pane.`,
+        deny: `The user removed ${e.tool} from this session; do not retry it. They can put it back in the Context details pane.`,
       }
     }
 
@@ -461,12 +453,13 @@ export const register: Register = on => {
     if (e.surface !== 'desktop') {
       const { Text } = $.ui.resolve(e)
 
-      return <Text>The context breakdown draws in the desktop app.</Text>
+      return <Text>The context details draw in the desktop app.</Text>
     }
     const ui = $.ui.resolve(e)
-    const [snapshot, open, seen, names, back, error] = await Promise.all([
+    const [snapshot, open, shown, seen, names, back, error] = await Promise.all([
       read($, context).then(currentSnapshot),
       read($, expanded),
+      read($, tab),
       read($, tools),
       read($, removed),
       read($, putBack),
@@ -477,6 +470,7 @@ export const register: Register = on => {
       ui,
       snapshot,
       tools: toolRows(seen, knownTools, names, back),
+      tab: shown,
       expanded: open,
       error,
       onToggle: (name, shouldRemove) =>
@@ -484,6 +478,7 @@ export const register: Register = on => {
           update($, toolError, () => String(error)),
         ),
       onExpand: key => void toggleExpanded($, key),
+      onTab: next => void update($, tab, () => next),
     })
   })
 
@@ -556,40 +551,19 @@ export const register: Register = on => {
 
         {/* Live figures: context, cost, elapsed, a hairline between each. */}
         <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={0}>
-          {/* Hovering the meter reveals the breakdown; the percentage opens the pane. */}
+          {/* The percentage opens the Context details pane. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
-            <Box key={`context-meter-${meterDrawing}`} flexDirection="row" alignItems="center">
-              <Box
-                position="absolute"
-                bottom={2}
-                right={0}
-                display="none"
-                hover={{ display: 'flex' }}
-                flexDirection="column"
-                // The faint border the desktop's own cards wear: the default one,
-                // which no borderColor leaves in place.
-                borderStyle="round"
-                backgroundColor="background"
-                paddingX={1}
-              >
-                {HoverCard({ ui, snapshot })}
-              </Box>
-              <Svg
-                source={meterSvg(percent)}
-                alt={percent === undefined ? 'context: no reading yet' : `context ${percent}% used`}
-                width={METER_WIDTH}
-                height={METER_HEIGHT}
-              />
-            </Box>
+            <Svg
+              source={meterSvg(percent)}
+              alt={percent === undefined ? 'context: no reading yet' : `context ${percent}% used`}
+              width={METER_WIDTH}
+              height={METER_HEIGHT}
+            />
             <Button
               key="open-context"
               plain
               label={percent === undefined ? '--%' : `${percent}%`}
-              onPress={() => {
-                meterDrawing += 1
-                void update($, tick, n => n + 1)
-                void openPane($)
-              }}
+              onPress={() => void openPane($)}
             />
           </Box>
 

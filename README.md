@@ -32,35 +32,27 @@ the figures a terminal status line shows, its text in the app's own theme colour
 - **Context meter**: a hollow rounded rectangle that fills as the context window does.
 - **Cost** so far and **elapsed** session time. Seconds are dropped past an hour.
 
-#### Context breakdown
+#### Context details
 
-Hover the context meter to see what fills the context window, row by row as
-`/context` lists it: the system prompt, system tools, MCP tools, memory files,
-skills and messages, then the autocompact buffer, the free space and the tools
-loaded on demand, each with its tokens and its share of the window. The rows are
-counted as `/context` counts them, so the two agree.
+The desktop app's own Context card lists what fills the context window. Click the
+percentage beside the meter to open the **Context details** pane for what that card
+cannot show. The window sits on top as a bar, counted as `/context` counts it, and
+under it four tabs:
 
-![The hover card above the meter: the context window as a bar, then each /context row with its tokens and share](docs/context-hover.png)
-
-Click the percentage beside the meter to open the **Context** pane. It shows the
-same rows, and each one with something in it opens to list what fills it:
-
-- **System prompt**: each section of the prompt as this session composes it, with
+- **Tools**: every built-in tool with a one-line summary and its approximate size,
+  grouped as in the context, loaded on demand, and removed. **Remove** takes a tool
+  out of the open session at once (its schema leaves the context and Claude can no
+  longer call it) and adds its name to `permissions.deny` in your user settings
+  (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR`), so new sessions in every
+  project start without it. **Put back** undoes both. A tool the session started
+  without comes back in the next session. Deleting the name from `permissions.deny`
+  by hand works too.
+- **Prompt**: each section of the system prompt as this session composes it, with
   its approximate size. Open a section to read its text.
-- **System tools**: every built-in tool with a one-line summary and its approximate
-  size. **Remove** takes a tool out of the open session at once (its schema leaves
-  the context and Claude can no longer call it) and adds its name to
-  `permissions.deny` in your user settings (`~/.claude/settings.json`, or
-  `$CLAUDE_CONFIG_DIR`), so new sessions in every project start without it.
-  **Put back** undoes both. A tool the session started without comes back in the
-  next session. Deleting the name from `permissions.deny` by hand works too.
-- **System tools (deferred)**: the built-in tools loaded only when Claude searches
-  for them, which can be removed the same way.
-- **MCP tools**, in the window and loaded on demand: each server and its tools.
-- **Skills**, read-only for now, **Memory files**, **Custom agents**, and
-  **Messages**, which lists the largest tool results in the conversation.
+- **Skills**: each skill's listing as Claude sees it, read-only for now.
+- **Results**: the largest tool results in the conversation.
 
-![The Context pane: the /context rows, System tools (deferred) open with Remove beside each tool](docs/context-pane.png)
+![The Context details pane: the context window as a bar, the tabs, and the Tools tab with Remove beside each tool](docs/context-pane.png)
 
 It draws on the desktop surface only. In the terminal it stays out of the way,
 so a `statusLine` command in your settings keeps working there.
@@ -124,8 +116,8 @@ desktop-statusline/
   .claude-plugin/plugin.json   manifest
   hooks/hooks.json             names the hooks module
   hooks/register.tsx           the mod: hooks, state and the band's tree
-  hooks/panel.tsx              the context breakdown's hover card and pane
-  hooks/context.ts             the window broken down into /context's rows
+  hooks/panel.tsx              the Context details pane
+  hooks/context.ts             the window broken down as /context counts it
   hooks/tools.ts               tool summaries, sizes and the settings deny edit
   types/index.d.ts             its state contract
   tests/                       run with `claude plugin test`

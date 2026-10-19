@@ -261,7 +261,7 @@ test('a tool put back that the session started without waits for a new session',
   ])
 })
 
-test('the snapshot lists the rows as /context does, and what fills each', () => {
+test('the snapshot lists the rows as /context does, and what the pane details', () => {
   const snapshot = buildSnapshot(breakdown(), MESSAGES, [DEPLOY], SECTIONS)
   expect(snapshot).toMatchObject({ used: 93_600, window: 200_000, percent: 46 })
   // In the window largest first, the four largest in the desktop's chart
@@ -279,20 +279,6 @@ test('the snapshot lists the rows as /context does, and what fills each', () => 
     ['MCP tools (deferred)', '#97958d91'],
   ])
   expect(snapshot.results.map(one => one.name)).toEqual(['Bash: npm test -- --verbose'])
-  expect(snapshot.mcpLoaded).toEqual([
-    {
-      name: 'docs',
-      tokens: 900,
-      tools: [
-        { name: 'lookup', tokens: 600, detail: '' },
-        { name: 'search', tokens: 300, detail: '' },
-      ],
-    },
-  ])
-  expect(snapshot.mcpDeferred.map(one => one.name)).toEqual(['web'])
-  expect(snapshot.memoryFiles).toEqual([
-    { name: 'CLAUDE.md', tokens: 700, detail: 'Project · /repo' },
-  ])
   // An empty section is not sent, so it is not listed.
   expect(snapshot.prompt.map(one => [one.id, one.title, one.text])).toEqual([
     ['intro', 'Introduction', 'You are Claude Code, an interactive CLI tool.'],
@@ -337,7 +323,7 @@ function descendants(node: { children?: unknown[] }): { type: string; children?:
   )
 }
 
-test('hovering the meter reveals the rows as /context lists them; the percentage opens the pane', async ($, on) => {
+test('the meter has no hover card; the percentage opens the pane on its Tools tab', async ($, on) => {
   const clock = engine(on, { text: '{}' })
   let opened: unknown
   on('ui.open', async (_$, e) => {
@@ -347,27 +333,61 @@ test('hovering the meter reveals the rows as /context lists them; the percentage
   })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
 
+  // The desktop's own Context card lists the rows; the band adds nothing over the meter.
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  const card = (await band.findAll({ type: 'Box' })).find(one => one.props.position === 'absolute')
-  expect(card?.props).toMatchObject({ position: 'absolute', display: 'none' })
-  expect(card?.text).toMatch(/Context window93\.6k \/ 200k \(46%\)/)
-  expect(card?.text).toMatch(/Messages60k30\.0%/)
-  expect(card?.text).toMatch(/Free space100k50\.0%/)
-  expect(card?.text).toMatch(/MCP tools \(deferred\)3k–/)
-  // The band redraws every second and the desktop rebuilds a hover card each
-  // time; an Svg in it would reload at every redraw, and the card flicker.
-  const drawn = descendants(card!)
-  expect(drawn.some(one => one.type === 'Text')).toBe(true)
-  expect(drawn.filter(one => one.type === 'Svg')).toEqual([])
+  const boxes = await band.findAll({ type: 'Box' })
+  expect(boxes.filter(one => one.props.position === 'absolute')).toEqual([])
+  expect(boxes.filter(one => one.props.hover !== undefined)).toEqual([])
+
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.press({ key: 'open-tab-skills' })
+  expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
   const pressed = band.press({ key: 'open-context' })
   // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed
   // Focused, or the desktop spends the first click in it on the focus.
-  expect(opened).toMatchObject({ id: 'context-map', title: 'Context', focus: true })
+  expect(opened).toMatchObject({ id: 'context-map', title: 'Context details', focus: true })
+  expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeUndefined()
+  expect(await pane.find({ type: 'Text', text: 'Built-in tools' })).toBeDefined()
 
+  await pane.unmount()
   await band.unmount()
+})
+
+test('the pane draws the window as a bar of pills over its tabs', async ($, on) => {
+  engine(on, { text: '{}' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  expect(
+    await pane.find({ type: 'Box', text: /^Context window93\.6k \/ 200k \(46%\)$/ }),
+  ).toBeDefined()
+  // Each tab names what /context counts for it.
+  expect((await pane.find({ key: 'open-tab-tools' }))?.text).toBe('Tools 20k')
+  expect((await pane.find({ key: 'open-tab-prompt' }))?.text).toBe('Prompt 8k')
+  expect((await pane.find({ key: 'open-tab-results' }))?.text).toBe('Results')
+  // A pill per segment, largest first, then the free space; nothing positioned,
+  // or the desktop draws it on a layer of its own and shifts its colours.
+  const boxes = await pane.findAll({ type: 'Box' })
+  const bar = boxes.find(one => one.props.height === 0.215)
+  const pills = descendants(bar!) as unknown as {
+    props: { backgroundColor?: string; borderStyle?: string }
+  }[]
+  expect(pills.every(one => one.props.borderStyle === 'round')).toBe(true)
+  expect(pills.map(one => one.props.backgroundColor)).toEqual([
+    '#3987e5',
+    '#d95926',
+    '#199e70',
+    '#c98500',
+    '#97958d',
+    '#97958d91',
+    '#97958d27',
+  ])
+  expect(boxes.filter(one => one.props.position !== undefined)).toEqual([])
+
+  await pane.unmount()
 })
 
 test('the pane opens the system prompt section by section, one at a time', async ($, on) => {
@@ -375,9 +395,8 @@ test('the pane opens the system prompt section by section, one at a time', async
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  // Closed, a row shows its figures and nothing under it.
   expect(await pane.find({ type: 'Text', text: 'Introduction' })).toBeUndefined()
-  await pane.press({ key: 'open-row-system-prompt' })
+  await pane.press({ key: 'open-tab-prompt' })
   expect(await pane.find({ type: 'Text', text: 'Introduction' })).toBeDefined()
   expect(await pane.find({ type: 'Code' })).toBeUndefined()
 
@@ -390,35 +409,23 @@ test('the pane opens the system prompt section by section, one at a time', async
     '# Environment\n - Platform: linux',
   ])
 
-  // Closing the row closes what is under it.
-  await pane.press({ key: 'open-row-system-prompt' })
+  // Pressing the open section again closes it.
+  await pane.press({ key: 'open-prompt-env-info-simple' })
   expect(await pane.find({ type: 'Code' })).toBeUndefined()
 
   await pane.unmount()
 })
 
-test('the pane lists MCP tools by server, memory files and the largest tool results', async ($, on) => {
+test('the Results tab lists the largest tool results, the Skills tab each skill', async ($, on) => {
   engine(on, { text: '{}' })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  await pane.press({ key: 'open-row-mcp-tools' })
-  expect(await pane.find({ type: 'Button', text: /docs/ })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'lookup' })).toBeUndefined()
-  await pane.press({ key: 'open-mcp-loaded-docs' })
-  expect(await pane.find({ type: 'Text', text: 'lookup' })).toBeDefined()
-  // What loads on demand is its own row.
-  expect(await pane.find({ type: 'Button', text: /web/ })).toBeUndefined()
-  await pane.press({ key: 'open-row-mcp-tools-deferred' })
-  expect(await pane.find({ type: 'Button', text: /web/ })).toBeDefined()
-
-  await pane.press({ key: 'open-row-memory-files' })
-  expect(await pane.find({ type: 'Text', text: 'Project · /repo' })).toBeDefined()
-  await pane.press({ key: 'open-row-messages' })
+  await pane.press({ key: 'open-tab-results' })
   expect(await pane.find({ type: 'Text', text: 'Bash: npm test -- --verbose' })).toBeDefined()
-
-  // The free space and the reserve have nothing to list.
-  expect(await pane.find({ key: 'open-row-free-space' })).toBeUndefined()
+  await pane.press({ key: 'open-tab-skills' })
+  expect(await pane.find({ type: 'Text', text: 'Ships the app to production.' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'Bash: npm test -- --verbose' })).toBeUndefined()
 
   await pane.unmount()
 })
@@ -436,16 +443,15 @@ test('removing a tool denies it in the settings and moves it out of the window a
   const bash = { tool: 'Bash', description: 'Executes a command.', provider: ENGINE }
   expect(await $.tool.describe(bash)).toEqual({ description: 'Executes a command.' })
 
+  // The pane opens on the Tools tab.
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  expect(await pane.find({ key: 'tool-Bash' })).toBeUndefined()
-  await pane.press({ key: 'open-row-system-tools' })
   expect((await pane.find({ key: 'tool-Bash' }))?.text).toMatch(/Runs a shell command/)
   expect((await pane.find({ key: 'toggle-Bash' }))?.props).toMatchObject({ label: 'Remove' })
   expect((await pane.find({ key: 'toggle-EnterPlanMode' }))?.props).toMatchObject({
     label: 'Put back',
   })
-  await pane.press({ key: 'open-row-skills' })
-  expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
+  // Grouped: the removed tool under its own label.
+  expect((await pane.find({ key: 'group-removed' }))?.text).toMatch(/^REMOVED1EnterPlanMode/)
 
   const before = invalidated
   await pane.press({ key: 'toggle-Bash' })
@@ -503,7 +509,6 @@ test('a settings file that cannot be written says so in the pane and removes not
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   await $.tool.describe({ tool: 'Grep', description: 'Searches.', provider: ENGINE })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.press({ key: 'open-row-system-tools' })
 
   await pane.press({ key: 'toggle-Grep' })
   expect(settings.text).toBe('{}\n')
@@ -536,7 +541,6 @@ test('the settings live under CLAUDE_CONFIG_DIR when it is set', async ($, on) =
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   await $.tool.describe({ tool: 'Grep', description: 'Searches.', provider: ENGINE })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.press({ key: 'open-row-system-tools' })
 
   await pane.press({ key: 'toggle-Grep' })
   expect(JSON.parse(settings.text).permissions.deny).toEqual(['Grep'])
@@ -551,7 +555,6 @@ test('two presses at once both land in the settings file', async ($, on) => {
   await $.tool.describe({ tool: 'Grep', description: 'Searches.', provider: ENGINE })
   await $.tool.describe({ tool: 'Glob', description: 'Finds files.', provider: ENGINE })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.press({ key: 'open-row-system-tools' })
 
   await Promise.all([pane.press({ key: 'toggle-Grep' }), pane.press({ key: 'toggle-Glob' })])
   expect(JSON.parse(settings.text).permissions.deny.sort()).toEqual(['Glob', 'Grep'])
@@ -571,8 +574,6 @@ test('MCP tools are not listed and ToolSearch is never removed', async ($, on) =
     provider: { plugin: 'mcp:docs', tier: 'user' },
   })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.press({ key: 'open-row-system-tools' })
-  await pane.press({ key: 'open-row-mcp-tools' })
 
   expect(await pane.find({ key: 'tool-ToolSearch' })).toBeUndefined()
   expect(await pane.find({ key: 'tool-mcp__docs__lookup' })).toBeUndefined()
@@ -606,16 +607,18 @@ test('a deny added by hand is picked up when the pane opens', async ($, on) => {
   await band.unmount()
 })
 
-test('the card says when there is no breakdown yet', async ($, on) => {
+test('the pane says when there is no breakdown yet, and still lists the tools', async ($, on) => {
   // No session has started, so no breakdown has been read.
   engine(on, { text: '{}' })
-  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  await $.tool.describe({ tool: 'Bash', description: 'Executes a command.', provider: ENGINE })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
   expect(
-    await band.find({ type: 'Text', text: /The breakdown appears after Claude's first reply/ }),
+    await pane.find({ type: 'Text', text: /The breakdown appears after Claude's first reply/ }),
   ).toBeDefined()
+  expect((await pane.find({ key: 'toggle-Bash' }))?.props).toMatchObject({ label: 'Remove' })
 
-  await band.unmount()
+  await pane.unmount()
 })
 
 test('a breakdown an earlier version kept in the state is read as none', () => {
