@@ -27,9 +27,9 @@ const SKILL_LINE_MAX = 110
 // chart palette and the rest in greys; these are its dark-theme values. The
 // greys are theme keys, so they follow the light theme too.
 const CHART = ['#5a88de', '#c36136', '#539b74', '#ba872e'] as const
-const OTHER_USED = 'inactive'
-const RESERVED = 'subtle'
-const FREE = 'promptBorder'
+const OTHER_USED = 'subtle'
+const RESERVED = 'promptBorder'
+const FREE = 'promptBorderShimmer'
 
 const KIND_ORDER: Record<RowKind, number> = { used: 0, buffer: 1, free: 2, deferred: 3 }
 

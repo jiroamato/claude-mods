@@ -15,15 +15,19 @@ type Ui = ElementTable<'desktop'>
 const CARD_COLUMNS = 40
 const SWATCH_WIDTH = 1.4
 const SWATCH_HEIGHT = 0.55
+// The swatch sits this close to its name, as on the desktop's own /context card.
+const SWATCH_GAP = 0.25
+// A plain Button pads its label by the `xs` step, about half a column.
+const LABEL_PAD = 0.5
 const BAR_HEIGHT = 0.4
 const BAR_GAP = 0.15
 const BAR_MIN_SEGMENT = 0.4
 const TOKENS_COLUMNS = 7
 const SHARE_COLUMNS = 6
-// The swatch and the gap after it, so a row's contents line up under its name.
-const DETAIL_INDENT = SWATCH_WIDTH + 1
+// The swatch, the gap after it and the label's padding, so what a row lists lines up under its name.
+const DETAIL_INDENT = SWATCH_WIDTH + SWATCH_GAP + LABEL_PAD
 // The bar's track, and the free space it leaves.
-const TRACK = 'promptBorder'
+const TRACK = 'promptBorderShimmer'
 // One drawing holds at most 100000 characters of code; a section is cut well short of that.
 const SECTION_TEXT_MAX = 40_000
 
@@ -57,7 +61,7 @@ function Header(props: { ui: Ui; snapshot: ContextSnapshot }) {
 
   return (
     <Box flexDirection="row" alignItems="center" columnGap={2}>
-      <Box flexGrow={1} flexShrink={1}>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
         <Text color="text" weight="semibold">
           Context window
         </Text>
@@ -126,8 +130,15 @@ function RowLine(props: {
 
   return (
     <Box flexDirection="row" alignItems="center" columnGap={1}>
-      {Swatch({ ui: props.ui, color: row.color })}
-      <Box flexGrow={1} flexShrink={1}>
+      <Box
+        flexDirection="row"
+        alignItems="center"
+        flexGrow={1}
+        flexShrink={1}
+        minWidth={0}
+        columnGap={SWATCH_GAP}
+      >
+        {Swatch({ ui: props.ui, color: row.color })}
         {props.label ?? (
           // A plain Button pads its label by `xs`; so does this, so the names line up.
           <Box paddingX="xs">
@@ -175,19 +186,25 @@ const STATUS_NOTE: Record<ToolRow['status'], string> = {
 }
 
 /** A name with a line under it and its tokens, as the rows' pieces are listed. */
-function ItemLine(props: { ui: Ui; item: ContextItem; note?: string }) {
+function ItemLine(props: {
+  ui: Ui
+  item: ContextItem
+  /** A line under the name in place of the item's detail, wrapped rather than cut. */
+  note?: string
+}) {
   const { Box, Text } = props.ui
   const item = props.item
   const detail = props.note ?? item.detail
 
   return (
-    <Box flexDirection="row" columnGap={1}>
-      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+    // The figure sits on the name's line; a long line under it never pushes past the figures.
+    <Box flexDirection="row" alignItems="flex-start" columnGap={1}>
+      <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
         <Text color="text" wrap="truncate-end">
           {item.name}
         </Text>
         {detail !== '' && (
-          <Text color="secondaryText" wrap="truncate-end">
+          <Text color="secondaryText" wrap={props.note === undefined ? 'truncate-end' : 'wrap'}>
             {detail}
           </Text>
         )}
@@ -204,16 +221,13 @@ function Toggle(props: {
   id: string
   label: string
   isOpen: boolean
-  isBold?: boolean
   onPress: () => void
 }) {
   const { Button, Text } = props.ui
 
   return (
     <Button key={props.id} plain onPress={props.onPress}>
-      <Text color="text" weight={props.isBold ? 'semibold' : undefined}>
-        {props.label}
-      </Text>{' '}
+      <Text color="text">{props.label}</Text>{' '}
       <Text color="inactive">{props.isOpen ? OPEN : CLOSED}</Text>
     </Button>
   )
@@ -250,7 +264,7 @@ function ToolLines(props: ContextPaneProps & { rows: ToolRow[]; isExplained: boo
 
         return (
           <Box key={`tool-${tool.name}`} flexDirection="row" alignItems="center" columnGap={1}>
-            <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
               <Box flexDirection="row" columnGap={1}>
                 <Text color={isRemoved ? 'inactive' : 'text'} bold strikethrough={isRemoved}>
                   {tool.name}
@@ -291,7 +305,7 @@ function ServerLines(props: ContextPaneProps & { servers: McpServer[]; group: st
         return (
           <Box key={id} flexDirection="column">
             <Box flexDirection="row" alignItems="center" columnGap={1}>
-              <Box flexDirection="row" flexGrow={1} flexShrink={1} columnGap={1}>
+              <Box flexDirection="row" flexGrow={1} flexShrink={1} minWidth={0} columnGap={1}>
                 {Toggle({
                   ui: props.ui,
                   id: `open-${id}`,
@@ -340,7 +354,7 @@ function PromptLines(props: ContextPaneProps & { snapshot: ContextSnapshot }) {
         return (
           <Box key={id} flexDirection="column" rowGap={1}>
             <Box flexDirection="row" alignItems="center" columnGap={1}>
-              <Box flexDirection="row" flexGrow={1} flexShrink={1} columnGap={1}>
+              <Box flexGrow={1} flexShrink={1} minWidth={0}>
                 {Toggle({
                   ui: props.ui,
                   id: `open-${id}`,
@@ -348,9 +362,6 @@ function PromptLines(props: ContextPaneProps & { snapshot: ContextSnapshot }) {
                   isOpen,
                   onPress: () => props.onExpand(id),
                 })}
-                <Text color="inactive" wrap="truncate-end">
-                  {section.id}
-                </Text>
               </Box>
               {Figure({
                 ui: props.ui,
@@ -497,7 +508,7 @@ export function ContextPane(props: ContextPaneProps) {
           const line = snapshot ? (
             RowLine({ ui: props.ui, row, window: snapshot.window, label })
           ) : (
-            <Box flexDirection="row" alignItems="center" columnGap={1}>
+            <Box flexDirection="row" alignItems="center" columnGap={SWATCH_GAP}>
               {Swatch({ ui: props.ui, color: row.color })}
               {label}
             </Box>

@@ -270,11 +270,11 @@ test('the snapshot lists the rows as /context does, and what fills each', () => 
     ['System tools', '#c36136'],
     ['System prompt', '#539b74'],
     ['Skills', '#ba872e'],
-    ['MCP tools', 'inactive'],
-    ['Memory files', 'inactive'],
-    ['Autocompact buffer', 'subtle'],
-    ['Free space', 'promptBorder'],
-    ['MCP tools (deferred)', 'subtle'],
+    ['MCP tools', 'subtle'],
+    ['Memory files', 'subtle'],
+    ['Autocompact buffer', 'promptBorder'],
+    ['Free space', 'promptBorderShimmer'],
+    ['MCP tools (deferred)', 'promptBorder'],
   ])
   expect(snapshot.results.map(one => one.name)).toEqual(['Bash: npm test -- --verbose'])
   expect(snapshot.mcpLoaded).toEqual([
@@ -595,7 +595,7 @@ test('a deny added by hand is picked up when the pane opens', async ($, on) => {
   settings.text = '{"permissions": {"deny": ["Grep"]}}'
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const pressed = band.press({ key: 'open-context' })
-  // The press reads the settings and the map before it waits; let the time pass.
+  // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed
   expect(invalidated).toBe(1)

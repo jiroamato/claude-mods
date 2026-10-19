@@ -328,7 +328,7 @@ async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
 }
 
 /**
- * Opens the Context pane at its top, with the deny list and the map read
+ * Opens the Context pane at its top, with the deny list and the breakdown read
  * afresh: the settings may have been edited by hand since the session began,
  * and the window may have moved since the last turn (a /compact).
  */
