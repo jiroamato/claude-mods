@@ -15,14 +15,14 @@ type Ui = ElementTable<'desktop'>
 const CARD_COLUMNS = 40
 // A 10px square, as the desktop's own /context card draws its swatches.
 const SWATCH_WIDTH = 1.24
-const SWATCH_HEIGHT = 0.52
+const SWATCH_HEIGHT = 0.54
 // The swatch sits this close to its name, as on the desktop's own /context card.
 const SWATCH_GAP = 0.25
 // A plain Button pads its label by the `xs` step, about half a column.
 const LABEL_PAD = 0.5
 // The bar's see-through border takes a pixel off each edge, which leaves the
 // desktop card's 8px pill; its segments stand a pixel apart.
-const BAR_HEIGHT = 0.48
+const BAR_HEIGHT = 0.5
 const BAR_GAP = 0.1
 const BAR_MIN_SEGMENT = 0.4
 const TOKENS_COLUMNS = 7
@@ -55,7 +55,10 @@ function headerFigures(snapshot: ContextSnapshot): string {
 function Swatch(props: { ui: Ui; color: string }) {
   const { Box } = props.ui
 
-  return <Box width={SWATCH_WIDTH} height={SWATCH_HEIGHT} backgroundColor={props.color} />
+  // It keeps its size however long the name beside it runs.
+  return (
+    <Box width={SWATCH_WIDTH} height={SWATCH_HEIGHT} flexShrink={0} backgroundColor={props.color} />
+  )
 }
 
 /** `Context window   72.6k / 1M (7%)`. */
@@ -172,7 +175,7 @@ function RowLine(props: {
         {Swatch({ ui: props.ui, color: row.color })}
         {props.label ?? (
           // A plain Button pads its label by `xs`; so does this, so the names line up.
-          <Box paddingX="xs">
+          <Box paddingX="xs" flexShrink={1} minWidth={0}>
             <Text color="text" wrap="truncate-end">
               {row.name}
             </Text>
@@ -297,7 +300,8 @@ function ToolLines(props: ContextPaneProps & { rows: ToolRow[]; isExplained: boo
         return (
           <Box key={`tool-${tool.name}`} flexDirection="row" alignItems="center" columnGap={1}>
             <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              <Box flexDirection="row" columnGap={1}>
+              {/* In a narrow pane the note drops under the name whole, rather than a word a line. */}
+              <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
                 <Text color={isRemoved ? 'inactive' : 'text'} bold strikethrough={isRemoved}>
                   {tool.name}
                 </Text>

@@ -522,15 +522,25 @@ export const register: Register = on => {
             It gives way first: a long branch name is cut short rather than pushing
             the figures onto a second line. */}
         <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={1} minWidth={0}>
-          <Text color="claude" bold>
-            {prettyModel(model)}
-          </Text>
+          <Box flexShrink={0}>
+            <Text color="claude" bold>
+              {prettyModel(model)}
+            </Text>
+          </Box>
           {level !== null && divider()}
-          {level !== null && <Text color={EFFORT_COLOR[level]}>{EFFORT_LABEL[level]}</Text>}
+          {level !== null && (
+            <Box flexShrink={0}>
+              <Text color={EFFORT_COLOR[level]}>{EFFORT_LABEL[level]}</Text>
+            </Box>
+          )}
           {hasPlace && divider()}
           {hasPlace && (
             <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
-              {folder !== '' && <Text color="text">{folder}</Text>}
+              {folder !== '' && (
+                <Box flexShrink={0}>
+                  <Text color="text">{folder}</Text>
+                </Box>
+              )}
               {folder !== '' && repo !== null && <Text color="inactive">|</Text>}
               {repo !== null && (
                 <Text color="secondaryText" wrap="truncate-end">
@@ -556,10 +566,10 @@ export const register: Register = on => {
                 display="none"
                 hover={{ display: 'flex' }}
                 flexDirection="column"
-                // The desktop's own /context card: its raised surface and its
-                // faint default border, which no borderColor leaves in place.
+                // The faint border the desktop's own cards wear: the default one,
+                // which no borderColor leaves in place.
                 borderStyle="round"
-                backgroundColor="userMessageBackground"
+                backgroundColor="background"
                 paddingX={1}
               >
                 {HoverCard({ ui, snapshot })}
