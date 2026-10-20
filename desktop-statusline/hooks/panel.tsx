@@ -835,7 +835,7 @@ function PromptTab(props: ContextPaneProps) {
   const added = sections.filter(one => one.isAdded)
   const groups = [
     { id: 'prompt-own', label: 'Claude Code’s prompt', sections: own },
-    { id: 'prompt-added', label: 'Added', sections: added },
+    { id: 'prompt-added', label: 'Added at send time', sections: added },
   ].filter(group => group.sections.length > 0)
 
   return (
@@ -878,7 +878,7 @@ function PromptTab(props: ContextPaneProps) {
                 Group({
                   ui: props.ui,
                   id: 'prompt-unread',
-                  label: 'Added',
+                  label: 'Added at send time',
                   count: 1,
                   noun: 'part',
                   tokens: unread,
