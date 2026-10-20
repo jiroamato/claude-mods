@@ -59,7 +59,7 @@ are four tabs:
 - **Trace**: every request the session sends to the model, newest first, the
   conversation's apart from side requests such as titles and subagents, with what it
   added to the conversation, what came back, and its tokens, cost and time. Open one
-  for a preview, then **Read it whole here**: its system prompt, every tool definition
+  for a preview, then **Expand**: its system prompt, every tool definition
   and every message, as the model received them, with a search that steps through
   each match. Or open it whole in your browser.
 

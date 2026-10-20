@@ -278,7 +278,7 @@ const PREVIEW_CHARS = 1_500
 
 /**
  * An open request's opening: a few lines of what it added and what came
- * back, enough to tell it apart. "Read it whole here" shows all of it.
+ * back, enough to tell it apart. Expand shows all of it.
  */
 function RequestText(props: { ui: Ui; text: string | null }) {
   const { Box, Code, Text } = props.ui
@@ -1145,15 +1145,24 @@ function TraceTab(props: ContextPaneProps) {
           <Box flexDirection="row" alignItems="center" columnGap={2}>
             <Button
               key={`read-${item.seq}`}
-              label="Read it whole here"
+              label="Expand"
               variant="primary"
               onPress={() => props.onRead(item.seq)}
             />
             {traced.view && (
-              <Link
-                href={viewLink(traced.view.session, traced.view.token, item.seq)}
-                label="Open in your browser"
-              />
+              // A pill beside Expand, quieter: only a Link opens the browser,
+              // so the Link is set on a pill of its own.
+              <Box
+                borderStyle="round"
+                borderColor={CLEAR}
+                backgroundColor={BROWSER_PILL}
+                paddingX={1}
+                paddingY={0.2}
+              >
+                <Link href={viewLink(traced.view.session, traced.view.token, item.seq)}>
+                  <Text color={BROWSER_PILL_TEXT}>Open in your browser</Text>
+                </Link>
+              </Box>
             )}
           </Box>
         )}
@@ -1211,3 +1220,7 @@ export function ContextPane(props: ContextPaneProps) {
     </Box>
   )
 }
+
+// The browser's pill: light grey, set apart from Expand's white.
+const BROWSER_PILL = '#c2c0b6'
+const BROWSER_PILL_TEXT = '#1f1e1d'

@@ -407,11 +407,11 @@ test('an open request shows a short preview, and opens whole here or in the brow
   )
   // No pages in the pane: its opening, and where the rest is.
   expect(await pane.find({ key: 'page-next' })).toBeUndefined()
-  // A dozen lines: "Read it whole here" shows the rest.
+  // A dozen lines: Expand shows the rest.
   const preview = String((await pane.find({ type: 'Code' }))?.props.source)
   expect(preview.split('\n')).toHaveLength(12)
   expect(await pane.find({ type: 'Text', text: /^4,9\d\d more lines$/ })).toBeDefined()
-  expect(await pane.find({ key: 'read-0' })).toBeDefined()
+  expect((await pane.find({ key: 'read-0' }))?.props).toMatchObject({ label: 'Expand' })
 
   await pane.unmount()
 })
