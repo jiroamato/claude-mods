@@ -251,7 +251,7 @@ function tracedEngine(
   on('session.id', async () => ({ value: 'session-1' }))
   on('session.turns', async () => ({ value: turns }))
   on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 6' },
+    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 7' },
   }))
   on('session.model', async () => ({ value: 'Opus 5.5' }))
   on('session.cwd', async () => ({ value: '/repo' }))
@@ -508,8 +508,32 @@ test('the browser pages show every message, escaped, and link to each other', ()
   expect(html).not.toContain('<b>three</b>')
   expect(html).toContain('You are &lt;Claude&gt;.')
   expect(html).toContain('href="/view/s?t=x"')
-  // The two new in this request open; the one before stays closed.
-  expect(html.match(/<details class="new" open>/g)).toHaveLength(2)
+  // The two new in this request open, the first of them the anchor the page's
+  // nav jumps to; the one before stays closed.
+  expect(html.match(/<details class="row new" open/g)).toHaveLength(2)
+  expect(html).toContain(
+    '<details class="row"><summary><span class="chev"></span><span class="label"><span class="seq">#1</span>',
+  )
+  expect(html).toContain('<details class="row new" open id="new">')
+  // No script without a nonce; with one, only that nonce's script.
+  expect(html).not.toContain('<script')
+  expect(
+    requestPage({
+      session: 's',
+      records: VIEW_RECORDS.map(one => ({
+        ...one,
+        at: '',
+        model: 'm',
+        usage: null,
+        response: null,
+      })),
+      seq: 2,
+      system: null,
+      tools: null,
+      link,
+      nonce: 'abc',
+    }),
+  ).toContain('<script nonce="abc">')
   const index = sessionPage({
     session: 's',
     records: VIEW_RECORDS.map(one => ({ ...one, at: '', usage: null, messageCount: 1 })),

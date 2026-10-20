@@ -18,7 +18,7 @@
  * another server, and an older receiver from this one (hooks/trace.ts keeps
  * the same text). Bumped whenever what the receiver serves changes.
  */
-export const HEALTH = 'desktop-statusline trace receiver 6'
+export const HEALTH = 'desktop-statusline trace receiver 7'
 
 /** The events the receiver keeps; the others are left unread. */
 export const KEPT_EVENTS = new Set(['api_request_body', 'api_request', 'api_response_body'])

@@ -149,7 +149,7 @@ function engine(
   }))
   on('session.id', async () => ({ value: 'session-1' }))
   on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 6' },
+    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 7' },
   }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)

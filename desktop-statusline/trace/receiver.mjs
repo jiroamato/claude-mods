@@ -104,9 +104,12 @@ function view(url, response) {
     response.end()
     return
   }
+  // The page's one script runs by a nonce made for this response alone: no
+  // other script, inline or fetched, does.
+  const nonce = randomBytes(16).toString('base64')
   let html
   if (match[2] === undefined) {
-    html = sessionPage({ session, records, link })
+    html = sessionPage({ session, records, link, nonce })
   } else {
     const seq = Number(match[2])
     const record = records.find(one => one.seq === seq)
@@ -120,6 +123,7 @@ function view(url, response) {
             system: readJson(path.join(root, session, `system-${base.system}.json`)),
             tools: readJson(path.join(root, session, `tools-${base.tools}.json`)),
             link,
+            nonce,
           })
         : null
   }
@@ -130,7 +134,7 @@ function view(url, response) {
   }
   response.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
-    'content-security-policy': "default-src 'none'; style-src 'unsafe-inline'",
+    'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`,
     'x-content-type-options': 'nosniff',
   })
   response.end(html)
