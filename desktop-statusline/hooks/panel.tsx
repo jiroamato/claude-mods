@@ -835,7 +835,7 @@ function PromptTab(props: ContextPaneProps) {
   const added = sections.filter(one => one.isAdded)
   const groups = [
     { id: 'prompt-own', label: 'Claude Code’s prompt', sections: own },
-    { id: 'prompt-added', label: 'Added outside Claude Code', sections: added },
+    { id: 'prompt-added', label: 'Added', sections: added },
   ].filter(group => group.sections.length > 0)
 
   return (
@@ -853,8 +853,8 @@ function PromptTab(props: ContextPaneProps) {
             ? "The system prompt appears after Claude's first reply."
             : sent
               ? 'The system prompt exactly as the last request sent it: Claude Code’s own ' +
-                'sections, then what was added around them, such as the output style, the line ' +
-                'that introduces Claude and the app’s own instructions.'
+                'sections, then what was added to them when it was sent, such as the billing ' +
+                'header, the line that introduces Claude and the app’s own instructions.'
               : 'The system prompt as this session composes it. Sizes are estimated from each ' +
                 "section's text. Turn on tracing (the Trace tab) to see it exactly as sent.",
       })}
@@ -878,7 +878,7 @@ function PromptTab(props: ContextPaneProps) {
                 Group({
                   ui: props.ui,
                   id: 'prompt-unread',
-                  label: 'Added outside Claude Code',
+                  label: 'Added',
                   count: 1,
                   noun: 'part',
                   tokens: unread,

@@ -323,7 +323,7 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-prompt' })
   // What came from outside Claude Code's own prompt is a card of its own.
   const added = await pane.find({ key: 'prompt-added' })
-  expect(added?.text).toMatch(/^Added outside Claude Code\d+ sections · ~\d+/)
+  expect(added?.text).toMatch(/^Added\d+ sections · ~\d+/)
   expect(
     (await pane.find({ type: 'Client', key: 'disclose-prompt-billing-0' }))?.props.props,
   ).toMatchObject({ label: 'Billing header' })

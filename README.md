@@ -51,8 +51,8 @@ are four tabs:
 - **Prompt**: the system prompt, section by section, with each section's approximate
   size. Open a section to read its text. With tracing on, it shows the prompt exactly
   as the last request sent it, in two groups: Claude Code's own sections, and what was
-  added from outside it, such as the output style, the line that introduces Claude and
-  the desktop app's own instructions.
+  added to them when the request was sent, such as the billing header, the line that
+  introduces Claude, an output style and the desktop app's own instructions.
 - **Skills**: each skill's listing as Claude sees it, read-only for now: the ones you
   installed apart from the ones Claude Code and the desktop app bring.
 - **Trace**: every request the session sends to the model, newest first, the
