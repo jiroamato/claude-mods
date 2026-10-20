@@ -13,6 +13,9 @@ export type DisclosureProps = {
   isHeading?: boolean
 }
 
+/** A row's height: room above and below its line, so its lit pill is not cramped. */
+export const DISCLOSURE_ROWS = 1.7
+
 /** What the row posts to the hooks module when pressed. */
 export type DisclosurePick = { toggle: string }
 
@@ -69,6 +72,7 @@ export default function Disclosure(
       borderStyle="round"
       borderColor={CLEAR}
       paddingY={0}
+      height={DISCLOSURE_ROWS}
       backgroundColor={isHover ? HOVER : CLEAR}
     >
       {/* The chevron's room: the pane draws the icon under this region. */}

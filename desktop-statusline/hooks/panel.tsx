@@ -10,6 +10,7 @@ import type {
   TraceState,
 } from '../types'
 import { FREE, barSegments, formatShare, formatTokens } from './context'
+import { DISCLOSURE_ROWS } from './disclosure'
 import type { DisclosureProps } from './disclosure'
 import type { ReaderBarProps } from './reader'
 import { TAB_PREFIX } from './tabs'
@@ -325,7 +326,7 @@ function DisclosureRow(props: { ui: Ui; row: DisclosureProps }) {
     <Box
       flexDirection="row"
       alignItems="center"
-      height={1}
+      height={DISCLOSURE_ROWS}
       paddingLeft={CARET_INSET}
       marginX={-CARET_INSET}
     >
@@ -341,7 +342,7 @@ function DisclosureRow(props: { ui: Ui; row: DisclosureProps }) {
           module="./disclosure.tsx"
           props={props.row}
           width="100%"
-          height={1}
+          height={DISCLOSURE_ROWS}
         />
       </Box>
     </Box>
