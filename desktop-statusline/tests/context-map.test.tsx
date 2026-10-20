@@ -395,14 +395,16 @@ test('the pane draws the window as a bar of pills over its tabs', async ($, on) 
       ],
     },
   })
-  // A pill per segment, largest first, then the free space; nothing positioned,
-  // or the desktop draws it on a layer of its own and shifts its colours.
+  // A pill per segment, largest first, then the free space; no pill
+  // positioned, or the desktop draws it on a layer of its own and shifts its colours.
   const boxes = await pane.findAll({ type: 'Box' })
   const bar = boxes.find(one => one.props.height === 0.215)
-  const pills = descendants(bar!) as unknown as {
-    props: { backgroundColor?: string; borderStyle?: string }
+  const pills = (bar!.children ?? []) as unknown as {
+    props: { backgroundColor?: string; borderStyle?: string; position?: string }
+    children?: unknown[]
   }[]
   expect(pills.every(one => one.props.borderStyle === 'round')).toBe(true)
+  expect(pills.every(one => one.props.position === undefined)).toBe(true)
   expect(pills.map(one => one.props.backgroundColor)).toEqual([
     '#3987e5',
     '#d95926',
@@ -412,7 +414,26 @@ test('the pane draws the window as a bar of pills over its tabs', async ($, on) 
     '#97958d91',
     '#97958d27',
   ])
-  expect(boxes.filter(one => one.props.position !== undefined)).toEqual([])
+  // Under the pointer each pill shows a card naming the rows it draws: a grey
+  // pill draws several.
+  const card = async (key: string) => {
+    const shown = pills
+      .find(one => (one.props as { key?: string }).key === key)
+      ?.children?.find(
+        (one): one is { props: Record<string, unknown>; hover?: unknown } =>
+          typeof one === 'object' && one !== null && 'props' in one,
+      )
+
+    return { props: shown?.props, hover: shown?.hover, text: (await pane.find({ key }))?.text }
+  }
+  const messages = await card('bar-messages')
+  expect(messages.props).toMatchObject({ position: 'absolute', display: 'none' })
+  expect(messages.hover).toEqual({ display: 'flex' })
+  expect(messages.text).toBe('Messages: 60k, 30.0%')
+  expect((await card('bar-mcp-tools')).text).toBe(
+    'MCP tools: 900, 0.4%  ·  Memory files: 700, 0.4%',
+  )
+  expect((await card('bar-free-space')).text).toBe('Free space: 100k, 50.0%')
 
   await pane.unmount()
 })

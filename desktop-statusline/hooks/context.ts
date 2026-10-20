@@ -95,17 +95,24 @@ export function contextRows(breakdown: SessionContextBreakdown): ContextRow[] {
  * neighbouring rows of one colour as one segment, as the desktop's card draws
  * its greys. The free space is the track left over.
  */
-export function barSegments(rows: readonly ContextRow[]): { color: string; tokens: number }[] {
-  const segments: { color: string; tokens: number }[] = []
+export function barSegments(rows: readonly ContextRow[]): BarSegment[] {
+  const segments: BarSegment[] = []
   for (const row of rows) {
     if (row.kind !== 'used' && row.kind !== 'buffer') continue
     const last = segments.at(-1)
-    if (last?.color === row.color) last.tokens += row.tokens
-    else segments.push({ color: row.color, tokens: row.tokens })
+    if (last?.color === row.color) {
+      last.tokens += row.tokens
+      last.rows.push(row)
+    } else {
+      segments.push({ color: row.color, tokens: row.tokens, rows: [row] })
+    }
   }
 
   return segments
 }
+
+/** One pill of the bar: its colour, its tokens, and the rows it draws. */
+export type BarSegment = { color: string; tokens: number; rows: ContextRow[] }
 
 /** A section's title: its own heading, else its id in words. */
 export function sectionTitle(section: Pick<PromptComposeSection, 'id' | 'text'>): string {

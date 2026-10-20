@@ -26,6 +26,11 @@ const BAR_HEIGHT = 0.215
 const BAR_GAP = 0.08
 const BAR_MIN_SEGMENT = 0.25
 const TOKENS_COLUMNS = 7
+// A pill's card: as wide as its text, in footnote type a little narrower than
+// a column a character, and no wider than the pane.
+const CARD_CHARS_PER_COLUMN = 0.75
+// The pane's padding and the card's own border, which the card leaves inside the pane.
+const CARD_EDGE_COLUMNS = 4
 // A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
 // A one-pixel rule between the pieces a tab lists, in the border's own faint colour.
@@ -89,29 +94,67 @@ function Header(props: { ui: Ui; snapshot: ContextSnapshot }) {
  * pill of bare track. Nothing in it is positioned: the desktop draws a
  * positioned Box on a layer of its own, which shifts its colours.
  */
-function Bar(props: { ui: Ui; snapshot: ContextSnapshot }) {
-  const { Box } = props.ui
-  const inWindow = barSegments(props.snapshot.rows)
-  const free = props.snapshot.rows.find(one => one.kind === 'free')?.tokens ?? 0
+function Bar(props: { ui: Ui; snapshot: ContextSnapshot; columns: number }) {
+  const { Box, Text } = props.ui
+  const window = props.snapshot.window
+  const free = props.snapshot.rows.find(one => one.kind === 'free')
+  const segments = [
+    ...barSegments(props.snapshot.rows),
+    ...(free && free.tokens > 0 ? [{ color: FREE, tokens: free.tokens, rows: [free] }] : []),
+  ]
   // Each segment grows by its share of the window, in thousandths: a Box's
   // flexGrow is capped, where a token count is not.
-  const grow = (tokens: number) => (tokens / Math.max(1, props.snapshot.window)) * 1000
+  const grow = (tokens: number) => (tokens / Math.max(1, window)) * 1000
   // Only a Box with a border has rounded corners; a clear one lets the colour
   // fill the whole Box, so each pill keeps the bar's full height.
   const pill = { borderStyle: 'round', borderColor: CLEAR, padding: 0 } as const
 
   return (
     <Box flexDirection="row" width="100%" height={BAR_HEIGHT} columnGap={BAR_GAP}>
-      {inWindow.map(row => (
-        <Box
-          flexGrow={grow(row.tokens)}
-          flexShrink={0}
-          minWidth={BAR_MIN_SEGMENT}
-          {...pill}
-          backgroundColor={row.color}
-        />
-      ))}
-      {free > 0 && <Box flexGrow={grow(free)} flexShrink={1} {...pill} backgroundColor={FREE} />}
+      {segments.map(segment => {
+        // One line, the rows a grey pill draws side by side: the card sits
+        // between the bar and the pane's top, where a second line is cut off.
+        const text = segment.rows
+          .map(
+            row => `${row.name}: ${formatTokens(row.tokens)}, ${formatShare(row.tokens, window)}`,
+          )
+          .join('  ·  ')
+
+        return (
+          // Keyed, so the pointer over a pill shows its card, as the desktop's
+          // own Context card names the segment under the pointer.
+          <Box
+            key={`bar-${slug(segment.rows[0]!.name)}`}
+            flexGrow={grow(segment.tokens)}
+            flexShrink={segment.color === FREE ? 1 : 0}
+            minWidth={BAR_MIN_SEGMENT}
+            {...pill}
+            backgroundColor={segment.color}
+          >
+            <Box
+              // The desktop places the card itself, above the pill. Its width
+              // is the text's own: a card takes no width from a pill this thin.
+              position="absolute"
+              bottom={1}
+              left={0}
+              width={Math.min(
+                props.columns - CARD_EDGE_COLUMNS,
+                Math.ceil(text.length * CARD_CHARS_PER_COLUMN) + 2,
+              )}
+              display="none"
+              hover={{ display: 'flex' }}
+              borderStyle="round"
+              backgroundColor="userMessageBackground"
+              paddingX={1}
+              paddingY={0}
+            >
+              <Text color="text" size="footnote" wrap="truncate-end">
+                {text}
+              </Text>
+            </Box>
+          </Box>
+        )
+      })}
     </Box>
   )
 }
@@ -352,6 +395,8 @@ export type ContextPaneProps = {
   /** The page of the open request or section's text. */
   page: number
   onPage: (page: number) => void
+  /** The pane's width in columns. */
+  columns: number
 }
 
 const STATUS_NOTE: Record<ToolRow['status'], string> = {
@@ -694,9 +739,11 @@ export function ContextPane(props: ContextPaneProps) {
   return (
     <Box flexDirection="column" rowGap={1} paddingX={1}>
       {snapshot ? (
-        <Box flexDirection="column" rowGap={1}>
+        // Room above the heading, so a pill's card has a line between the bar
+        // and the pane's top.
+        <Box flexDirection="column" rowGap={1} paddingTop={1}>
           {Header({ ui: props.ui, snapshot })}
-          {Bar({ ui: props.ui, snapshot })}
+          {Bar({ ui: props.ui, snapshot, columns: props.columns })}
         </Box>
       ) : (
         <Text color="secondaryText">The breakdown appears after Claude's first reply.</Text>

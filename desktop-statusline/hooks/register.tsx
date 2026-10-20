@@ -701,6 +701,7 @@ export const register: Register = on => {
         ),
       onExpand: key => void toggleExpanded($, key),
       page: shownPage,
+      columns: e.props.bodyColumns,
       onPage: next => void update($, page, () => next),
     })
   })
