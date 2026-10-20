@@ -83,6 +83,9 @@ export type TraceState = {
   view: { session: string; token: string } | null
 }
 
+/** The files tracing touches: the settings it writes, and the one folder its traces are kept in. */
+export type TracePlaces = { settings: string; traces: string }
+
 /** The context window broken down, as the pane draws it. */
 export type ContextSnapshot = {
   /** Tokens in use, as /context counts them. */

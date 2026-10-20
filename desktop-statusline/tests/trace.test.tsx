@@ -214,11 +214,16 @@ const PANE = {
 } as const
 
 /** A traced session's engine: tracing on in the settings and in the session's env. */
-function tracedEngine(on: On, files: Record<string, string>, turns = 0) {
-  const settings = { text: JSON.stringify({ env: TRACE_ENV }) }
+function tracedEngine(
+  on: On,
+  files: Record<string, string>,
+  turns = 0,
+  env: Record<string, string> = {},
+) {
+  const settings = { text: JSON.stringify({ env: TRACE_ENV }), written: [] as string[] }
   mock.clock(on, { now: 1_000 })
   mock.store(on)
-  mock.env(on, { HOME: '/home/me', OTEL_LOG_RAW_API_BODIES: '1' })
+  mock.env(on, { HOME: '/home/me', OTEL_LOG_RAW_API_BODIES: '1', ...env })
   const traceFile = (path: string) => /[\\/]traces[\\/]session-1[\\/]([^\\/]+)$/.exec(path)?.[1]
   const isToken = (path: string) => /[\\/]traces[\\/]\.view-token$/.test(path)
   on('fs.exists', async () => ({ value: true }))
@@ -239,13 +244,14 @@ function tracedEngine(on: On, files: Record<string, string>, turns = 0) {
   }))
   on('fs.write', async (_$, e) => {
     settings.text = e.text
+    settings.written.push(e.path)
 
     return { value: undefined }
   })
   on('session.id', async () => ({ value: 'session-1' }))
   on('session.turns', async () => ({ value: turns }))
   on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 5' },
+    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 6' },
   }))
   on('session.model', async () => ({ value: 'Opus 5.5' }))
   on('session.cwd', async () => ({ value: '/repo' }))
@@ -346,6 +352,48 @@ test('turning tracing on writes its env to the user settings', async ($, on) => 
   await pane.press({ key: 'tracing' })
   expect(isTraceOn(JSON.parse(settings.text))).toBe(true)
   expect((await pane.find({ key: 'tracing' }))?.props).toMatchObject({ label: 'Turn off tracing' })
+
+  await pane.unmount()
+})
+
+test('the Trace tab says what turning tracing on changes, and where the traces are kept', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(
+    await pane.find({ type: 'Text', text: /seven telemetry settings to the\s+env\s+block of/ }),
+  ).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '/home/me/.claude/settings.json' })).toBeDefined()
+  expect(
+    await pane.find({ type: 'Text', text: '/home/me/.claude/desktop-statusline/traces' }),
+  ).toBeDefined()
+
+  // On, the list says where its traces are kept.
+  await pane.press({ key: 'tracing' })
+  expect(
+    await pane.find({ type: 'Text', text: /^Kept in .* for 14 days, a folder per session\./ }),
+  ).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('traces are kept under the home folder, wherever CLAUDE_CONFIG_DIR puts the settings', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { CLAUDE_CONFIG_DIR: '/cfg' })
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(await pane.find({ type: 'Text', text: '/cfg/settings.json' })).toBeDefined()
+  expect(
+    await pane.find({ type: 'Text', text: '/home/me/.claude/desktop-statusline/traces' }),
+  ).toBeDefined()
+  await pane.press({ key: 'tracing' })
+  expect(settings.written).toHaveLength(1)
+  expect(settings.written[0]).toMatch(/[\\/]cfg[\\/]settings\.json$/)
 
   await pane.unmount()
 })

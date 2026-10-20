@@ -67,8 +67,9 @@ are four tabs:
 
 **Turn on tracing** in the Trace tab turns on Claude Code's own telemetry for the
 sessions you start after it, in the terminal and in the desktop app alike. It adds
-these to the `env` block of your user settings, and **Turn off tracing** takes back
-the ones it set:
+these to the `env` block of your user settings (`~/.claude/settings.json`, or
+`$CLAUDE_CONFIG_DIR`), so they apply globally, and **Turn off tracing** takes back
+the ones it set and nothing else:
 
 | Variable                              | Value                               |
 | ------------------------------------- | ----------------------------------- |
@@ -82,9 +83,11 @@ the ones it set:
 
 Only the log events are exported, to a small receiver on this machine that the
 plugin starts with [Node.js](https://nodejs.org) (which has to be on your `PATH`).
-One receiver serves every session. It keeps each session's requests under
-`~/.claude/desktop-statusline/traces/` (or `$CLAUDE_CONFIG_DIR`) for 14 days, and
-serves the browser pages on `localhost` only, behind a token it writes beside them.
+One receiver serves every session. It keeps each session's requests in a folder of
+its own under `~/.claude/desktop-statusline/traces/` for 14 days, always there
+whatever `$CLAUDE_CONFIG_DIR` says, and serves the browser pages on `localhost`
+only, behind a token it writes beside them. Delete that folder to remove every
+trace; the Trace tab shows its full path.
 
 A trace holds the whole conversation, file contents and command output included.
 It never leaves your machine, but anyone who can read your files can read it.

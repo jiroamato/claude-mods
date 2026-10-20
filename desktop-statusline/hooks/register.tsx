@@ -1,7 +1,15 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptComposeSection, Register } from 'claude-code'
 
-import type { Effort, GitInfo, PaneTab, TraceItem, TraceState, TraceStatus } from '../types'
+import type {
+  Effort,
+  GitInfo,
+  PaneTab,
+  TraceItem,
+  TracePlaces,
+  TraceState,
+  TraceStatus,
+} from '../types'
 import { buildSnapshot, currentSnapshot } from './context'
 import {
   ContextPane,
@@ -238,15 +246,21 @@ async function configuredEffort($: EngineInterface): Promise<Effort | null> {
   }
 }
 
-/** The user's Claude configuration folder: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
-async function configDir($: EngineInterface): Promise<string> {
-  const configured = await $.env.get('CLAUDE_CONFIG_DIR')
-  if (configured) return configured
+/** The person's home folder. */
+async function homeDir($: EngineInterface): Promise<string> {
   const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
   if (!home)
     throw new SettingsShapeError('Cannot find your home folder, so settings.json was not changed.')
 
-  return `${home}/.claude`
+  return home
+}
+
+/** The user's Claude configuration folder: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
+async function configDir($: EngineInterface): Promise<string> {
+  const configured = await $.env.get('CLAUDE_CONFIG_DIR')
+  if (configured) return configured
+
+  return `${await homeDir($)}/.claude`
 }
 
 /** The user settings file, which `/permissions` and the settings UI also write. */
@@ -359,9 +373,23 @@ async function setRemoved($: EngineInterface, name: string, shouldRemove: boolea
   await refreshContext($)
 }
 
-/** Where the trace receiver keeps each session's requests. */
+/**
+ * Where the trace receiver keeps each session's requests: always
+ * `~/.claude/desktop-statusline/traces`, whatever `$CLAUDE_CONFIG_DIR` says.
+ * One receiver serves every session on the machine, so its folder is one
+ * too, and the person always knows where to find it, or delete it.
+ */
 async function traceRoot($: EngineInterface): Promise<string> {
-  return `${await configDir($)}/desktop-statusline/traces`
+  return `${await homeDir($)}/.claude/desktop-statusline/traces`
+}
+
+/** The files tracing touches, as the Trace tab names them; null where no home folder is set. */
+async function tracePlaces($: EngineInterface): Promise<TracePlaces | null> {
+  try {
+    return { settings: await settingsPath($), traces: await traceRoot($) }
+  } catch {
+    return null
+  }
 }
 
 /** How long the receiver gets to answer once started, before it counts as failed. */
@@ -886,6 +914,7 @@ export const register: Register = on => {
     return ContextPane({
       ui,
       snapshot,
+      places: await tracePlaces($),
       tools: toolRows(seen, knownTools, names, back),
       tab: shown,
       expanded: open,

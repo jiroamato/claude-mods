@@ -7,6 +7,7 @@ import type {
   PromptSection,
   SkillOrigin,
   TraceItem,
+  TracePlaces,
   TraceState,
 } from '../types'
 import { FREE, barSegments, formatShare, formatTokens } from './context'
@@ -566,6 +567,8 @@ export type ContextPaneProps = {
   error: string | null
   /** The conversation's trace, from the trace receiver. */
   trace: TraceState
+  /** The settings file tracing writes and the folder its traces are kept in. */
+  places: TracePlaces | null
   /** Why the last tracing switch failed, if it did. */
   traceError: string | null
   /** The open request of the Trace tab, as text; null when none is open. */
@@ -990,13 +993,37 @@ function SkillsTab(props: ContextPaneProps) {
   )
 }
 
-const TRACE_NOTE: Record<Exclude<TraceState['status'], 'on'>, string> = {
-  off:
-    'Tracing records every request this session sends to the model, the system prompt, the ' +
-    'tools and the messages exactly as sent, and what came back. It turns on Claude Code’s own ' +
-    'telemetry for new sessions, sent only to a receiver on this machine, which keeps the ' +
-    'requests in your Claude folder for 14 days. They hold the whole conversation, file ' +
-    'contents and command output included.',
+/** A path as the person's system writes it: backslashes throughout on Windows. */
+function shownPath(path: string): string {
+  return path.includes('\\') ? path.replace(/\//g, '\\') : path
+}
+
+/** What turning tracing on changes, and where its traces are kept. */
+function tracingNotes(places: TracePlaces | null): string[] {
+  const settings = places ? `\`${shownPath(places.settings)}\`` : 'your user settings'
+  const traces = places ? `\`${shownPath(places.traces)}\`` : 'your home folder'
+
+  return [
+    'Tracing records every request a session sends to the model: the system prompt, the tools ' +
+      'and the messages exactly as sent, and what came back.',
+    `Turning it on adds seven telemetry settings to the \`env\` block of ${settings}, so it ` +
+      'applies to every Claude Code session you start after it, in the terminal and in the ' +
+      'desktop app. Turning it off takes them back out, and nothing else.',
+    `The requests go only to a receiver on this machine, which keeps them in ${traces}, a ` +
+      'folder per session, for 14 days. They hold the whole conversation, file contents and ' +
+      'command output included. Delete the folder to remove them.',
+  ]
+}
+
+/** Where traces are kept, said under the list: the one folder, to find or delete. */
+function keptNote(places: TracePlaces | null): string {
+  return places
+    ? `Kept in \`${shownPath(places.traces)}\` for 14 days, a folder per session. Delete the ` +
+        'folder to remove them.'
+    : 'Kept in your home folder for 14 days.'
+}
+
+const TRACE_NOTE: Record<Exclude<TraceState['status'], 'on' | 'off'>, string> = {
   'next-session':
     'Tracing is on. This session started before it was, so it is not traced: start a new ' +
     'session to trace it.',
@@ -1056,7 +1083,11 @@ function TraceTab(props: ContextPaneProps) {
         )}
       </Box>
       {props.traceError && <Text color="error">{props.traceError}</Text>}
-      {traced.status !== 'on' && Intro({ ui: props.ui, text: TRACE_NOTE[traced.status] })}
+      {traced.status === 'off' &&
+        tracingNotes(props.places).map(text => Intro({ ui: props.ui, text }))}
+      {traced.status !== 'on' &&
+        traced.status !== 'off' &&
+        Intro({ ui: props.ui, text: TRACE_NOTE[traced.status] })}
       {traced.status !== 'on' && switchButton}
       {traced.status === 'on' &&
         Intro({
@@ -1068,6 +1099,7 @@ function TraceTab(props: ContextPaneProps) {
                 'the conversation and what came back. Open one to read it, with its system ' +
                 'prompt, tools and every message.',
         })}
+      {traced.status === 'on' && Intro({ ui: props.ui, text: keptNote(props.places) })}
       {traced.status === 'on' && (
         // The tab's actions on one line: the whole trace, and the switch at the far end.
         <Box flexDirection="row" alignItems="center" columnGap={2}>

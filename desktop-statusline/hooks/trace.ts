@@ -11,7 +11,7 @@ import {
 export const TRACE_PORT = 43180
 
 /** What the receiver's `GET /health` answers (trace/store.mjs keeps the same text). */
-export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 5'
+export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 6'
 /** What every version of the receiver's health answer opens with. */
 export const RECEIVER_NAME = 'desktop-statusline trace receiver'
 
