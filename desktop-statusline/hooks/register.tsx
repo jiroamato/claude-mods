@@ -383,6 +383,28 @@ async function traceRoot($: EngineInterface): Promise<string> {
   return `${await homeDir($)}/.claude/desktop-statusline/traces`
 }
 
+/** What the traces folder says it is, to whoever comes across it. */
+const TRACES_README =
+  'Traces of desktop-statusline, a plugin for Claude Code.\n' +
+  '\n' +
+  'With tracing on (the Trace tab of its Context details pane), every request a\n' +
+  'Claude Code session sends to the model is kept here, a folder per session, for\n' +
+  '14 days. They hold the whole conversation, file contents and command output\n' +
+  'included, and never leave this machine.\n' +
+  '\n' +
+  'Delete this folder to remove every trace. The next session makes it again, empty.\n'
+
+/**
+ * Makes the traces folder if it is missing, so the path the Trace tab names
+ * leads somewhere from the first session after install, tracing on or off.
+ * The engine makes a folder only for a file written in it: the folder's one
+ * is a note on what it holds.
+ */
+async function ensureTraceFolder($: EngineInterface): Promise<void> {
+  const root = await traceRoot($)
+  if (!(await $.fs.exists(root))) await $.fs.write(`${root}/README.txt`, TRACES_README)
+}
+
 /** The files tracing touches, as the Trace tab names them; null where no home folder is set. */
 async function tracePlaces($: EngineInterface): Promise<TracePlaces | null> {
   try {
@@ -709,6 +731,9 @@ export const register: Register = on => {
       await refreshContext($)
       await refreshTrace($)
     })()
+    void ensureTraceFolder($).catch(() => {
+      // No home folder, or it could not be written: the receiver makes the folder when it starts.
+    })
     void (async () => {
       for (const key of await $.store.keys()) {
         if (!key.startsWith(KNOWN_TOOL_PREFIX)) continue

@@ -220,13 +220,18 @@ function tracedEngine(
   turns = 0,
   env: Record<string, string> = {},
 ) {
-  const settings = { text: JSON.stringify({ env: TRACE_ENV }), written: [] as string[] }
+  const settings = {
+    text: JSON.stringify({ env: TRACE_ENV }),
+    written: [] as string[],
+    /** Paths `fs.exists` denies, as the engine resolves them; every other one exists. */
+    missing: [] as RegExp[],
+  }
   mock.clock(on, { now: 1_000 })
   mock.store(on)
   mock.env(on, { HOME: '/home/me', OTEL_LOG_RAW_API_BODIES: '1', ...env })
   const traceFile = (path: string) => /[\\/]traces[\\/]session-1[\\/]([^\\/]+)$/.exec(path)?.[1]
   const isToken = (path: string) => /[\\/]traces[\\/]\.view-token$/.test(path)
-  on('fs.exists', async () => ({ value: true }))
+  on('fs.exists', async (_$, e) => ({ value: !settings.missing.some(one => one.test(e.path)) }))
   on('fs.read', async (_$, e) => {
     if (isToken(e.path)) return { value: '0123456789abcdef0123456789abcdef' }
     const name = traceFile(e.path)
@@ -243,7 +248,7 @@ function tracedEngine(
     })),
   }))
   on('fs.write', async (_$, e) => {
-    settings.text = e.text
+    if (e.path.endsWith('settings.json')) settings.text = e.text
     settings.written.push(e.path)
 
     return { value: undefined }
@@ -394,6 +399,32 @@ test('traces are kept under the home folder, wherever CLAUDE_CONFIG_DIR puts the
   await pane.press({ key: 'tracing' })
   expect(settings.written).toHaveLength(1)
   expect(settings.written[0]).toMatch(/[\\/]cfg[\\/]settings\.json$/)
+
+  await pane.unmount()
+})
+
+test('a session makes the traces folder when it is missing, tracing on or off', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = '{}'
+  settings.missing = [/[\\/]\.claude[\\/]desktop-statusline[\\/]traces$/]
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  expect(settings.written).toHaveLength(1)
+  expect(settings.written[0]).toMatch(
+    /[\\/]home[\\/]me[\\/]\.claude[\\/]desktop-statusline[\\/]traces[\\/]README\.txt$/,
+  )
+
+  await pane.unmount()
+})
+
+test('a session leaves a traces folder that is there as it is', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  expect(settings.written).toEqual([])
 
   await pane.unmount()
 })
