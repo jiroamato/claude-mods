@@ -50,12 +50,13 @@ are four tabs:
   by hand works too.
 - **Prompt**: the system prompt, section by section, with each section's approximate
   size. Open a section to read its text. With tracing on, it shows the prompt exactly
-  as the last request sent it. Sections marked _added_ come from outside Claude Code's
-  own prompt: the output style, the line that introduces Claude, and the desktop
-  app's own instructions.
+  as the last request sent it, in two groups: Claude Code's own sections, and what was
+  added from outside it, such as the output style, the line that introduces Claude and
+  the desktop app's own instructions.
 - **Skills**: each skill's listing as Claude sees it, read-only for now: the ones you
   installed apart from the ones Claude Code and the desktop app bring.
-- **Trace**: every request the session sends to the model, newest first, with what it
+- **Trace**: every request the session sends to the model, newest first, the
+  conversation's apart from side requests such as titles and subagents, with what it
   added to the conversation, what came back, and its tokens, cost and time. Open one
   for a preview, then **Read it whole here**: its system prompt, every tool definition
   and every message, as the model received them, with a search that steps through

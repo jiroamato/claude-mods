@@ -296,9 +296,14 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  // A card of the main loop's requests, as the Tools and Skills tabs group theirs.
+  expect(
+    await pane.find({ key: 'trace-main', text: /^Conversation1 request · \$0\.25/ }),
+  ).toBeDefined()
+  expect(await pane.find({ key: 'trace-side' })).toBeUndefined()
   expect((await pane.find({ type: 'Client', key: 'disclose-trace-0' }))?.props.props).toMatchObject(
     {
-      label: '#1 Main',
+      label: '#1',
       tag: '12:00:05',
       isOpen: false,
     },
@@ -316,12 +321,12 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
   )
 
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-prompt' })
+  // What came from outside Claude Code's own prompt is a card of its own.
+  const added = await pane.find({ key: 'prompt-added' })
+  expect(added?.text).toMatch(/^Added outside Claude Code\d+ sections · ~\d+/)
   expect(
     (await pane.find({ type: 'Client', key: 'disclose-prompt-billing-0' }))?.props.props,
-  ).toMatchObject({
-    label: 'Billing header',
-    tag: 'added',
-  })
+  ).toMatchObject({ label: 'Billing header' })
   const sections = (await pane.findAll({ type: 'Client' }))
     .filter(one => String(one.props.key).startsWith('disclose-prompt-'))
     .map(one => (one.props.props as { label: string }).label)

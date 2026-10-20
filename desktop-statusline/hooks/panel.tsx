@@ -15,7 +15,7 @@ import type { ReaderBarProps } from './reader'
 import { TAB_PREFIX } from './tabs'
 import type { TabProps } from './tabs'
 import type { ToolRow } from './tools'
-import { MAX_MATCHES, sourceLabel, viewLink } from './trace'
+import { MAX_MATCHES, isMainSource, sourceLabel, viewLink } from './trace'
 
 /** The pane the percentage opens. */
 export const PANE_ID = 'context-map'
@@ -304,8 +304,8 @@ function RequestText(props: { ui: Ui; text: string | null }) {
 
 /** The key prefix of a row that opens, which the hooks module hears it post under. */
 export const DISCLOSURE_PREFIX = 'disclose-'
-// A row's own padding and its chevron's column, so what sits under the label lines up with it.
-const DISCLOSURE_INDENT = 4.6
+// The chevron's column and the gap after it, so what sits under the label lines up with it.
+const DISCLOSURE_INDENT = 2.6
 
 /**
  * A row that opens what is under it: the chevron, the label, the figure at the
@@ -319,7 +319,16 @@ function DisclosureRow(props: { ui: Ui; row: DisclosureProps }) {
     // region: a region draws no icon, and an icon over it would take the press.
     // The region, laid over the icon with no background of its own, lets it
     // show and takes the press on the whole row.
-    <Box flexDirection="row" alignItems="center" height={1} paddingLeft={CARET_INSET}>
+    // Set out into its card's padding by the row's own, so the chevron lines up
+    // with the card's heading and the figure with its figures, as the lit row
+    // runs past them both.
+    <Box
+      flexDirection="row"
+      alignItems="center"
+      height={1}
+      paddingLeft={CARET_INSET}
+      marginX={-CARET_INSET}
+    >
       <Svg
         source={props.row.isOpen ? CARET_DOWN : CARET_RIGHT}
         alt={props.row.isOpen ? 'open' : 'closed'}
@@ -430,6 +439,8 @@ function Group(props: {
   tokens?: number
   /** Said after the size, as `when loaded`. */
   tokensNote?: string
+  /** A last figure, as a cost. */
+  extra?: string
   children: JSX.Element
 }) {
   const { Box, Text } = props.ui
@@ -438,6 +449,7 @@ function Group(props: {
     ...(props.tokens === undefined
       ? []
       : [`~${formatTokens(props.tokens)}${props.tokensNote ? ` ${props.tokensNote}` : ''}`]),
+    ...(props.extra === undefined ? [] : [props.extra]),
   ].join(' · ')
 
   return (
@@ -453,6 +465,17 @@ function Group(props: {
         </Text>
       </Box>
       <Box height={HAIRLINE} flexShrink={0} backgroundColor={RULE} />
+      {props.children}
+    </Box>
+  )
+}
+
+/** A tab's groups, stacked under its intro with room between each. */
+function Groups(props: { ui: Ui; children: JSX.Element[] }) {
+  const { Box } = props.ui
+
+  return (
+    <Box flexDirection="column" rowGap={2} paddingTop={1}>
       {props.children}
     </Box>
   )
@@ -763,8 +786,9 @@ function ToolsTab(props: ContextPaneProps) {
           'it) and adds it to `permissions.deny` in your user settings, so new sessions in every ' +
           'project start without it. Put back undoes both.',
       })}
-      <Box flexDirection="column" rowGap={2} paddingTop={1}>
-        {groups.map(group =>
+      {Groups({
+        ui: props.ui,
+        children: groups.map(group =>
           Group({
             ui: props.ui,
             id: `group-${slug(group.label)}`,
@@ -780,19 +804,39 @@ function ToolsTab(props: ContextPaneProps) {
             tokensNote: 'isDeferred' in group ? 'when loaded' : undefined,
             children: ToolLines({ ...props, rows: group.rows }),
           }),
-        )}
-      </Box>
+        ),
+      })}
     </Box>
   )
 }
 
 /** The Prompt tab: the system prompt section by section, each opening to its text. */
 function PromptTab(props: ContextPaneProps) {
-  const { Box, Code, Button, Text } = props.ui
+  const { Box } = props.ui
   const sent = props.trace.prompt
   const sections: PromptSection[] = sent ?? props.snapshot?.prompt ?? []
   const counted = rowTokens(props.snapshot, 'System prompt') ?? 0
-  const unread = sent ? 0 : counted - sections.reduce((sum, one) => sum + one.tokens, 0)
+  const unread = sent ? 0 : counted - sumTokens(sections)
+  const section = (one: PromptSection) => {
+    const id = `prompt-${slug(one.id)}`
+    const isOpen = props.expanded.includes(id)
+
+    return (
+      <Box key={id} flexDirection="column" rowGap={1}>
+        {DisclosureRow({
+          ui: props.ui,
+          row: { id, label: one.title, figure: `~${formatTokens(one.tokens)}`, isOpen },
+        })}
+        {isOpen && Paged({ ui: props.ui, text: one.text, page: props.page, onPage: props.onPage })}
+      </Box>
+    )
+  }
+  const own = sections.filter(one => !one.isAdded)
+  const added = sections.filter(one => one.isAdded)
+  const groups = [
+    { id: 'prompt-own', label: 'Claude Code’s prompt', sections: own },
+    { id: 'prompt-added', label: 'Added outside Claude Code', sections: added },
+  ].filter(group => group.sections.length > 0)
 
   return (
     <Box flexDirection="column" rowGap={1}>
@@ -808,57 +852,48 @@ function PromptTab(props: ContextPaneProps) {
           sections.length === 0
             ? "The system prompt appears after Claude's first reply."
             : sent
-              ? 'The system prompt exactly as the last request sent it, in order. Sections ' +
-                'marked `added` come from outside Claude Code’s own prompt: the output style, ' +
-                'the line that introduces Claude, and the app’s own instructions.'
-              : 'The system prompt as this session composes it, section by section. Sizes are ' +
-                "estimated from each section's text. Turn tracing on (the Trace tab) to see " +
-                'it exactly as sent.',
+              ? 'The system prompt exactly as the last request sent it: Claude Code’s own ' +
+                'sections, then what was added around them, such as the output style, the line ' +
+                'that introduces Claude and the app’s own instructions.'
+              : 'The system prompt as this session composes it. Sizes are estimated from each ' +
+                "section's text. Turn on tracing (the Trace tab) to see it exactly as sent.",
       })}
-      {sections.length > 0 &&
-        Ruled({
-          ui: props.ui,
-          children: sections.map(section => {
-            const id = `prompt-${slug(section.id)}`
-            const isOpen = props.expanded.includes(id)
-
-            return (
-              <Box key={id} flexDirection="column" rowGap={1}>
-                {DisclosureRow({
+      {Groups({
+        ui: props.ui,
+        children: [
+          ...groups.map(group =>
+            Group({
+              ui: props.ui,
+              id: group.id,
+              label: group.label,
+              count: group.sections.length,
+              noun: 'section',
+              tokens: sumTokens(group.sections),
+              children: Ruled({ ui: props.ui, children: group.sections.map(section) }),
+            }),
+          ),
+          // What /context counts that no plugin can read, so the groups add up to the row.
+          ...(unread >= UNREAD_MIN_TOKENS
+            ? [
+                Group({
                   ui: props.ui,
-                  row: {
-                    id,
-                    label: section.title,
-                    ...(section.isAdded ? { tag: 'added' } : {}),
-                    figure: `~${formatTokens(section.tokens)}`,
-                    isOpen,
-                  },
-                })}
-                {isOpen &&
-                  Paged({
+                  id: 'prompt-unread',
+                  label: 'Added outside Claude Code',
+                  count: 1,
+                  noun: 'part',
+                  tokens: unread,
+                  children: ItemLine({
                     ui: props.ui,
-                    text: section.text,
-                    page: props.page,
-                    onPage: props.onPage,
-                  })}
-              </Box>
-            )
-          }),
-        })}
-      {unread >= UNREAD_MIN_TOKENS && (
-        // What /context counts that no plugin can read, so the list adds up to the row.
-        <Box flexDirection="row" alignItems="flex-start" columnGap={1} paddingTop={1}>
-          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-            <Text color="secondaryText">Not readable by plugins</Text>
-            <Text color="subtle" size="footnote">
-              The rest of what /context counts: the output style, the line that introduces Claude,
-              and any instructions the app or --append-system-prompt adds. Turn on tracing to see
-              them.
-            </Text>
-          </Box>
-          {Figure({ ui: props.ui, text: `~${formatTokens(unread)}` })}
-        </Box>
-      )}
+                    item: { name: 'Not readable by plugins', tokens: unread, detail: '' },
+                    note:
+                      'The output style, the line that introduces Claude, and any instructions ' +
+                      'the app or --append-system-prompt adds. Turn on tracing to see them.',
+                  }),
+                }),
+              ]
+            : []),
+        ],
+      })}
     </Box>
   )
 }
@@ -892,8 +927,9 @@ function SkillsTab(props: ContextPaneProps) {
             : "Each skill's listing as the model sees it: the ones you added, then the ones " +
               'Claude Code and the desktop app bring. Removing skills is not supported yet.',
       })}
-      <Box flexDirection="column" rowGap={2} paddingTop={1}>
-        {groups.map(group =>
+      {Groups({
+        ui: props.ui,
+        children: groups.map(group =>
           Group({
             ui: props.ui,
             id: `skills-${group.origin}`,
@@ -919,8 +955,8 @@ function SkillsTab(props: ContextPaneProps) {
               )),
             }),
           }),
-        )}
-      </Box>
+        ),
+      })}
     </Box>
   )
 }
@@ -999,73 +1035,109 @@ function TraceTab(props: ContextPaneProps) {
           text:
             items.length === 0
               ? 'Tracing is on. Each request appears here once it is sent.'
-              : 'Each request this session sent, newest first: what it added to the ' +
-                'conversation, and what came back. Open one to read it, or read any request ' +
-                'whole in your browser: its system prompt, tools and every message.',
+              : 'Each request this session sent to the model, newest first: what it added to ' +
+                'the conversation and what came back. Open one to read it, with its system ' +
+                'prompt, tools and every message.',
         })}
-      {traced.status === 'on' && traced.view && items.length > 0 && (
-        <Link
-          href={viewLink(traced.view.session, traced.view.token)}
-          label="Open the whole trace in your browser"
-        />
+      {traced.status === 'on' && (
+        // The tab's actions on one line: the whole trace, and the switch at the far end.
+        <Box flexDirection="row" alignItems="center" columnGap={2}>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            {traced.view && items.length > 0 && (
+              <Link
+                href={viewLink(traced.view.session, traced.view.token)}
+                label="Open the whole trace in your browser"
+              />
+            )}
+          </Box>
+          {switchButton}
+        </Box>
       )}
-      {items.length > 0 &&
-        Ruled({
-          ui: props.ui,
-          children: items.map(item => {
-            const id = `trace-${item.seq}`
-            const isOpen = props.expanded.includes(id)
-
-            return (
-              <Box key={id} flexDirection="column" rowGap={1}>
-                <Box flexDirection="column">
-                  {DisclosureRow({
-                    ui: props.ui,
-                    row: {
-                      id,
-                      label: `#${item.seq + 1} ${sourceLabel(item.source)}`,
-                      tag: clock(item.at),
-                      figure: usageLine(item),
-                      isOpen,
-                    },
-                  })}
-                  {/* Under the label, past the chevron. */}
-                  <Box flexDirection="column" paddingLeft={DISCLOSURE_INDENT}>
-                    <Text color="subtle" wrap="truncate-end">
-                      {`+ ${item.added.join(', ') || 'nothing new'}`}
-                    </Text>
-                    {item.reply !== null && (
-                      <Text color="subtle" wrap="truncate-end">
-                        {`→ ${item.reply}`}
-                      </Text>
-                    )}
-                  </Box>
-                </Box>
-                {isOpen && RequestText({ ui: props.ui, text: props.traceText })}
-                {isOpen && (
-                  <Box flexDirection="row" alignItems="center" columnGap={2}>
-                    <Button
-                      key={`read-${item.seq}`}
-                      label="Read it whole here"
-                      variant="primary"
-                      onPress={() => props.onRead(item.seq)}
-                    />
-                    {traced.view && (
-                      <Link
-                        href={viewLink(traced.view.session, traced.view.token, item.seq)}
-                        label="Open in your browser"
-                      />
-                    )}
-                  </Box>
-                )}
-              </Box>
-            )
-          }),
-        })}
-      {traced.status === 'on' && <Box paddingTop={1}>{switchButton}</Box>}
+      {Groups({
+        ui: props.ui,
+        children: TRACE_GROUPS.map(group => ({
+          ...group,
+          items: items.filter(item => isMainSource(item.source) === group.isMain),
+        }))
+          .filter(group => group.items.length > 0)
+          .map(group =>
+            Group({
+              ui: props.ui,
+              id: `trace-${group.isMain ? 'main' : 'side'}`,
+              label: group.label,
+              count: group.items.length,
+              noun: 'request',
+              extra: `$${group.items.reduce((sum, one) => sum + (one.usage?.costUsd ?? 0), 0).toFixed(2)}`,
+              children: Ruled({
+                ui: props.ui,
+                children: group.items.map(item => traceRow(item, group.isMain)),
+              }),
+            }),
+          ),
+      })}
     </Box>
   )
+
+  function traceRow(item: TraceItem, isMain: boolean) {
+    const id = `trace-${item.seq}`
+    const isOpen = props.expanded.includes(id)
+
+    return (
+      <Box key={id} flexDirection="column" rowGap={1}>
+        <Box flexDirection="column">
+          {DisclosureRow({
+            ui: props.ui,
+            row: {
+              id,
+              // Its group names the main loop; a side request says where it came from.
+              label: isMain ? `#${item.seq + 1}` : `#${item.seq + 1} ${sourceLabel(item.source)}`,
+              tag: clock(item.at),
+              figure: usageLine(item),
+              isOpen,
+            },
+          })}
+          {/* Under the label, past the chevron: a padding is drawn in whole cells, a width is not. */}
+          <Box flexDirection="row">
+            <Box width={DISCLOSURE_INDENT} flexShrink={0} />
+            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+              <Text color="subtle" wrap="truncate-end">
+                {`+ ${item.added.join(', ') || 'nothing new'}`}
+              </Text>
+              {item.reply !== null && (
+                <Text color="subtle" wrap="truncate-end">
+                  {`→ ${item.reply}`}
+                </Text>
+              )}
+            </Box>
+          </Box>
+        </Box>
+        {isOpen && RequestText({ ui: props.ui, text: props.traceText })}
+        {isOpen && (
+          <Box flexDirection="row" alignItems="center" columnGap={2}>
+            <Button
+              key={`read-${item.seq}`}
+              label="Read it whole here"
+              variant="primary"
+              onPress={() => props.onRead(item.seq)}
+            />
+            {traced.view && (
+              <Link
+                href={viewLink(traced.view.session, traced.view.token, item.seq)}
+                label="Open in your browser"
+              />
+            )}
+          </Box>
+        )}
+      </Box>
+    )
+  }
 }
+
+// The main loop's requests, then the ones made beside it (titles, subagents, compaction).
+const TRACE_GROUPS: readonly { isMain: boolean; label: string }[] = [
+  { isMain: true, label: 'Conversation' },
+  { isMain: false, label: 'Side requests' },
+]
 
 /**
  * The pane: the window as a bar, then a tab for each thing the desktop's own
