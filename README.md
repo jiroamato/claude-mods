@@ -41,7 +41,8 @@ a segment to see what it holds, each row a grey segment draws named in turn. Und
 are four tabs:
 
 - **Tools**: every built-in tool with a one-line summary and its approximate size,
-  grouped as in the context, deferred (loaded on demand), and removed. **Remove** takes a tool
+  grouped as in the context, deferred (loaded on demand), and removed, each group open
+  until you close it. **Remove** takes a tool
   out of the open session at once (its schema leaves the context and Claude can no
   longer call it) and adds its name to `permissions.deny` in your user settings
   (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR`), so new sessions in every

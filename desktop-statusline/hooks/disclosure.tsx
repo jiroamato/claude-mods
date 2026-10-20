@@ -9,6 +9,8 @@ export type DisclosureProps = {
   /** Right-aligned: a size, a cost. */
   figure: string
   isOpen: boolean
+  /** A card's heading: its label set as the card's, its figures smaller. */
+  isHeading?: boolean
 }
 
 /** What the row posts to the hooks module when pressed. */
@@ -72,13 +74,17 @@ export default function Disclosure(
       {/* The chevron's room: the pane draws the icon under this region. */}
       <Box width={1.6} flexShrink={0} />
       <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text color="text" wrap="truncate-end">
+        <Text
+          color="text"
+          wrap="truncate-end"
+          {...(props.isHeading ? { weight: 'semibold' as const } : {})}
+        >
           {props.label}
         </Text>
         {props.tag !== undefined && <Text color="subtle">{props.tag}</Text>}
       </Box>
       <Box flexShrink={0}>
-        <Text color="subtle" tabular>
+        <Text color="subtle" tabular {...(props.isHeading ? { size: 'footnote' as const } : {})}>
           {props.figure}
         </Text>
       </Box>

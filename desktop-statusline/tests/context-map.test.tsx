@@ -552,10 +552,11 @@ test('removing a tool denies it in the settings and moves it out of the window a
   expect((await pane.find({ key: 'toggle-EnterPlanMode' }))?.props).toMatchObject({
     label: 'Put back',
   })
-  // Grouped: the removed tool under its own label.
-  expect((await pane.find({ key: 'group-removed' }))?.text).toMatch(
-    /^Removed1 tool · ~181EnterPlanMode/,
-  )
+  // Grouped: the removed tool under its own heading.
+  expect(
+    (await pane.find({ type: 'Client', key: 'disclose-group-removed' }))?.props.props,
+  ).toMatchObject({ label: 'Removed', figure: '1 tool · ~181', isOpen: true, isHeading: true })
+  expect((await pane.find({ key: 'group-removed' }))?.text).toMatch(/^EnterPlanMode/)
 
   const before = invalidated
   await pane.press({ key: 'toggle-Bash' })
@@ -742,6 +743,35 @@ test('a skill is the person’s, Anthropic’s or the organization’s by where 
   expect(skillOrigin({ name: 'treg', source: 'userSettings' })).toBe('yours')
   expect(skillOrigin({ name: 'review', source: 'plugin', pluginName: 'reviewer' })).toBe('yours')
   expect(skillOrigin({ name: 'policy', source: 'policySettings' })).toBe('organization')
+})
+
+test('each group of tools opens and closes on its own, and starts open', async ($, on) => {
+  engine(on, { text: '{"permissions":{"deny":["EnterPlanMode"]}}' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  await $.tool.describe({ tool: 'Bash', description: 'Executes a command.', provider: ENGINE })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const heading = async (id: string) =>
+    (await pane.find({ type: 'Client', key: `disclose-${id}` }))?.props.props as
+      { label: string; isOpen: boolean } | undefined
+
+  expect(await heading('group-in-context')).toMatchObject({ label: 'In context', isOpen: true })
+  expect(await pane.find({ key: 'tool-Bash' })).toBeDefined()
+
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-group-in-context' })
+  expect((await heading('group-in-context'))?.isOpen).toBe(false)
+  expect(await pane.find({ key: 'tool-Bash' })).toBeUndefined()
+  // The other groups stay as they were, and so does an open prompt section.
+  expect((await heading('group-removed'))?.isOpen).toBe(true)
+  await openTab(pane, 'prompt')
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-prompt-intro' })
+  await openTab(pane, 'tools')
+  expect((await heading('group-in-context'))?.isOpen).toBe(false)
+
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-group-in-context' })
+  expect((await heading('group-in-context'))?.isOpen).toBe(true)
+  expect(await pane.find({ key: 'tool-Bash' })).toBeDefined()
+
+  await pane.unmount()
 })
 
 test('a row that opens lights under the pointer and goes dark when it leaves', async ($, on) => {

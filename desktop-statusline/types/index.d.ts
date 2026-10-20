@@ -122,6 +122,8 @@ declare module 'claude-code' {
       context: ContextSnapshot | null
       /** Which of the pane's system prompt sections are open, by key. */
       expanded: string[]
+      /** Which of the pane's groups are closed, by key: a group is open until closed. */
+      collapsed: string[]
       /** The pane's open tab. */
       tab: PaneTab
       /** Which page of the open request's or section's text is shown, from 0. */

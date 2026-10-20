@@ -426,9 +426,13 @@ function Intro(props: { ui: Ui; text: string }) {
 // Inline code's ground: the raised surface the desktop sets code on.
 const INLINE_CODE = 'bashMessageBackgroundColor'
 
+/** The key prefix of a group that opens and closes, as the hooks module keeps it closed. */
+export const GROUP_PREFIX = 'group-'
+
 /**
  * A group of what a tab lists, set apart as a card: its name, then how many
- * it holds and their size, then the list.
+ * it holds and their size, then the list. Given `isOpen`, its heading is a
+ * row that opens and closes the list.
  */
 function Group(props: {
   ui: Ui
@@ -441,6 +445,8 @@ function Group(props: {
   tokensNote?: string
   /** A last figure, as a cost. */
   extra?: string
+  /** Whether the list shows, for a group that opens and closes. */
+  isOpen?: boolean
   children: JSX.Element
 }) {
   const { Box, Text } = props.ui
@@ -451,6 +457,25 @@ function Group(props: {
       : [`~${formatTokens(props.tokens)}${props.tokensNote ? ` ${props.tokensNote}` : ''}`]),
     ...(props.extra === undefined ? [] : [props.extra]),
   ].join(' · ')
+
+  if (props.isOpen !== undefined) {
+    return (
+      <Box key={props.id} flexDirection="column" rowGap={1} borderStyle="round">
+        {DisclosureRow({
+          ui: props.ui,
+          row: {
+            id: props.id,
+            label: props.label,
+            figure: figures,
+            isOpen: props.isOpen,
+            isHeading: true,
+          },
+        })}
+        {props.isOpen && <Box height={HAIRLINE} flexShrink={0} backgroundColor={RULE} />}
+        {props.isOpen && props.children}
+      </Box>
+    )
+  }
 
   return (
     <Box key={props.id} flexDirection="column" rowGap={1} borderStyle="round">
@@ -534,6 +559,8 @@ export type ContextPaneProps = {
   tab: PaneTab
   /** Keys of the sections that are open. */
   expanded: readonly string[]
+  /** Keys of the groups that are closed: a group is open until closed. */
+  collapsed: readonly string[]
   /** Why the last Remove or Put back failed, if it did. */
   error: string | null
   /** The conversation's trace, from the trace receiver. */
@@ -791,8 +818,9 @@ function ToolsTab(props: ContextPaneProps) {
         children: groups.map(group =>
           Group({
             ui: props.ui,
-            id: `group-${slug(group.label)}`,
+            id: `${GROUP_PREFIX}${slug(group.label)}`,
             label: group.label,
+            isOpen: !props.collapsed.includes(`${GROUP_PREFIX}${slug(group.label)}`),
             count: group.rows.length,
             noun: 'tool',
             // What loads on demand is out of the window: its size is what it

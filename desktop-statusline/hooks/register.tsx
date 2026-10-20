@@ -6,6 +6,7 @@ import { buildSnapshot, currentSnapshot } from './context'
 import {
   ContextPane,
   DISCLOSURE_PREFIX,
+  GROUP_PREFIX,
   PANE_ID,
   PANE_TITLE,
   READER_HIT_KEY,
@@ -60,6 +61,7 @@ const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
 const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, null)
 const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, null)
 const expanded = atom({ plugin: 'desktop-statusline', key: 'expanded' } as const, [])
+const collapsed = atom({ plugin: 'desktop-statusline', key: 'collapsed' } as const, [])
 const page = atom({ plugin: 'desktop-statusline', key: 'page' } as const, 0)
 const reader = atom({ plugin: 'desktop-statusline', key: 'reader' } as const, null)
 const readerSearch = atom({ plugin: 'desktop-statusline', key: 'readerSearch' } as const, {
@@ -783,7 +785,14 @@ export const register: Register = on => {
     if (e.element.startsWith(TAB_PREFIX) && isTab(picked)) await update($, tab, () => picked)
     const toggled = (e.data as Partial<DisclosurePick> | null)?.toggle
     if (e.element.startsWith(DISCLOSURE_PREFIX) && typeof toggled === 'string') {
-      await toggleExpanded($, toggled)
+      // A group opens and closes on its own; a section opens alone.
+      if (toggled.startsWith(GROUP_PREFIX)) {
+        await update($, collapsed, keys =>
+          keys.includes(toggled) ? keys.filter(key => key !== toggled) : [...keys, toggled],
+        )
+      } else {
+        await toggleExpanded($, toggled)
+      }
     }
     if (e.element === READER_KEY && (e.data as Partial<ReaderBarPick> | null)?.back) {
       await update($, reader, () => null)
@@ -802,6 +811,7 @@ export const register: Register = on => {
     const [
       snapshot,
       open,
+      closed,
       shown,
       seen,
       names,
@@ -815,6 +825,7 @@ export const register: Register = on => {
     ] = await Promise.all([
       read($, context).then(currentSnapshot),
       read($, expanded),
+      read($, collapsed),
       read($, tab),
       read($, tools),
       read($, removed),
@@ -878,6 +889,7 @@ export const register: Register = on => {
       tools: toolRows(seen, knownTools, names, back),
       tab: shown,
       expanded: open,
+      collapsed: closed,
       error,
       trace: traced,
       traceError: tracingError,
