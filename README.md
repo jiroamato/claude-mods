@@ -49,10 +49,10 @@ are four tabs:
   without comes back in the next session. Deleting the name from `permissions.deny`
   by hand works too.
 - **Prompt**: the system prompt, section by section, with each section's approximate
-  size. Open a section to read its text. With tracing on, it is the prompt exactly as
-  the last request sent it, the parts the engine adds outside its own sections marked
-  _added_: the output style, the line that names Claude, the desktop app's own
-  instructions.
+  size. Open a section to read its text. With tracing on, it shows the prompt exactly
+  as the last request sent it. Sections marked _added_ come from outside Claude Code's
+  own prompt: the output style, the line that introduces Claude, and the desktop
+  app's own instructions.
 - **Skills**: each skill's listing as Claude sees it, read-only for now: the ones you
   installed apart from the ones Claude Code and the desktop app bring.
 - **Trace**: every request the session sends to the model, newest first, with what it

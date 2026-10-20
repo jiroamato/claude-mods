@@ -769,9 +769,9 @@ function PromptTab(props: ContextPaneProps) {
           sections.length === 0
             ? "The system prompt appears after Claude's first reply."
             : sent
-              ? 'The system prompt exactly as the last request sent it, in order. The engine’s own ' +
-                'sections, and marked added what came from outside them: the output style, the ' +
-                'line that names Claude, an app’s own instructions.'
+              ? 'The system prompt exactly as the last request sent it, in order. Sections ' +
+                'marked “added” come from outside Claude Code’s own prompt: the output style, ' +
+                'the line that introduces Claude, and the app’s own instructions.'
               : 'The system prompt as this session composes it, section by section. Sizes are ' +
                 "estimated from each section's text. Turn tracing on (the Trace tab) to see " +
                 'it exactly as sent.',
@@ -812,8 +812,8 @@ function PromptTab(props: ContextPaneProps) {
           <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
             <Text color="secondaryText">Not readable by plugins</Text>
             <Text color="subtle" size="footnote">
-              The rest of what /context counts: the output style, the line that names Claude Code,
-              and any instructions the app or an --append-system-prompt adds. Turn tracing on to see
+              The rest of what /context counts: the output style, the line that introduces Claude,
+              and any instructions the app or --append-system-prompt adds. Turn on tracing to see
               them.
             </Text>
           </Box>
