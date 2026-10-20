@@ -12,7 +12,8 @@ import type {
 import { FREE, barSegments, formatShare, formatTokens } from './context'
 import type { DisclosureProps } from './disclosure'
 import type { ReaderBarProps } from './reader'
-import type { TabStripProps } from './tabs'
+import { TAB_PREFIX } from './tabs'
+import type { TabProps } from './tabs'
 import type { ToolRow } from './tools'
 import { MAX_MATCHES, sourceLabel, viewLink } from './trace'
 
@@ -159,35 +160,60 @@ function Bar(props: { ui: Ui; snapshot: ContextSnapshot; columns: number }) {
   )
 }
 
-/** The key of the tab strip's region, which the hooks module hears it post under. */
-export const TABS_KEY = 'tabs'
-
 /**
  * The tab strip: each tab's label and, where /context counts it, its tokens.
  * A region of its own (./tabs.tsx), so the whole pill of a tab takes the press.
  */
 function Tabs(props: ContextPaneProps) {
-  const { Client } = props.ui
-  const strip: TabStripProps = {
-    open: props.tab,
-    tabs: TABS.map(tab => {
-      const tokens = rowTokens(props.snapshot, tab.row)
-      const count = props.trace.items.length
-      const figure =
-        tab.id === 'trace'
-          ? count > 0
-            ? String(count)
-            : null
-          : tokens === null
-            ? null
-            : formatTokens(tokens)
+  const { Box, Client } = props.ui
 
-      return { id: tab.id, label: tab.label, figure }
-    }),
-  }
+  return (
+    // A recessed track, each tab a region of its own on it (./tabs.tsx).
+    <Box
+      flexDirection="row"
+      columnGap="xs"
+      padding="xs"
+      borderStyle="round"
+      borderColor={CLEAR}
+      backgroundColor={TAB_TRACK}
+    >
+      {TABS.map((tab, index) => {
+        const tokens = rowTokens(props.snapshot, tab.row)
+        const count = props.trace.items.length
+        const figure =
+          tab.id === 'trace'
+            ? count > 0
+              ? String(count)
+              : null
+            : tokens === null
+              ? null
+              : formatTokens(tokens)
+        const one: TabProps = {
+          id: tab.id,
+          label: tab.label,
+          figure,
+          isOpen: props.tab === tab.id,
+          previous: TABS[index - 1]?.id ?? null,
+          next: TABS[index + 1]?.id ?? null,
+        }
 
-  return <Client key={TABS_KEY} module="./tabs.tsx" props={strip} width="100%" />
+        // Each tab an equal share of the strip, whatever its label.
+        return (
+          <Client
+            key={`${TAB_PREFIX}${tab.id}`}
+            module="./tabs.tsx"
+            props={one}
+            width={0}
+            flexGrow={1}
+          />
+        )
+      })}
+    </Box>
+  )
 }
+
+// The strip's track, recessed under its tabs.
+const TAB_TRACK = '#0000004d'
 
 /** Where each page of `text` starts: about PAGE_CHARS apart, each at a line's start. */
 export function pageStarts(text: string): number[] {
@@ -370,13 +396,26 @@ function sumTokens(items: readonly { tokens: number }[]): number {
 /** What a tab says before it lists its pieces: small and muted, so the list leads. */
 function Intro(props: { ui: Ui; text: string }) {
   const { Text } = props.ui
+  // A word in backticks reads as inline code, as Markdown draws it.
+  const parts = props.text.split(/(`[^`]+`)/).filter(part => part !== '')
 
   return (
     <Text color="subtle" size="footnote">
-      {props.text}
+      {parts.map(part =>
+        /^`[^`]+`$/.test(part) ? (
+          <Text mono color="text" backgroundColor={INLINE_CODE}>
+            {` ${part.slice(1, -1)} `}
+          </Text>
+        ) : (
+          part
+        ),
+      )}
     </Text>
   )
 }
+
+// Inline code's ground: the raised surface the desktop sets code on.
+const INLINE_CODE = 'bashMessageBackgroundColor'
 
 /**
  * A group of what a tab lists, set apart as a card: its name, then how many
@@ -770,7 +809,7 @@ function PromptTab(props: ContextPaneProps) {
             ? "The system prompt appears after Claude's first reply."
             : sent
               ? 'The system prompt exactly as the last request sent it, in order. Sections ' +
-                'marked “added” come from outside Claude Code’s own prompt: the output style, ' +
+                'marked `added` come from outside Claude Code’s own prompt: the output style, ' +
                 'the line that introduces Claude, and the app’s own instructions.'
               : 'The system prompt as this session composes it, section by section. Sizes are ' +
                 "estimated from each section's text. Turn tracing on (the Trace tab) to see " +

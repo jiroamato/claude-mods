@@ -328,9 +328,9 @@ function descendants(node: { children?: unknown[] }): { type: string; children?:
 /** The pane's tabs in their order, as the strip lays them out. */
 const TAB_IDS = ['tools', 'prompt', 'skills', 'trace'] as const
 
-/** Clicks a tab in the pane's strip, anywhere on its pill: here, near its right edge. */
+/** Clicks a tab in the pane's strip, in its own region. */
 async function openTab(
-  pane: { resize: (size: { columns: number; rows: number; in?: string }) => Promise<void> } & {
+  pane: {
     pointer: (event: {
       type: 'down'
       x: number
@@ -341,14 +341,7 @@ async function openTab(
   },
   id: (typeof TAB_IDS)[number],
 ): Promise<void> {
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
-  await pane.pointer({
-    type: 'down',
-    x: TAB_IDS.indexOf(id) * 10 + 9,
-    y: 1,
-    button: 'left',
-    in: 'tabs',
-  })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: `tab-${id}` })
 }
 
 test('the meter has no hover card; the percentage opens the pane on its Tools tab', async ($, on) => {
@@ -393,19 +386,16 @@ test('the pane draws the window as a bar of pills over its tabs', async ($, on) 
     await pane.find({ type: 'Box', text: /^Context window93\.6k \/ 200k \(46%\)$/ }),
   ).toBeDefined()
   // Each tab names what /context counts for it.
-  const strip = await pane.find({ type: 'Client', key: 'tabs' })
-  expect(strip?.props).toMatchObject({
-    module: 'hooks/tabs.tsx',
-    props: {
-      open: 'tools',
-      tabs: [
-        { id: 'tools', label: 'Tools', figure: '20k' },
-        { id: 'prompt', label: 'Prompt', figure: '8k' },
-        { id: 'skills', label: 'Skills', figure: '4k' },
-        { id: 'trace', label: 'Trace', figure: null },
-      ],
-    },
-  })
+  const tabs = (await pane.findAll({ type: 'Client' })).filter(one =>
+    String(one.props.key).startsWith('tab-'),
+  )
+  expect(tabs.map(one => one.props.module)).toEqual(Array(4).fill('hooks/tabs.tsx'))
+  expect(tabs.map(one => one.props.props)).toMatchObject([
+    { id: 'tools', label: 'Tools', figure: '20k', isOpen: true, previous: null, next: 'prompt' },
+    { id: 'prompt', label: 'Prompt', figure: '8k', isOpen: false },
+    { id: 'skills', label: 'Skills', figure: '4k', isOpen: false },
+    { id: 'trace', label: 'Trace', figure: null, isOpen: false, next: null },
+  ])
   // A pill per segment, largest first, then the free space; no pill
   // positioned, or the desktop draws it on a layer of its own and shifts its colours.
   const boxes = await pane.findAll({ type: 'Box' })
@@ -454,22 +444,27 @@ test('a tab takes the press anywhere on its pill, and the arrow keys move betwee
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   const open = async () =>
-    ((await pane.find({ type: 'Client', key: 'tabs' }))?.props.props as { open: string }).open
+    (await pane.findAll({ type: 'Client' }))
+      .filter(one => String(one.props.key).startsWith('tab-'))
+      .map(one => one.props.props as { id: string; isOpen: boolean })
+      .find(one => one.isOpen)?.id
 
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
   // The far edge of the last pill, well clear of its label.
-  await pane.pointer({ type: 'down', x: 39, y: 0, button: 'left', in: 'tabs' })
+  await pane.resize({ columns: 12, rows: 1, in: 'tab-trace' })
+  await pane.pointer({ type: 'down', x: 11, y: 0, button: 'left', in: 'tab-trace' })
   expect(await open()).toBe('trace')
   expect(await pane.find({ type: 'Button', key: 'tracing' })).toBeDefined()
   // The near edge of the second.
-  await pane.pointer({ type: 'down', x: 10, y: 1, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'tab-prompt' })
   expect(await open()).toBe('prompt')
 
-  await pane.key({ key: 'right', in: 'tabs' })
+  await pane.key({ key: 'right', in: 'tab-prompt' })
   expect(await open()).toBe('skills')
-  await pane.key({ key: 'left', in: 'tabs' })
-  await pane.key({ key: 'left', in: 'tabs' })
-  await pane.key({ key: 'left', in: 'tabs' })
+  await pane.key({ key: 'left', in: 'tab-skills' })
+  await pane.key({ key: 'left', in: 'tab-prompt' })
+  expect(await open()).toBe('tools')
+  // No tab left of the first.
+  await pane.key({ key: 'left', in: 'tab-tools' })
   expect(await open()).toBe('tools')
 
   await pane.unmount()

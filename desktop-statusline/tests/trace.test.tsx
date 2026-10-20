@@ -294,9 +294,8 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
   tracedEngine(on, files)
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
 
-  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   expect((await pane.find({ type: 'Client', key: 'disclose-trace-0' }))?.props.props).toMatchObject(
     {
       label: '#1 Main',
@@ -316,7 +315,7 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
     /\[user\]\nlist the files[\s\S]*── Answer \(end_turn\)\n\nHere they are\./,
   )
 
-  await pane.pointer({ type: 'down', x: 15, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-prompt' })
   expect(
     (await pane.find({ type: 'Client', key: 'disclose-prompt-billing-0' }))?.props.props,
   ).toMatchObject({
@@ -336,8 +335,7 @@ test('turning tracing on writes its env to the user settings', async ($, on) => 
   settings.text = '{}'
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
-  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
 
   expect((await pane.find({ key: 'tracing' }))?.props).toMatchObject({ label: 'Turn on tracing' })
   await pane.press({ key: 'tracing' })
@@ -352,8 +350,7 @@ test('a session that started before tracing was on says so', async ($, on) => {
   tracedEngine(on, {}, 3)
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
-  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
 
   expect(await pane.find({ type: 'Text', text: /start a new session to trace it/ })).toBeDefined()
   expect((await pane.find({ key: 'tracing' }))?.props).toMatchObject({ label: 'Turn off tracing' })
@@ -393,8 +390,7 @@ test('an open request shows a short preview, and opens whole here or in the brow
   tracedEngine(on, files)
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
-  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
 
   expect((await pane.find({ type: 'Link' }))?.props).toMatchObject({
     href: 'http://localhost:43180/view/session-1?t=0123456789abcdef0123456789abcdef',
@@ -498,8 +494,7 @@ test('the reader draws only the rows near the window, and empty space for the re
   tracedEngine(on, files)
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
-  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   await pane.press({ key: 'read-0' })
 
@@ -577,8 +572,7 @@ test('searching the reader marks each match and steps to the next', async ($, on
   tracedEngine(on, files)
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
-  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   await pane.press({ key: 'read-0' })
 

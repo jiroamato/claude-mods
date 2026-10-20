@@ -11,12 +11,12 @@ import {
   READER_HIT_KEY,
   READER_KEY,
   READER_TOP_ROWS,
-  TABS_KEY,
 } from './panel'
 import type { ReaderView } from './panel'
 import type { DisclosurePick } from './disclosure'
 import type { ReaderBarPick } from './reader'
-import type { TabStripPick } from './tabs'
+import { TAB_PREFIX } from './tabs'
+import type { TabPick } from './tabs'
 import type { RowMatch, TraceRecord } from './trace'
 import {
   editTraceEnv,
@@ -778,9 +778,9 @@ export const register: Register = on => {
 
   // A tab picked in the pane's strip, posted by its region.
   on('ui.message', { requestId: PANE_ID }, async ($, e, next) => {
-    const picked = (e.data as Partial<TabStripPick> | null)?.tab
+    const picked = (e.data as Partial<TabPick> | null)?.tab
     const isTab = (value: unknown): value is PaneTab => PANE_TABS.includes(value as PaneTab)
-    if (e.element === TABS_KEY && isTab(picked)) await update($, tab, () => picked)
+    if (e.element.startsWith(TAB_PREFIX) && isTab(picked)) await update($, tab, () => picked)
     const toggled = (e.data as Partial<DisclosurePick> | null)?.toggle
     if (e.element.startsWith(DISCLOSURE_PREFIX) && typeof toggled === 'string') {
       await toggleExpanded($, toggled)

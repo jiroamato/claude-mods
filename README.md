@@ -152,7 +152,7 @@ desktop-statusline/
   hooks/hooks.json             names the hooks module
   hooks/register.tsx           the mod: hooks, state and the band's tree
   hooks/panel.tsx              the Context details pane
-  hooks/tabs.tsx               the pane's tab strip, a region of its own
+  hooks/tabs.tsx               a tab of the pane, a region of its own
   hooks/context.ts             the window broken down as /context counts it
   hooks/tools.ts               tool summaries, sizes and the settings deny edit
   hooks/trace.ts               tracing's settings, and a trace read for the pane
