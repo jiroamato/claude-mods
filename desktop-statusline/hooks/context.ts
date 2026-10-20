@@ -1,18 +1,8 @@
-import type {
-  CommandInfo,
-  PromptComposeSection,
-  SessionContextBreakdown,
-  SessionMessage,
-  ToolUseSummary,
-} from 'claude-code'
+import type { CommandInfo, PromptComposeSection, SessionContextBreakdown } from 'claude-code'
 
 import type { ContextItem, ContextRow, ContextSnapshot, PromptSection, RowKind } from '../types'
 import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
-/** How many tool results the Messages row lists. */
-const RESULTS_SHOWN = 8
-/** A tool result smaller than this is not listed on its own. */
-const RESULT_MIN_TOKENS = 500
 const SKILL_LINE_MAX = 110
 
 // The desktop's own /context card colours its four largest rows from its
@@ -75,20 +65,6 @@ function basename(path: string): string {
   return index === -1 ? path : path.slice(index + 1)
 }
 
-/** `Bash: npm test`, `Read: register.tsx`: what a tool call was, in a few words. */
-export function describeCall(use: Pick<ToolUseSummary, 'tool' | 'input'>): string {
-  const input = use.input
-  const pick = (key: string): string | undefined =>
-    typeof input[key] === 'string' && input[key] !== '' ? (input[key] as string) : undefined
-  const path = pick('file_path') ?? pick('notebook_path') ?? pick('path')
-  let detail = path ? basename(path) : (pick('command') ?? pick('pattern') ?? pick('url'))
-  detail ??= pick('description') ?? pick('prompt') ?? pick('query')
-  if (!detail) return use.tool
-  const line = detail.split('\n')[0]!.trim()
-
-  return `${use.tool}: ${line.length > 40 ? `${line.slice(0, 39)}…` : line}`
-}
-
 function estimate(text: string): number {
   return text.length / CHARS_PER_TOKEN
 }
@@ -131,34 +107,6 @@ export function barSegments(rows: readonly ContextRow[]): { color: string; token
   return segments
 }
 
-/**
- * The largest tool results in the transcript. Sizes are estimated from their
- * text and scaled so the whole transcript adds up to the Messages row.
- */
-export function largestResults(
-  messages: readonly SessionMessage[],
-  messageTokens: number,
-): ContextItem[] {
-  const results: ContextItem[] = []
-  let estimated = 0
-  for (const message of messages) {
-    estimated += estimate(message.text)
-    for (const use of message.toolUses) {
-      estimated += estimate(JSON.stringify(use.input))
-      const size = estimate(use.text ?? '')
-      estimated += size
-      results.push({ name: describeCall(use), tokens: size, detail: '' })
-    }
-  }
-  const scale = estimated > 0 ? messageTokens / estimated : 0
-
-  return results
-    .map(one => ({ ...one, tokens: Math.round(one.tokens * scale) }))
-    .filter(one => one.tokens >= RESULT_MIN_TOKENS)
-    .sort((a, b) => b.tokens - a.tokens)
-    .slice(0, RESULTS_SHOWN)
-}
-
 /** A section's title: its own heading, else its id in words. */
 export function sectionTitle(section: Pick<PromptComposeSection, 'id' | 'text'>): string {
   const heading = /^\s*#{1,3}\s+(.+)$/m.exec(section.text.trimStart().split('\n')[0] ?? '')?.[1]
@@ -188,12 +136,10 @@ export function promptSections(sections: readonly PromptComposeSection[]): Promp
 /** The context window as the card and the pane draw it: /context's rows and what is in each. */
 export function buildSnapshot(
   breakdown: SessionContextBreakdown,
-  messages: readonly SessionMessage[],
   commands: readonly CommandInfo[],
   sections: readonly PromptComposeSection[],
 ): ContextSnapshot {
   const rows = contextRows(breakdown)
-  const messageTokens = rows.find(one => one.name === 'Messages')?.tokens ?? 0
 
   const descriptions = new Map(commands.map(one => [one.name, one.description]))
   const skills = (breakdown.skills?.skillFrontmatter ?? [])
@@ -210,7 +156,6 @@ export function buildSnapshot(
     window: breakdown.rawMaxTokens,
     percent: breakdown.percentage,
     rows,
-    results: largestResults(messages, messageTokens),
     skills,
     prompt: promptSections(sections),
   }

@@ -1,10 +1,9 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { On, PromptComposeSection, SessionContextBreakdown, SessionMessage } from 'claude-code'
+import type { On, PromptComposeSection, SessionContextBreakdown } from 'claude-code'
 
 import {
   buildSnapshot,
   currentSnapshot,
-  describeCall,
   formatShare,
   formatTokens,
   sectionTitle,
@@ -101,29 +100,6 @@ function breakdown(): SessionContextBreakdown {
   }
 }
 
-// A transcript with one big log dump and one small read.
-const MESSAGES: SessionMessage[] = [
-  { role: 'user', text: 'run the tests', toolUses: [] },
-  {
-    role: 'assistant',
-    text: 'Running them.',
-    toolUses: [
-      {
-        tool_use_id: 't1',
-        tool: 'Bash',
-        input: { command: 'npm test -- --verbose' },
-        text: 'x'.repeat(100_000),
-      },
-      {
-        tool_use_id: 't2',
-        tool: 'Read',
-        input: { file_path: '/repo/src/app.ts' },
-        text: 'y'.repeat(800),
-      },
-    ],
-  },
-]
-
 const SECTIONS: PromptComposeSection[] = [
   { id: 'intro', text: '\nYou are Claude Code, an interactive CLI tool.', scope: 'shared' },
   { id: 'env_info_simple', text: '# Environment\n - Platform: linux', scope: 'session' },
@@ -140,16 +116,39 @@ const DEPLOY = {
 /** The engine around the plugin: a settings file in memory, the usage and the transcript. */
 type SettingsFile = { text: string; isLocked?: boolean; path?: RegExp; writes?: number }
 
+/** Files under the trace folder, by name, as the receiver writes them. */
+type TraceFiles = Record<string, string>
+
 function engine(
   on: On,
   settings: SettingsFile,
   env: Record<string, string> = { HOME: '/home/me' },
+  traced?: TraceFiles,
 ) {
   const clock = mock.clock(on, { now: 1_000 })
   mock.store(on)
   mock.env(on, env)
+  const traceFile = (path: string) =>
+    traced ? /[\\/]traces[\\/]session-1[\\/]([^\\/]+)$/.exec(path)?.[1] : undefined
   on('fs.exists', async () => ({ value: true }))
-  on('fs.read', async () => ({ value: settings.text }))
+  on('fs.read', async (_$, e) => {
+    const name = traceFile(e.path)
+
+    return { value: name !== undefined ? (traced?.[name] ?? '') : settings.text }
+  })
+  on('fs.list', async () => ({
+    value: Object.keys(traced ?? {}).map(name => ({
+      name,
+      kind: 'file' as const,
+      size: traced![name]!.length,
+      mtimeMs: 1,
+      isLink: false,
+    })),
+  }))
+  on('session.id', async () => ({ value: 'session-1' }))
+  on('http.fetch', async () => ({
+    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 2' },
+  }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)
     if (settings.isLocked) return { deny: 'EPERM: settings.json is read-only' }
@@ -172,7 +171,6 @@ function engine(
       rateLimits: [],
     },
   }))
-  on('session.messages', async () => ({ value: MESSAGES }))
   on('command.list', async () => ({ value: [DEPLOY] }))
   on('prompt.compose', async () => ({ sections: SECTIONS }))
   on('process.run', async () => ({
@@ -262,7 +260,7 @@ test('a tool put back that the session started without waits for a new session',
 })
 
 test('the snapshot lists the rows as /context does, and what the pane details', () => {
-  const snapshot = buildSnapshot(breakdown(), MESSAGES, [DEPLOY], SECTIONS)
+  const snapshot = buildSnapshot(breakdown(), [DEPLOY], SECTIONS)
   expect(snapshot).toMatchObject({ used: 93_600, window: 200_000, percent: 46 })
   // In the window largest first, the four largest in the desktop's chart
   // colours and the rest in its grey; then the reserve, the free space and
@@ -278,7 +276,6 @@ test('the snapshot lists the rows as /context does, and what the pane details', 
     ['Free space', '#97958d27'],
     ['MCP tools (deferred)', '#97958d91'],
   ])
-  expect(snapshot.results.map(one => one.name)).toEqual(['Bash: npm test -- --verbose'])
   // An empty section is not sent, so it is not listed.
   expect(snapshot.prompt.map(one => [one.id, one.title, one.text])).toEqual([
     ['intro', 'Introduction', 'You are Claude Code, an interactive CLI tool.'],
@@ -293,12 +290,6 @@ test('the snapshot lists the rows as /context does, and what the pane details', 
     },
     { name: 'review', tokens: 120, source: 'reviewer', description: '' },
   ])
-})
-
-test('describeCall names a call by what it touched', () => {
-  expect(describeCall({ tool: 'Read', input: { file_path: 'C:\\repo\\a.ts' } })).toBe('Read: a.ts')
-  expect(describeCall({ tool: 'Bash', input: { command: 'ls\nmore' } })).toBe('Bash: ls')
-  expect(describeCall({ tool: 'TaskStop', input: {} })).toBe('TaskStop')
 })
 
 test('sizes and shares read as /context prints them', () => {
@@ -323,6 +314,32 @@ function descendants(node: { children?: unknown[] }): { type: string; children?:
   )
 }
 
+/** The pane's tabs in their order, as the strip lays them out. */
+const TAB_IDS = ['tools', 'prompt', 'skills', 'trace'] as const
+
+/** Clicks a tab in the pane's strip, anywhere on its pill: here, near its right edge. */
+async function openTab(
+  pane: { resize: (size: { columns: number; rows: number; in?: string }) => Promise<void> } & {
+    pointer: (event: {
+      type: 'down'
+      x: number
+      y: number
+      button: 'left'
+      in?: string
+    }) => Promise<void>
+  },
+  id: (typeof TAB_IDS)[number],
+): Promise<void> {
+  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
+  await pane.pointer({
+    type: 'down',
+    x: TAB_IDS.indexOf(id) * 10 + 9,
+    y: 1,
+    button: 'left',
+    in: 'tabs',
+  })
+}
+
 test('the meter has no hover card; the percentage opens the pane on its Tools tab', async ($, on) => {
   const clock = engine(on, { text: '{}' })
   let opened: unknown
@@ -340,7 +357,7 @@ test('the meter has no hover card; the percentage opens the pane on its Tools ta
   expect(boxes.filter(one => one.props.hover !== undefined)).toEqual([])
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  await pane.press({ key: 'open-tab-skills' })
+  await openTab(pane, 'skills')
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
   const pressed = band.press({ key: 'open-context' })
@@ -365,9 +382,19 @@ test('the pane draws the window as a bar of pills over its tabs', async ($, on) 
     await pane.find({ type: 'Box', text: /^Context window93\.6k \/ 200k \(46%\)$/ }),
   ).toBeDefined()
   // Each tab names what /context counts for it.
-  expect((await pane.find({ key: 'open-tab-tools' }))?.text).toBe('Tools 20k')
-  expect((await pane.find({ key: 'open-tab-prompt' }))?.text).toBe('Prompt 8k')
-  expect((await pane.find({ key: 'open-tab-results' }))?.text).toBe('Results')
+  const strip = await pane.find({ type: 'Client', key: 'tabs' })
+  expect(strip?.props).toMatchObject({
+    module: 'hooks/tabs.tsx',
+    props: {
+      open: 'tools',
+      tabs: [
+        { id: 'tools', label: 'Tools', figure: '20k' },
+        { id: 'prompt', label: 'Prompt', figure: '8k' },
+        { id: 'skills', label: 'Skills', figure: '4k' },
+        { id: 'trace', label: 'Trace', figure: null },
+      ],
+    },
+  })
   // A pill per segment, largest first, then the free space; nothing positioned,
   // or the desktop draws it on a layer of its own and shifts its colours.
   const boxes = await pane.findAll({ type: 'Box' })
@@ -390,14 +417,44 @@ test('the pane draws the window as a bar of pills over its tabs', async ($, on) 
   await pane.unmount()
 })
 
+test('a tab takes the press anywhere on its pill, and the arrow keys move between tabs', async ($, on) => {
+  engine(on, { text: '{}' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  const open = async () =>
+    ((await pane.find({ type: 'Client', key: 'tabs' }))?.props.props as { open: string }).open
+
+  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
+  // The far edge of the last pill, well clear of its label.
+  await pane.pointer({ type: 'down', x: 39, y: 0, button: 'left', in: 'tabs' })
+  expect(await open()).toBe('trace')
+  expect(await pane.find({ type: 'Button', key: 'tracing' })).toBeDefined()
+  // The near edge of the second.
+  await pane.pointer({ type: 'down', x: 10, y: 1, button: 'left', in: 'tabs' })
+  expect(await open()).toBe('prompt')
+
+  await pane.key({ key: 'right', in: 'tabs' })
+  expect(await open()).toBe('skills')
+  await pane.key({ key: 'left', in: 'tabs' })
+  await pane.key({ key: 'left', in: 'tabs' })
+  await pane.key({ key: 'left', in: 'tabs' })
+  expect(await open()).toBe('tools')
+
+  await pane.unmount()
+})
+
 test('the pane opens the system prompt section by section, one at a time', async ($, on) => {
   engine(on, { text: '{}' })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
   expect(await pane.find({ type: 'Text', text: 'Introduction' })).toBeUndefined()
-  await pane.press({ key: 'open-tab-prompt' })
+  await openTab(pane, 'prompt')
   expect(await pane.find({ type: 'Text', text: 'Introduction' })).toBeDefined()
+  // /context counts 8k; the sections hold a few tokens, the rest no plugin can read.
+  expect((await pane.find({ type: 'Box', text: /^Not readable by plugins.*~8k$/ }))?.text).toMatch(
+    /output style/,
+  )
   expect(await pane.find({ type: 'Code' })).toBeUndefined()
 
   await pane.press({ key: 'open-prompt-intro' })
@@ -416,16 +473,13 @@ test('the pane opens the system prompt section by section, one at a time', async
   await pane.unmount()
 })
 
-test('the Results tab lists the largest tool results, the Skills tab each skill', async ($, on) => {
+test('the Skills tab lists each skill', async ($, on) => {
   engine(on, { text: '{}' })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  await pane.press({ key: 'open-tab-results' })
-  expect(await pane.find({ type: 'Text', text: 'Bash: npm test -- --verbose' })).toBeDefined()
-  await pane.press({ key: 'open-tab-skills' })
+  await openTab(pane, 'skills')
   expect(await pane.find({ type: 'Text', text: 'Ships the app to production.' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: 'Bash: npm test -- --verbose' })).toBeUndefined()
 
   await pane.unmount()
 })
@@ -625,6 +679,6 @@ test('a breakdown an earlier version kept in the state is read as none', () => {
   // What the treemap version wrote, still in the state after a reload.
   expect(currentSnapshot({ used: 1, window: 2, percent: 50, blocks: [], skills: [] })).toBeNull()
   expect(currentSnapshot(null)).toBeNull()
-  const snapshot = buildSnapshot(breakdown(), MESSAGES, [DEPLOY], SECTIONS)
+  const snapshot = buildSnapshot(breakdown(), [DEPLOY], SECTIONS)
   expect(currentSnapshot(snapshot)).toBe(snapshot)
 })

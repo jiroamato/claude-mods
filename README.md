@@ -47,10 +47,42 @@ under it four tabs:
   project start without it. **Put back** undoes both. A tool the session started
   without comes back in the next session. Deleting the name from `permissions.deny`
   by hand works too.
-- **Prompt**: each section of the system prompt as this session composes it, with
-  its approximate size. Open a section to read its text.
+- **Prompt**: the system prompt, section by section, with each section's approximate
+  size. Open a section to read its text. With tracing on, it is the prompt exactly as
+  the last request sent it, the parts the engine adds outside its own sections marked
+  _added_: the output style, the line that names Claude, the desktop app's own
+  instructions.
 - **Skills**: each skill's listing as Claude sees it, read-only for now.
-- **Results**: the largest tool results in the conversation.
+- **Trace**: every request the session sends to the model, newest first, with what it
+  added to the conversation, what came back, and its tokens, cost and time. Open one
+  to read it, or open it whole in your browser: its system prompt, every tool
+  definition and every message, as the model received them.
+
+##### Tracing
+
+**Turn on tracing** in the Trace tab turns on Claude Code's own telemetry for the
+sessions you start after it, in the terminal and in the desktop app alike. It adds
+these to the `env` block of your user settings, and **Turn off tracing** takes back
+the ones it set:
+
+| Variable                              | Value                               |
+| ------------------------------------- | ----------------------------------- |
+| `CLAUDE_CODE_ENABLE_TELEMETRY`        | `1`                                 |
+| `OTEL_LOGS_EXPORTER`                  | `otlp`                              |
+| `OTEL_EXPORTER_OTLP_LOGS_PROTOCOL`    | `http/json`                         |
+| `OTEL_EXPORTER_OTLP_LOGS_ENDPOINT`    | `http://127.0.0.1:43180/v1/logs`    |
+| `OTEL_LOGS_EXPORT_INTERVAL`           | `1000`                              |
+| `OTEL_LOG_RAW_API_BODIES`             | `1`                                 |
+| `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | `20000000`, so no body is cut short |
+
+Only the log events are exported, to a small receiver on this machine that the
+plugin starts with [Node.js](https://nodejs.org) (which has to be on your `PATH`).
+One receiver serves every session. It keeps each session's requests under
+`~/.claude/desktop-statusline/traces/` (or `$CLAUDE_CONFIG_DIR`) for 14 days, and
+serves the browser pages on `localhost` only, behind a token it writes beside them.
+
+A trace holds the whole conversation, file contents and command output included.
+It never leaves your machine, but anyone who can read your files can read it.
 
 ![The Context details pane: the context window as a bar, the tabs, and the Tools tab with Remove beside each tool](docs/context-pane.png)
 
@@ -117,8 +149,13 @@ desktop-statusline/
   hooks/hooks.json             names the hooks module
   hooks/register.tsx           the mod: hooks, state and the band's tree
   hooks/panel.tsx              the Context details pane
+  hooks/tabs.tsx               the pane's tab strip, a region of its own
   hooks/context.ts             the window broken down as /context counts it
   hooks/tools.ts               tool summaries, sizes and the settings deny edit
+  hooks/trace.ts               tracing's settings, and a trace read for the pane
+  trace/receiver.mjs           the trace receiver, run with Node
+  trace/store.mjs              what the receiver keeps of each request
+  trace/view.mjs               the receiver's pages for the browser
   types/index.d.ts             its state contract
   tests/                       run with `claude plugin test`
 ```

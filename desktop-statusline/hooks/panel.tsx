@@ -1,8 +1,17 @@
 import type { ElementTable } from 'claude-code'
 
-import type { ContextItem, ContextSnapshot, PaneTab } from '../types'
+import type {
+  ContextItem,
+  ContextSnapshot,
+  PaneTab,
+  PromptSection,
+  TraceItem,
+  TraceState,
+} from '../types'
 import { FREE, barSegments, formatShare, formatTokens } from './context'
+import type { TabStripProps } from './tabs'
 import type { ToolRow } from './tools'
+import { sourceLabel, viewLink } from './trace'
 
 /** The pane the percentage opens. */
 export const PANE_ID = 'context-map'
@@ -19,14 +28,17 @@ const BAR_MIN_SEGMENT = 0.25
 const TOKENS_COLUMNS = 7
 // A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
-// The tab strip: a recessed track, the open tab raised on it.
-const TAB_TRACK = '#0000004d'
-const TAB_OPEN = '#ffffff14'
 // A one-pixel rule between the pieces a tab lists, in the border's own faint colour.
 const HAIRLINE = 0.05
 const RULE = 'promptBorderShimmer'
-// One drawing holds at most 100000 characters of code; a section is cut well short of that.
-const SECTION_TEXT_MAX = 40_000
+// The system prompt /context counts beyond the sections, below which the
+// difference is the sections' estimate erring rather than text left unread.
+const UNREAD_MIN_TOKENS = 100
+// One drawing holds at most 100000 characters of code, so long text is read a
+// page at a time, each well short of that.
+const PAGE_CHARS = 40_000
+// A page ends at the last line break this close to its end, so it never cuts a line.
+const PAGE_SLACK = 4_000
 
 const CLOSED = '▸'
 const OPEN = '▾'
@@ -36,7 +48,7 @@ const TABS: readonly { id: PaneTab; label: string; row?: string }[] = [
   { id: 'tools', label: 'Tools', row: 'System tools' },
   { id: 'prompt', label: 'Prompt', row: 'System prompt' },
   { id: 'skills', label: 'Skills', row: 'Skills' },
-  { id: 'results', label: 'Results', row: 'Messages' },
+  { id: 'trace', label: 'Trace' },
 ]
 
 function slug(text: string): string {
@@ -104,39 +116,108 @@ function Bar(props: { ui: Ui; snapshot: ContextSnapshot }) {
   )
 }
 
-/** The tab strip: each tab's label and, where /context counts it, its tokens. */
+/** The key of the tab strip's region, which the hooks module hears it post under. */
+export const TABS_KEY = 'tabs'
+
+/**
+ * The tab strip: each tab's label and, where /context counts it, its tokens.
+ * A region of its own (./tabs.tsx), so the whole pill of a tab takes the press.
+ */
 function Tabs(props: ContextPaneProps) {
-  const { Box, Button, Text } = props.ui
-  const rounded = { borderStyle: 'round', borderColor: CLEAR } as const
+  const { Client } = props.ui
+  const strip: TabStripProps = {
+    open: props.tab,
+    tabs: TABS.map(tab => {
+      const tokens = rowTokens(props.snapshot, tab.row)
+      const count = props.trace.items.length
+      const figure =
+        tab.id === 'trace'
+          ? count > 0
+            ? String(count)
+            : null
+          : tokens === null
+            ? null
+            : formatTokens(tokens)
+
+      return { id: tab.id, label: tab.label, figure }
+    }),
+  }
+
+  return <Client key={TABS_KEY} module="./tabs.tsx" props={strip} width="100%" />
+}
+
+/** Where each page of `text` starts: about PAGE_CHARS apart, each at a line's start. */
+export function pageStarts(text: string): number[] {
+  const starts = [0]
+  while (text.length - starts.at(-1)! > PAGE_CHARS) {
+    const from = starts.at(-1)!
+    const end = from + PAGE_CHARS
+    const lineBreak = text.lastIndexOf('\n', end)
+    starts.push(lineBreak > end - PAGE_SLACK ? lineBreak + 1 : end)
+  }
+
+  return starts
+}
+
+/** Long text, a page at a time, with the way to the pages before and after. */
+function Paged(props: { ui: Ui; text: string; page: number; onPage: (page: number) => void }) {
+  const { Box, Button, Code, Text } = props.ui
+  const starts = pageStarts(props.text)
+  const page = Math.min(Math.max(0, props.page), starts.length - 1)
+  const from = starts[page]!
+  const to = starts[page + 1] ?? props.text.length
+  const code = <Code source={props.text.slice(from, to)} wrap="wrap" />
+  if (starts.length === 1) return code
+  // Above the page and again under it; each Button keyed by where it sits.
+  const pager = (at: 'top' | 'bottom') => (
+    <Box flexDirection="row" alignItems="center" columnGap={1}>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        <Text color="subtle" size="footnote" tabular>
+          {`Page ${page + 1} of ${starts.length} · characters ${(from + 1).toLocaleString('en-US')}–${to.toLocaleString('en-US')} of ${props.text.length.toLocaleString('en-US')}`}
+        </Text>
+      </Box>
+      {page > 0 && (
+        <Button
+          key={at === 'top' ? 'page-previous' : 'page-previous-bottom'}
+          label="Previous"
+          onPress={() => props.onPage(page - 1)}
+        />
+      )}
+      {page < starts.length - 1 && (
+        <Button
+          key={at === 'top' ? 'page-next' : 'page-next-bottom'}
+          label="Next"
+          onPress={() => props.onPage(page + 1)}
+        />
+      )}
+    </Box>
+  )
 
   return (
-    <Box flexDirection="row" columnGap="xs" padding="xs" {...rounded} backgroundColor={TAB_TRACK}>
-      {TABS.map(tab => {
-        const isOpen = props.tab === tab.id
-        const tokens = tab.id === 'results' ? null : rowTokens(props.snapshot, tab.row)
+    <Box flexDirection="column" rowGap={1}>
+      {pager('top')}
+      {code}
+      {pager('bottom')}
+    </Box>
+  )
+}
 
-        return (
-          <Box
-            key={`tab-${tab.id}`}
-            // Each tab an equal share of the strip, whatever its label.
-            flexGrow={1}
-            width={0}
-            justifyContent="center"
-            {...rounded}
-            padding={0}
-            backgroundColor={isOpen ? TAB_OPEN : CLEAR}
-          >
-            <Button key={`open-tab-${tab.id}`} plain onPress={() => props.onTab(tab.id)}>
-              <Text color={isOpen ? 'text' : 'secondaryText'}>{tab.label}</Text>
-              {tokens !== null && (
-                <Text color="subtle" size="footnote">
-                  {` ${formatTokens(tokens)}`}
-                </Text>
-              )}
-            </Button>
-          </Box>
-        )
-      })}
+/**
+ * An open request as text: whole when it fits in the pane, which draws at most
+ * 100000 characters of code; else its opening, and where the rest is.
+ */
+function RequestText(props: { ui: Ui; text: string | null }) {
+  const { Box, Code, Text } = props.ui
+  if (props.text === null) return <Text color="subtle">This request could not be read.</Text>
+  const end = pageStarts(props.text)[1]
+  if (end === undefined) return <Code source={props.text} wrap="wrap" />
+
+  return (
+    <Box flexDirection="column" rowGap={1}>
+      <Code source={props.text.slice(0, end)} wrap="wrap" />
+      <Text color="subtle" size="footnote">
+        {`The pane shows the first ${end.toLocaleString('en-US')} of its ${props.text.length.toLocaleString('en-US')} characters; the browser shows it whole.`}
+      </Text>
     </Box>
   )
 }
@@ -259,9 +340,18 @@ export type ContextPaneProps = {
   expanded: readonly string[]
   /** Why the last Remove or Put back failed, if it did. */
   error: string | null
+  /** The conversation's trace, from the trace receiver. */
+  trace: TraceState
+  /** Why the last tracing switch failed, if it did. */
+  traceError: string | null
+  /** The open request of the Trace tab, as text; null when none is open. */
+  traceText: string | null
   onToggle: (name: string, isRemoved: boolean) => void
   onExpand: (key: string) => void
-  onTab: (tab: PaneTab) => void
+  onTracing: (isOn: boolean) => void
+  /** The page of the open request or section's text. */
+  page: number
+  onPage: (page: number) => void
 }
 
 const STATUS_NOTE: Record<ToolRow['status'], string> = {
@@ -349,7 +439,10 @@ function ToolsTab(props: ContextPaneProps) {
 /** The Prompt tab: the system prompt section by section, each opening to its text. */
 function PromptTab(props: ContextPaneProps) {
   const { Box, Code, Button, Text } = props.ui
-  const sections = props.snapshot?.prompt ?? []
+  const sent = props.trace.prompt
+  const sections: PromptSection[] = sent ?? props.snapshot?.prompt ?? []
+  const counted = rowTokens(props.snapshot, 'System prompt') ?? 0
+  const unread = sent ? 0 : counted - sections.reduce((sum, one) => sum + one.tokens, 0)
 
   return (
     <Box flexDirection="column" rowGap={1}>
@@ -364,8 +457,13 @@ function PromptTab(props: ContextPaneProps) {
         text:
           sections.length === 0
             ? "The system prompt appears after Claude's first reply."
-            : 'The system prompt as this session composes it, section by section. Sizes are ' +
-              "estimated from each section's text.",
+            : sent
+              ? 'The system prompt exactly as the last request sent it, in order. The engine’s own ' +
+                'sections, and marked added what came from outside them: the output style, the ' +
+                'line that names Claude, an app’s own instructions.'
+              : 'The system prompt as this session composes it, section by section. Sizes are ' +
+                "estimated from each section's text. Turn tracing on (the Trace tab) to see " +
+                'it exactly as sent.',
       })}
       {sections.length > 0 &&
         Ruled({
@@ -373,27 +471,44 @@ function PromptTab(props: ContextPaneProps) {
           children: sections.map(section => {
             const id = `prompt-${slug(section.id)}`
             const isOpen = props.expanded.includes(id)
-            const text =
-              section.text.length > SECTION_TEXT_MAX
-                ? `${section.text.slice(0, SECTION_TEXT_MAX)}\n\n[${section.text.length - SECTION_TEXT_MAX} more characters]`
-                : section.text
 
             return (
               <Box key={id} flexDirection="column" rowGap={1}>
                 <Box flexDirection="row" alignItems="center" columnGap={1}>
                   <Box flexGrow={1} flexShrink={1} minWidth={0}>
                     <Button key={`open-${id}`} plain onPress={() => props.onExpand(id)}>
-                      <Text color="text">{section.title}</Text>{' '}
+                      <Text color="text">{section.title}</Text>
+                      {section.isAdded && <Text color="subtle">{' added'}</Text>}{' '}
                       <Text color="inactive">{isOpen ? OPEN : CLOSED}</Text>
                     </Button>
                   </Box>
                   {Figure({ ui: props.ui, text: `~${formatTokens(section.tokens)}` })}
                 </Box>
-                {isOpen && <Code source={text} wrap="wrap" />}
+                {isOpen &&
+                  Paged({
+                    ui: props.ui,
+                    text: section.text,
+                    page: props.page,
+                    onPage: props.onPage,
+                  })}
               </Box>
             )
           }),
         })}
+      {unread >= UNREAD_MIN_TOKENS && (
+        // What /context counts that no plugin can read, so the list adds up to the row.
+        <Box flexDirection="row" alignItems="flex-start" columnGap={1} paddingTop={1}>
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+            <Text color="secondaryText">Not readable by plugins</Text>
+            <Text color="subtle" size="footnote">
+              The rest of what /context counts: the output style, the line that names Claude Code,
+              and any instructions the app or an --append-system-prompt adds. Turn tracing on to see
+              them.
+            </Text>
+          </Box>
+          {Figure({ ui: props.ui, text: `~${formatTokens(unread)}` })}
+        </Box>
+      )}
     </Box>
   )
 }
@@ -430,28 +545,133 @@ function SkillsTab(props: ContextPaneProps) {
   )
 }
 
-/** The Results tab: the largest tool results in the conversation. */
-function ResultsTab(props: ContextPaneProps) {
-  const { Box } = props.ui
-  const results = props.snapshot?.results ?? []
+const TRACE_NOTE: Record<Exclude<TraceState['status'], 'on'>, string> = {
+  off:
+    'Tracing records every request this session sends to the model, the system prompt, the ' +
+    'tools and the messages exactly as sent, and what came back. It turns on Claude Code’s own ' +
+    'telemetry for new sessions, sent only to a receiver on this machine, which keeps the ' +
+    'requests in your Claude folder for 14 days. They hold the whole conversation, file ' +
+    'contents and command output included.',
+  'next-session':
+    'Tracing is on. This session started before it was, so it is not traced: start a new ' +
+    'session to trace it.',
+  'no-node':
+    'Tracing is on, but the receiver could not start: it runs on Node.js, which was not found ' +
+    'on your PATH. Install Node.js, then start a new session.',
+}
+
+/** A request's figures: tokens read and written, cost, time. */
+function usageLine(item: TraceItem): string {
+  const usage = item.usage
+  if (!usage) return 'waiting for its answer'
+  const read = (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
+  const parts = [`${formatTokens(read)} in`, `${formatTokens(usage.output ?? 0)} out`]
+  if (usage.costUsd !== undefined)
+    parts.push(`$${usage.costUsd.toFixed(usage.costUsd < 0.01 ? 4 : 2)}`)
+  if (usage.durationMs !== undefined) parts.push(`${(usage.durationMs / 1000).toFixed(1)}s`)
+
+  return parts.join(' · ')
+}
+
+function clock(at: string): string {
+  const match = /T(\d{2}:\d{2}:\d{2})/.exec(at)
+
+  return match?.[1] ?? ''
+}
+
+/** The Trace tab: every request of the conversation as sent, each opening onto its text. */
+function TraceTab(props: ContextPaneProps) {
+  const { Box, Button, Code, Link, Text } = props.ui
+  const traced = props.trace
+  const items = [...traced.items].reverse()
+  const cost = traced.items.reduce((sum, one) => sum + (one.usage?.costUsd ?? 0), 0)
+  const switchButton = (
+    <Box flexDirection="row">
+      <Button
+        key="tracing"
+        label={traced.status === 'off' ? 'Turn on tracing' : 'Turn off tracing'}
+        variant={traced.status === 'off' ? 'primary' : 'secondary'}
+        onPress={() => props.onTracing(traced.status === 'off')}
+      />
+    </Box>
+  )
 
   return (
     <Box flexDirection="column" rowGap={1}>
-      {Heading({
-        ui: props.ui,
-        title: 'Largest tool results',
-        snapshot: props.snapshot,
-        row: 'Messages',
-      })}
-      {Intro({
-        ui: props.ui,
-        text:
-          results.length === 0
-            ? 'No tool result in this conversation is large enough to list yet.'
-            : 'The tool results that fill the most of the conversation, sized from their text.',
-      })}
-      {results.length > 0 &&
-        Ruled({ ui: props.ui, children: results.map(item => ItemLine({ ui: props.ui, item })) })}
+      <Box flexDirection="row" alignItems="center" columnGap={2}>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text color="text" size="heading">
+            Trace
+          </Text>
+        </Box>
+        {traced.items.length > 0 && (
+          <Text color="subtle" tabular>
+            {`${traced.items.length} ${traced.items.length === 1 ? 'request' : 'requests'} · $${cost.toFixed(2)}`}
+          </Text>
+        )}
+      </Box>
+      {props.traceError && <Text color="error">{props.traceError}</Text>}
+      {traced.status !== 'on' && Intro({ ui: props.ui, text: TRACE_NOTE[traced.status] })}
+      {traced.status !== 'on' && switchButton}
+      {traced.status === 'on' &&
+        Intro({
+          ui: props.ui,
+          text:
+            items.length === 0
+              ? 'Tracing is on. Each request appears here once it is sent.'
+              : 'Each request this session sent, newest first: what it added to the ' +
+                'conversation, and what came back. Open one to read it, or read any request ' +
+                'whole in your browser: its system prompt, tools and every message.',
+        })}
+      {traced.status === 'on' && traced.view && items.length > 0 && (
+        <Link
+          href={viewLink(traced.view.session, traced.view.token)}
+          label="Open the whole trace in your browser"
+        />
+      )}
+      {items.length > 0 &&
+        Ruled({
+          ui: props.ui,
+          children: items.map(item => {
+            const id = `trace-${item.seq}`
+            const isOpen = props.expanded.includes(id)
+
+            return (
+              <Box key={id} flexDirection="column" rowGap={1}>
+                <Box flexDirection="row" alignItems="flex-start" columnGap={1}>
+                  <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+                    <Button key={`open-${id}`} plain onPress={() => props.onExpand(id)}>
+                      <Text color="text">{`#${item.seq + 1} ${sourceLabel(item.source)}`}</Text>
+                      <Text color="subtle">{` ${clock(item.at)}`}</Text>{' '}
+                      <Text color="inactive">{isOpen ? OPEN : CLOSED}</Text>
+                    </Button>
+                    <Text color="subtle" wrap="truncate-end">
+                      {`+ ${item.added.join(', ') || 'nothing new'}`}
+                    </Text>
+                    {item.reply !== null && (
+                      <Text color="subtle" wrap="truncate-end">
+                        {`→ ${item.reply}`}
+                      </Text>
+                    )}
+                  </Box>
+                  <Box flexShrink={0}>
+                    <Text color="subtle" size="footnote" tabular>
+                      {usageLine(item)}
+                    </Text>
+                  </Box>
+                </Box>
+                {isOpen && traced.view && (
+                  <Link
+                    href={viewLink(traced.view.session, traced.view.token, item.seq)}
+                    label="Open this request whole in your browser"
+                  />
+                )}
+                {isOpen && RequestText({ ui: props.ui, text: props.traceText })}
+              </Box>
+            )
+          }),
+        })}
+      {traced.status === 'on' && <Box paddingTop={1}>{switchButton}</Box>}
     </Box>
   )
 }
@@ -459,7 +679,7 @@ function ResultsTab(props: ContextPaneProps) {
 /**
  * The pane: the window as a bar, then a tab for each thing the desktop's own
  * Context card cannot show: the built-in tools (which can be removed), the
- * system prompt's text, the skills' listings and the largest tool results.
+ * system prompt as sent, the skills' listings and the conversation's trace.
  */
 export function ContextPane(props: ContextPaneProps) {
   const { Box, Text } = props.ui
@@ -468,7 +688,7 @@ export function ContextPane(props: ContextPaneProps) {
     tools: ToolsTab,
     prompt: PromptTab,
     skills: SkillsTab,
-    results: ResultsTab,
+    trace: TraceTab,
   }[props.tab]
 
   return (

@@ -19,10 +19,66 @@ export type ContextRow = {
 export type ContextItem = { name: string; tokens: number; detail: string }
 
 /** One section of the system prompt, with its text. */
-export type PromptSection = { id: string; title: string; tokens: number; text: string }
+export type PromptSection = {
+  id: string
+  title: string
+  tokens: number
+  text: string
+  /** Sent, but not one of the engine's own sections: the output style, an app's instructions. */
+  isAdded?: boolean
+}
 
 /** The pane's tabs: what the desktop's own Context card cannot show. */
-export type PaneTab = 'tools' | 'prompt' | 'skills' | 'results'
+export type PaneTab = 'tools' | 'prompt' | 'skills' | 'trace'
+
+/** One request of the conversation as the Trace tab lists it, from the trace receiver. */
+export type TraceItem = {
+  seq: number
+  /** When it was sent, an ISO timestamp. */
+  at: string
+  /** The engine's name for where it came from (`sdk`, `generate_session_title`, ...). */
+  source: string
+  model: string
+  /** The person's prompt it answers, shared by every request of that turn. */
+  promptId: string | null
+  /** What it added to the conversation, a few words each. */
+  added: string[]
+  /** What came back, in a few words; null while no answer is recorded. */
+  reply: string | null
+  usage: {
+    input?: number
+    output?: number
+    cacheRead?: number
+    cacheWrite?: number
+    costUsd?: number
+    durationMs?: number
+    effort?: string | null
+  } | null
+  messageCount: number
+  toolCount: number
+}
+
+/** Whether this session is traced, and why not when it is not. */
+export type TraceStatus =
+  /** Tracing is off in the user settings. */
+  | 'off'
+  /** On in the settings, but this session started before: its next one is traced. */
+  | 'next-session'
+  /** On, but Node.js, which runs the receiver, is not on the PATH. */
+  | 'no-node'
+  /** On, and this session's requests are recorded. */
+  | 'on'
+
+/** The conversation's trace, as the receiver recorded it. */
+export type TraceState = {
+  status: TraceStatus
+  /** Every request recorded for this session, oldest first. */
+  items: TraceItem[]
+  /** The system prompt the last main request sent, its sections in order; null before one. */
+  prompt: PromptSection[] | null
+  /** What links to the trace's pages in the browser; null while none can be served. */
+  view: { session: string; token: string } | null
+}
 
 /** The context window broken down, as the pane draws it. */
 export type ContextSnapshot = {
@@ -34,8 +90,6 @@ export type ContextSnapshot = {
   percent: number
   /** /context's rows: in use largest first, then the reserve, the free space, what loads on demand. */
   rows: ContextRow[]
-  /** The largest tool results within the messages, largest first. */
-  results: ContextItem[]
   /** Each listed skill with its listing's tokens. */
   skills: { name: string; tokens: number; source: string; description: string }[]
   /** The system prompt's sections, in the order they are sent. */
@@ -60,6 +114,12 @@ declare module 'claude-code' {
       expanded: string[]
       /** The pane's open tab. */
       tab: PaneTab
+      /** Which page of the open request's or section's text is shown, from 0. */
+      page: number
+      /** The conversation's trace, read from the receiver's folder after each turn. */
+      trace: TraceState
+      /** Why the last tracing switch failed, until the next one succeeds. */
+      traceError: string | null
       /** The built-in tools of this session, by name, as `tool.describe` saw them. */
       tools: Record<string, SeenTool>
       /** Built-in tools denied by bare name in the user settings, read from the file. */

@@ -1,9 +1,22 @@
 import { atom, read, update } from 'claude-code'
 import type { EngineInterface, PromptComposeSection, Register } from 'claude-code'
 
-import type { Effort, GitInfo, PaneTab } from '../types'
+import type { Effort, GitInfo, PaneTab, TraceItem, TraceState, TraceStatus } from '../types'
 import { buildSnapshot, currentSnapshot } from './context'
-import { ContextPane, PANE_ID, PANE_TITLE } from './panel'
+import { ContextPane, PANE_ID, PANE_TITLE, TABS_KEY } from './panel'
+import type { TabStripPick } from './tabs'
+import type { TraceRecord } from './trace'
+import {
+  editTraceEnv,
+  isMainSource,
+  isTraceOn,
+  RECEIVER_HEALTH,
+  RECEIVER_NAME,
+  requestText,
+  sentPrompt,
+  summarize,
+  TRACE_PORT,
+} from './trace'
 import {
   deniedTools,
   editDeny,
@@ -22,14 +35,19 @@ import {
 // The percentage opens the Context details pane, for what the desktop's own
 // Context card cannot show: the built-in tools, which can be removed from the
 // window and put back, the system prompt's text, the skills' listings and the
-// largest tool results.
+// conversation's trace.
 
 const tick = atom({ plugin: 'desktop-statusline', key: 'tick' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
 const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, null)
 const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, null)
 const expanded = atom({ plugin: 'desktop-statusline', key: 'expanded' } as const, [])
+const page = atom({ plugin: 'desktop-statusline', key: 'page' } as const, 0)
 const tab = atom({ plugin: 'desktop-statusline', key: 'tab' } as const, 'tools' as PaneTab)
+const PANE_TABS: readonly PaneTab[] = ['tools', 'prompt', 'skills', 'trace']
+const NO_TRACE: TraceState = { status: 'off', items: [], prompt: null, view: null }
+const trace = atom({ plugin: 'desktop-statusline', key: 'trace' } as const, NO_TRACE)
+const traceError = atom({ plugin: 'desktop-statusline', key: 'traceError' } as const, null)
 const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
@@ -195,15 +213,20 @@ async function configuredEffort($: EngineInterface): Promise<Effort | null> {
   }
 }
 
-/** The user settings file, which `/permissions` and the settings UI also write. */
-async function settingsPath($: EngineInterface): Promise<string> {
-  const configDir = await $.env.get('CLAUDE_CONFIG_DIR')
-  if (configDir) return `${configDir}/settings.json`
+/** The user's Claude configuration folder: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
+async function configDir($: EngineInterface): Promise<string> {
+  const configured = await $.env.get('CLAUDE_CONFIG_DIR')
+  if (configured) return configured
   const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
   if (!home)
     throw new SettingsShapeError('Cannot find your home folder, so settings.json was not changed.')
 
-  return `${home}/.claude/settings.json`
+  return `${home}/.claude`
+}
+
+/** The user settings file, which `/permissions` and the settings UI also write. */
+async function settingsPath($: EngineInterface): Promise<string> {
+  return `${await configDir($)}/settings.json`
 }
 
 // Reads and writes of the settings file run one at a time, so two quick presses
@@ -259,12 +282,8 @@ async function refreshContext($: EngineInterface): Promise<void> {
     const usage = await $.session.usage({ breakdown: 'full' })
     const breakdown = usage.context.breakdown
     if (!breakdown) return
-    const [messages, commands, sections] = await Promise.all([
-      $.session.messages(),
-      $.command.list(),
-      composedPrompt($),
-    ])
-    const snapshot = buildSnapshot(breakdown, messages, commands, sections)
+    const [commands, sections] = await Promise.all([$.command.list(), composedPrompt($)])
+    const snapshot = buildSnapshot(breakdown, commands, sections)
     await update($, context, () => snapshot)
   } catch {
     // The session could not be read just now; the next turn tries again.
@@ -315,11 +334,190 @@ async function setRemoved($: EngineInterface, name: string, shouldRemove: boolea
   await refreshContext($)
 }
 
+/** Where the trace receiver keeps each session's requests. */
+async function traceRoot($: EngineInterface): Promise<string> {
+  return `${await configDir($)}/desktop-statusline/traces`
+}
+
+/** How long the receiver gets to answer once started, before it counts as failed. */
+const RECEIVER_START_MS = 3000
+const RECEIVER_POLL_MS = 150
+/** How long after a turn its last answer has surely been exported. */
+const TRACE_SETTLE_MS = 2500
+
+/** Which receiver answers on the port: this plugin's, an older one of it, or none. */
+async function receiverOnPort($: EngineInterface): Promise<'current' | 'older' | 'none'> {
+  try {
+    const answer = await $.http.fetch(`http://127.0.0.1:${TRACE_PORT}/health`)
+    if (answer.ok && answer.text === RECEIVER_HEALTH) return 'current'
+
+    return answer.ok && answer.text.startsWith(RECEIVER_NAME) ? 'older' : 'none'
+  } catch {
+    return 'none'
+  }
+}
+
+/** The token the running receiver's pages answer to, which it writes beside the traces. */
+async function viewToken($: EngineInterface): Promise<string | null> {
+  try {
+    const token = String(await $.fs.read(`${await traceRoot($)}/.view-token`)).trim()
+
+    return /^[0-9a-f]{32}$/.test(token) ? token : null
+  } catch {
+    return null
+  }
+}
+
+async function isReceiverUp($: EngineInterface): Promise<boolean> {
+  return (await receiverOnPort($)) === 'current'
+}
+
+/**
+ * Makes sure a trace receiver listens: one serves every session on the
+ * machine, so one already up is used. Else this session starts one with Node,
+ * which runs for the session's life; when that session ends, the next one to
+ * check starts another.
+ */
+async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
+  const found = await receiverOnPort($)
+  if (found === 'current') return 'on'
+  if (found === 'older') {
+    // An older receiver serves the trace as it was: asked to leave, it frees the port.
+    const token = await viewToken($)
+    if (token) {
+      await $.http
+        .fetch(`http://127.0.0.1:${TRACE_PORT}/quit?t=${token}`, { method: 'POST' })
+        .catch(() => undefined)
+      await $.clock.sleep(RECEIVER_POLL_MS)
+    }
+  }
+  let hasFailed = false
+  try {
+    const child = $.process.spawn({
+      argv: ['node', `${$.plugin.root}/trace/receiver.mjs`, await traceRoot($), String(TRACE_PORT)],
+    })
+    void (async () => {
+      try {
+        for await (const _piece of child) {
+          // Its output is not read; the loop holds the child for the session.
+        }
+      } catch {
+        hasFailed = true
+      }
+    })()
+  } catch {
+    return 'no-node'
+  }
+  for (let waited = 0; waited < RECEIVER_START_MS; waited += RECEIVER_POLL_MS) {
+    if (hasFailed) return 'no-node'
+    await $.clock.sleep(RECEIVER_POLL_MS)
+    if (await isReceiverUp($)) return 'on'
+  }
+
+  return hasFailed ? 'no-node' : 'on'
+}
+
+/** Requests read from the trace folder, by file name, with the time each was last read. */
+const traceCache = new Map<string, { mtimeMs: number; item: TraceItem; record: TraceRecord }>()
+const systemCache = new Map<string, { type: string; text: string }[]>()
+let traceQueue: Promise<unknown> = Promise.resolve()
+
+/**
+ * Reads this session's trace from the receiver's folder: what tracing's
+ * switch says, every request recorded, and the system prompt the last main
+ * request sent. One reading at a time; a request already read is read again
+ * only when its file changed (its answer arrived).
+ */
+function refreshTrace($: EngineInterface): Promise<void> {
+  const run = traceQueue.then(async () => {
+    try {
+      const settings = parseSettings(await readSettingsText($))
+      let status: TraceStatus = isTraceOn(settings) ? await ensureReceiver($) : 'off'
+      if (status !== 'on') {
+        await update($, trace, current => ({ ...current, status }))
+        return
+      }
+      const folder = `${await traceRoot($)}/${await $.session.id()}`
+      const entries = (await $.fs.exists(folder)) ? await $.fs.list(folder) : []
+      // Telemetry starts with the session: one already running when tracing was
+      // turned on exports nothing, though its environment says otherwise once
+      // the settings change. A session that has taken a turn and has no trace
+      // is such a one.
+      const turns = await $.session.turns().catch(() => 0)
+      if (entries.length === 0 && turns > 0) status = 'next-session'
+      for (const entry of entries) {
+        if (!/^\d{6}\.json$/.test(entry.name)) continue
+        const cached = traceCache.get(entry.name)
+        if (cached && cached.mtimeMs === entry.mtimeMs) continue
+        try {
+          const record = JSON.parse(
+            String(await $.fs.read(`${folder}/${entry.name}`)),
+          ) as TraceRecord
+          traceCache.set(entry.name, { mtimeMs: entry.mtimeMs, item: summarize(record), record })
+        } catch {
+          // Being written, or too large to read: the next reading tries again.
+        }
+      }
+      const records = [...traceCache.values()].sort((a, b) => a.item.seq - b.item.seq)
+      const main = records.findLast(one => isMainSource(one.record.source))?.record
+      let prompt: TraceState['prompt'] = null
+      if (main) {
+        let blocks = systemCache.get(main.system)
+        if (!blocks) {
+          blocks = JSON.parse(String(await $.fs.read(`${folder}/system-${main.system}.json`))) as {
+            type: string
+            text: string
+          }[]
+          systemCache.set(main.system, blocks)
+        }
+        const snapshot = currentSnapshot(await read($, context))
+        prompt = sentPrompt(blocks, snapshot?.prompt ?? [])
+      }
+      const token = await viewToken($)
+      const view = token ? { session: await $.session.id(), token } : null
+      await update($, trace, () => ({ status, items: records.map(one => one.item), prompt, view }))
+    } catch {
+      // The folder could not be read just now; the next turn tries again.
+    }
+  })
+  traceQueue = run.catch(() => undefined)
+
+  return run
+}
+
+/** One recorded request as text, for the Trace tab's open row; null when it is not read. */
+function traceRequestText(seq: number): string | null {
+  const cached = [...traceCache.values()].find(one => one.item.seq === seq)
+
+  return cached ? requestText(cached.record) : null
+}
+
+/** Turns tracing on or off in the user settings; new sessions follow it. */
+async function setTracing($: EngineInterface, isOn: boolean): Promise<void> {
+  await serially(async () => {
+    try {
+      const path = await settingsPath($)
+      const text = await readSettingsText($)
+      const next = editTraceEnv(text, isOn)
+      if (next !== text) await $.fs.write(path, next)
+      await update($, traceError, () => null)
+    } catch (error) {
+      const reason =
+        error instanceof SettingsShapeError
+          ? error.message
+          : `Could not update settings.json: ${String(error)}`
+      await update($, traceError, () => reason)
+    }
+  })
+  await refreshTrace($)
+}
+
 /**
  * Opens or closes one of the system prompt's sections. A section opens alone,
  * so the pane never draws more than one at a time.
  */
 async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
+  await update($, page, () => 0)
   await update($, expanded, keys => (keys.includes(key) ? [] : [key]))
 }
 
@@ -335,7 +533,7 @@ async function openPane($: EngineInterface): Promise<void> {
     // Focused, so the first click in the pane presses its button: an
     // unfocused pane spends that click on taking the focus.
     await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
-    await Promise.all([refreshRemoved($), refreshContext($)])
+    await Promise.all([refreshRemoved($), refreshContext($).then(() => refreshTrace($))])
     await $.clock.sleep(PANE_SETTLE_MS)
     await $.ui.scroll({ in: PANE_ID, to: 'start' })
   } catch {
@@ -356,6 +554,7 @@ export const register: Register = on => {
       await refreshGit($)
       await refreshRemoved($)
       await refreshContext($)
+      await refreshTrace($)
     })()
     void (async () => {
       for (const key of await $.store.keys()) {
@@ -393,7 +592,12 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       void refreshGit($)
+      // The last request's answer reaches the receiver a moment after the turn
+      // ends (the export runs every second), so the trace is read twice.
       void refreshContext($)
+        .then(() => refreshTrace($))
+        .then(() => $.clock.sleep(TRACE_SETTLE_MS))
+        .then(() => refreshTrace($))
     }
 
     return next(e)
@@ -449,6 +653,15 @@ export const register: Register = on => {
     return isRedrawJump ? {} : next(e)
   }).catch(($, e, next) => next(e))
 
+  // A tab picked in the pane's strip, posted by its region.
+  on('ui.message', { requestId: PANE_ID }, async ($, e, next) => {
+    const picked = (e.data as Partial<TabStripPick> | null)?.tab
+    const isTab = (value: unknown): value is PaneTab => PANE_TABS.includes(value as PaneTab)
+    if (e.element === TABS_KEY && isTab(picked)) await update($, tab, () => picked)
+
+    return next(e)
+  })
+
   on('ui.render', { component: 'Pane', requestId: PANE_ID }, async ($, e) => {
     if (e.surface !== 'desktop') {
       const { Text } = $.ui.resolve(e)
@@ -456,15 +669,20 @@ export const register: Register = on => {
       return <Text>The context details draw in the desktop app.</Text>
     }
     const ui = $.ui.resolve(e)
-    const [snapshot, open, shown, seen, names, back, error] = await Promise.all([
-      read($, context).then(currentSnapshot),
-      read($, expanded),
-      read($, tab),
-      read($, tools),
-      read($, removed),
-      read($, putBack),
-      read($, toolError),
-    ])
+    const [snapshot, open, shown, seen, names, back, error, traced, tracingError, shownPage] =
+      await Promise.all([
+        read($, context).then(currentSnapshot),
+        read($, expanded),
+        read($, tab),
+        read($, tools),
+        read($, removed),
+        read($, putBack),
+        read($, toolError),
+        read($, trace),
+        read($, traceError),
+        read($, page),
+      ])
+    const openSeq = open.map(key => /^trace-(\d+)$/.exec(key)?.[1]).find(Boolean)
 
     return ContextPane({
       ui,
@@ -473,12 +691,17 @@ export const register: Register = on => {
       tab: shown,
       expanded: open,
       error,
+      trace: traced,
+      traceError: tracingError,
+      traceText: openSeq === undefined ? null : traceRequestText(Number(openSeq)),
+      onTracing: isOn => void setTracing($, isOn),
       onToggle: (name, shouldRemove) =>
         void setRemoved($, name, shouldRemove).catch(error =>
           update($, toolError, () => String(error)),
         ),
       onExpand: key => void toggleExpanded($, key),
-      onTab: next => void update($, tab, () => next),
+      page: shownPage,
+      onPage: next => void update($, page, () => next),
     })
   })
 

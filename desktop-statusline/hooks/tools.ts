@@ -160,7 +160,7 @@ export function deniedTools(settings: unknown): string[] {
 /** Why the settings file was left untouched: it holds something the panel will not rewrite. */
 export class SettingsShapeError extends Error {}
 
-function isPlainObject(value: unknown): value is Record<string, unknown> {
+export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
@@ -208,6 +208,11 @@ export function editDeny(text: string, name: string, shouldDeny: boolean): strin
   if (shouldDeny) next.push(name)
   settings.permissions = { ...permissions, deny: next }
 
+  return writeSettings(text, settings)
+}
+
+/** `settings` as the file's text, keeping the file's byte-order mark, line endings and indentation. */
+export function writeSettings(text: string, settings: Record<string, unknown>): string {
   const bom = text.startsWith('\uFEFF') ? '\uFEFF' : ''
   const eol = text.includes('\r\n') ? '\r\n' : '\n'
   const indent = /^\uFEFF?\s*\{\r?\n([ \t]+)"/.exec(text)?.[1] ?? '  '
