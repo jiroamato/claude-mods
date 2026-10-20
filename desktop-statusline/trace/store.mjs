@@ -18,7 +18,7 @@
  * another server, and an older receiver from this one (hooks/trace.ts keeps
  * the same text). Bumped whenever what the receiver serves changes.
  */
-export const HEALTH = 'desktop-statusline trace receiver 2'
+export const HEALTH = 'desktop-statusline trace receiver 5'
 
 /** The events the receiver keeps; the others are left unread. */
 export const KEPT_EVENTS = new Set(['api_request_body', 'api_request', 'api_response_body'])
@@ -59,6 +59,11 @@ export function logRecords(payload) {
   }
 
   return records
+}
+
+/** Whether a system block is the billing header alone, which every request carries. */
+export function isBillingBlock(block) {
+  return /^x-anthropic-billing-header:/.test(String(block?.text ?? ''))
 }
 
 /** A session id safe to name a folder by, or null for one that is not. */
@@ -141,11 +146,21 @@ export class TraceStore {
     this.keep(folder, session, `tools-${toolsHash}.json`, tools)
 
     // The messages after what the previous request of this kind already sent.
+    // A request that goes on from the one before (newer Claude Code sends the
+    // system prompt and the tools once, then only the billing header, no tools
+    // and the new messages, the API holding the rest) adds all it carries.
     const hashes = body.messages.map(message => hashText(JSON.stringify(message)))
     const before = session.last.get(source) ?? []
+    const continues = before.length > 0 && tools.length === 0 && system.every(isBillingBlock)
     let from = 0
-    while (from < before.length && from < hashes.length && before[from] === hashes[from]) from += 1
-    session.last.set(source, hashes)
+    if (continues) {
+      from = before.length
+      session.last.set(source, [...before, ...hashes])
+    } else {
+      while (from < before.length && from < hashes.length && before[from] === hashes[from])
+        from += 1
+      session.last.set(source, hashes)
+    }
 
     const record = {
       seq: session.next,
@@ -159,7 +174,8 @@ export class TraceStore {
       toolCount: tools.length,
       messageCount: body.messages.length,
       from,
-      added: body.messages.slice(from),
+      continues,
+      added: continues ? body.messages : body.messages.slice(from),
       usage: null,
       response: null,
     }

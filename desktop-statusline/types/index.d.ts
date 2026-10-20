@@ -28,6 +28,9 @@ export type PromptSection = {
   isAdded?: boolean
 }
 
+/** Who put a skill in the session. */
+export type SkillOrigin = 'yours' | 'anthropic' | 'organization'
+
 /** The pane's tabs: what the desktop's own Context card cannot show. */
 export type PaneTab = 'tools' | 'prompt' | 'skills' | 'trace'
 
@@ -91,7 +94,14 @@ export type ContextSnapshot = {
   /** /context's rows: in use largest first, then the reserve, the free space, what loads on demand. */
   rows: ContextRow[]
   /** Each listed skill with its listing's tokens. */
-  skills: { name: string; tokens: number; source: string; description: string }[]
+  skills: {
+    name: string
+    tokens: number
+    source: string
+    description: string
+    /** Who put it there: the person, Anthropic (bundled with Claude Code or the app), or their organization. */
+    origin: SkillOrigin
+  }[]
   /** The system prompt's sections, in the order they are sent. */
   prompt: PromptSection[]
 }
@@ -116,6 +126,10 @@ declare module 'claude-code' {
       tab: PaneTab
       /** Which page of the open request's or section's text is shown, from 0. */
       page: number
+      /** The request the pane reads whole, by its number; null while the pane shows its tabs. */
+      reader: number | null
+      /** The reader's search: what is looked for, and which match is current. */
+      readerSearch: { query: string; index: number }
       /** The conversation's trace, read from the receiver's folder after each turn. */
       trace: TraceState
       /** Why the last tracing switch failed, until the next one succeeds. */

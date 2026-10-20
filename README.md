@@ -41,7 +41,7 @@ a segment to see what it holds, each row a grey segment draws named in turn. Und
 are four tabs:
 
 - **Tools**: every built-in tool with a one-line summary and its approximate size,
-  grouped as in the context, loaded on demand, and removed. **Remove** takes a tool
+  grouped as in the context, deferred (loaded on demand), and removed. **Remove** takes a tool
   out of the open session at once (its schema leaves the context and Claude can no
   longer call it) and adds its name to `permissions.deny` in your user settings
   (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR`), so new sessions in every
@@ -53,11 +53,13 @@ are four tabs:
   the last request sent it, the parts the engine adds outside its own sections marked
   _added_: the output style, the line that names Claude, the desktop app's own
   instructions.
-- **Skills**: each skill's listing as Claude sees it, read-only for now.
+- **Skills**: each skill's listing as Claude sees it, read-only for now: the ones you
+  installed apart from the ones Claude Code and the desktop app bring.
 - **Trace**: every request the session sends to the model, newest first, with what it
   added to the conversation, what came back, and its tokens, cost and time. Open one
-  to read it, or open it whole in your browser: its system prompt, every tool
-  definition and every message, as the model received them.
+  for a preview, then **Read it whole here**: its system prompt, every tool definition
+  and every message, as the model received them, with a search that steps through
+  each match. Or open it whole in your browser.
 
 ##### Tracing
 

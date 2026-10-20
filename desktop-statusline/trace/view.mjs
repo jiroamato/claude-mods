@@ -21,11 +21,49 @@ export function fullMessages(records, seq) {
   let messages = []
   for (const record of [...records].sort((a, b) => a.seq - b.seq)) {
     if (record.source !== target.source) continue
-    messages = [...messages.slice(0, record.from), ...record.added]
+    messages = goesOn(record, messages.length > 0)
+      ? [...messages, ...record.added]
+      : [...messages.slice(0, record.from), ...record.added]
     if (record.seq === seq) break
   }
 
   return messages
+}
+
+/** The main loop's requests, by the engine's name for where a request came from. */
+function isMain(source) {
+  return source === 'sdk' || String(source).startsWith('repl_main_thread')
+}
+
+/**
+ * Whether a request goes on from the one before, adding to its messages: the
+ * receiver marks it so; one it kept before it knew to is a main request with
+ * no tools whose messages start afresh.
+ */
+export function goesOn(record, hasBefore) {
+  return (
+    record.continues === true ||
+    (hasBefore &&
+      record.continues === undefined &&
+      isMain(record.source) &&
+      record.toolCount === 0 &&
+      record.from === 0)
+  )
+}
+
+/**
+ * The request whose system prompt and tools a request was sent with: itself,
+ * or for one that goes on from the one before, the last of its kind that
+ * carried them.
+ */
+export function promptRecord(records, seq) {
+  const target = records.find(one => one.seq === seq)
+  if (!target) return null
+  const before = records
+    .filter(one => one.source === target.source && one.seq <= seq && one.toolCount > 0)
+    .sort((a, b) => b.seq - a.seq)
+
+  return target.toolCount > 0 ? target : (before[0] ?? target)
 }
 
 function count(value) {
@@ -104,7 +142,8 @@ export function requestPage({ session, records, seq, system, tools, link }) {
   const record = records.find(one => one.seq === seq)
   if (!record) return null
   const messages = fullMessages(records, seq) ?? []
-  const firstNew = record.from
+  // What this request added comes last, however it was sent.
+  const firstNew = Math.max(0, messages.length - record.added.length)
   const systemBlocks = (system ?? [])
     .map(
       (one, index) =>

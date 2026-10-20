@@ -11,7 +11,7 @@ import http from 'node:http'
 import path from 'node:path'
 
 import { HEALTH, logRecords, sessionFolder, TraceStore } from './store.mjs'
-import { requestPage, sessionPage } from './view.mjs'
+import { promptRecord, requestPage, sessionPage } from './view.mjs'
 
 /** A session left this long untouched is deleted at start. */
 const KEEP_DAYS = 14
@@ -56,8 +56,22 @@ const store = new TraceStore(
   },
 )
 
-/** What a page link carries, so no other page or program on the machine reads the traces. */
-const token = randomBytes(16).toString('hex')
+/**
+ * What a page link carries, so no other page or program on the machine reads
+ * the traces. Kept beside them and read again by the next receiver, so a link
+ * the pane drew before a restart still opens.
+ */
+const tokenFile = path.join(root, '.view-token')
+const token = (() => {
+  try {
+    const kept = fs.readFileSync(tokenFile, 'utf8').trim()
+    if (/^[0-9a-f]{32}$/.test(kept)) return kept
+  } catch {
+    // None kept yet: this receiver makes the first.
+  }
+
+  return randomBytes(16).toString('hex')
+})()
 const link = (session, seq) => `/view/${session}${seq === undefined ? '' : `/${seq}`}?t=${token}`
 
 function readJson(file) {
@@ -96,16 +110,18 @@ function view(url, response) {
   } else {
     const seq = Number(match[2])
     const record = records.find(one => one.seq === seq)
-    html = record
-      ? requestPage({
-          session,
-          records,
-          seq,
-          system: readJson(path.join(root, session, `system-${record.system}.json`)),
-          tools: readJson(path.join(root, session, `tools-${record.tools}.json`)),
-          link,
-        })
-      : null
+    const base = promptRecord(records, seq)
+    html =
+      record && base
+        ? requestPage({
+            session,
+            records,
+            seq,
+            system: readJson(path.join(root, session, `system-${base.system}.json`)),
+            tools: readJson(path.join(root, session, `tools-${base.tools}.json`)),
+            link,
+          })
+        : null
   }
   if (html === null) {
     response.writeHead(404)
@@ -185,7 +201,7 @@ server.on('error', error => {
 })
 // The token is written once the port is this receiver's, never over a running one's.
 server.on('listening', () => {
-  fs.writeFileSync(path.join(root, '.view-token'), token)
+  fs.writeFileSync(tokenFile, token)
   // A browser may reach `localhost` over IPv6 first: the pages answer there too.
   const v6 = http.createServer(handle)
   v6.on('error', () => undefined)

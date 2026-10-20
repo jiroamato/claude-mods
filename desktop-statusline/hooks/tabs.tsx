@@ -11,6 +11,9 @@ export type TabStripPick = { tab: string }
 
 type State = { hover: number | null }
 
+/** The props each instance last drew with, by its surface, for listeners set once. */
+const latest = new WeakMap<object, TabStripProps>()
+
 // A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
 // A recessed track, the open tab raised on it, a tab under the pointer between.
@@ -27,31 +30,43 @@ export default function TabStrip(props: TabStripProps, surface: ClientSurface<St
   const { Box, Text } = surface.elements
   const tabs = props.tabs
   const hover = surface.state?.hover ?? null
-  const openIndex = Math.max(
-    0,
-    tabs.findIndex(one => one.id === props.open),
-  )
-  const pick = (index: number) => {
-    const tab = tabs[index]
-    if (tab && tab.id !== props.open) surface.post({ tab: tab.id } satisfies TabStripPick)
-  }
-  // Which tab a column is over: each takes an equal share of the region.
-  const at = (x: number) =>
-    Math.min(tabs.length - 1, Math.floor((x / Math.max(1, surface.columns)) * tabs.length))
+  // Its listeners are set once, at the first drawing, and read the latest
+  // props: set again at every drawing, an event that comes while one is
+  // replaced (the pointer leaving) is lost, a tab left lit.
+  const isWired = latest.has(surface)
+  latest.set(surface, props)
+  if (!isWired) {
+    const now = () => latest.get(surface)!
+    const lit = () => surface.state?.hover ?? null
+    // Which tab a column is over: each takes an equal share of the region.
+    const indexOf = (x: number) => {
+      const count = now().tabs.length
 
-  surface.onPointer(event => {
-    if (event.type === 'leave') {
-      if (hover !== null) surface.setState({ hover: null })
-      return
+      return Math.min(count - 1, Math.floor((x / Math.max(1, surface.columns)) * count))
     }
-    const index = at(event.x)
-    if (event.type === 'down' && event.button === 'left') pick(index)
-    if (index !== hover) surface.setState({ hover: index })
-  })
-  surface.onKey(event => {
-    if (event.key === 'left') pick(Math.max(0, openIndex - 1))
-    if (event.key === 'right') pick(Math.min(tabs.length - 1, openIndex + 1))
-  })
+    const pickAt = (index: number) => {
+      const tab = now().tabs[index]
+      if (tab && tab.id !== now().open) surface.post({ tab: tab.id } satisfies TabStripPick)
+    }
+    const openAt = () =>
+      Math.max(
+        0,
+        now().tabs.findIndex(one => one.id === now().open),
+      )
+    surface.onPointer(event => {
+      if (event.type === 'leave') {
+        if (lit() !== null) surface.setState({ hover: null })
+        return
+      }
+      const index = indexOf(event.x)
+      if (event.type === 'down' && event.button === 'left') pickAt(index)
+      if (index !== lit()) surface.setState({ hover: index })
+    })
+    surface.onKey(event => {
+      if (event.key === 'left') pickAt(Math.max(0, openAt() - 1))
+      if (event.key === 'right') pickAt(Math.min(now().tabs.length - 1, openAt() + 1))
+    })
+  }
 
   const rounded = { borderStyle: 'round', borderColor: CLEAR } as const
 

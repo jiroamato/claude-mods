@@ -2,11 +2,21 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { pageStarts } from '../hooks/panel'
-import { editTraceEnv, isTraceOn, sentPrompt, summarize, TRACE_ENV } from '../hooks/trace'
+import {
+  editTraceEnv,
+  findMatches,
+  isTraceOn,
+  promptRecord as tracePromptRecord,
+  readerRanges,
+  sentPrompt,
+  summarize,
+  TRACE_ENV,
+  wrapRows,
+} from '../hooks/trace'
 import type { TraceRecord } from '../hooks/trace'
 // The receiver's own logic, as Node runs it.
 import { logRecords, TraceStore } from '../trace/store.mjs'
-import { fullMessages, requestPage, sessionPage } from '../trace/view.mjs'
+import { fullMessages, promptRecord, requestPage, sessionPage } from '../trace/view.mjs'
 
 const SESSION = 'session-1'
 
@@ -235,7 +245,7 @@ function tracedEngine(on: On, files: Record<string, string>, turns = 0) {
   on('session.id', async () => ({ value: 'session-1' }))
   on('session.turns', async () => ({ value: turns }))
   on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 2' },
+    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 5' },
   }))
   on('session.model', async () => ({ value: 'Opus 5.5' }))
   on('session.cwd', async () => ({ value: '/repo' }))
@@ -287,18 +297,36 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
   await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
 
   await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
-  expect((await pane.find({ key: 'open-trace-0' }))?.text).toMatch(/^#1 Main 12:00:05/)
+  expect((await pane.find({ type: 'Client', key: 'disclose-trace-0' }))?.props.props).toMatchObject(
+    {
+      label: '#1 Main',
+      tag: '12:00:05',
+      isOpen: false,
+    },
+  )
   expect(await pane.find({ type: 'Text', text: '+ "list the files"' })).toBeDefined()
   expect(await pane.find({ type: 'Text', text: '→ "Here they are."' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: '10 in · 5 out · $0.25 · 1.5s' })).toBeDefined()
-  await pane.press({ key: 'open-trace-0' })
+  expect((await pane.find({ type: 'Client', key: 'disclose-trace-0' }))?.props.props).toMatchObject(
+    {
+      figure: '10 in · 5 out · $0.25 · 1.5s',
+    },
+  )
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   expect(String((await pane.find({ type: 'Code' }))?.props.source)).toMatch(
     /\[user\]\nlist the files[\s\S]*── Answer \(end_turn\)\n\nHere they are\./,
   )
 
   await pane.pointer({ type: 'down', x: 15, y: 0, button: 'left', in: 'tabs' })
-  expect((await pane.find({ key: 'open-prompt-billing-0' }))?.text).toMatch(/^Billing header added/)
-  expect(await pane.find({ type: 'Text', text: 'Output Style: Concise' })).toBeDefined()
+  expect(
+    (await pane.find({ type: 'Client', key: 'disclose-prompt-billing-0' }))?.props.props,
+  ).toMatchObject({
+    label: 'Billing header',
+    tag: 'added',
+  })
+  const sections = (await pane.findAll({ type: 'Client' }))
+    .filter(one => String(one.props.key).startsWith('disclose-prompt-'))
+    .map(one => (one.props.props as { label: string }).label)
+  expect(sections).toContain('Output Style: Concise')
 
   await pane.unmount()
 })
@@ -342,7 +370,7 @@ test('long text is read a page at a time, each page starting on a line', () => {
   expect(pageStarts('short')).toEqual([0])
 })
 
-test('an open request too long for the pane shows its opening, and opens whole in the browser', async ($, on) => {
+test('an open request shows a short preview, and opens whole here or in the browser', async ($, on) => {
   const long = 'line of the request\n'.repeat(5_000)
   const files: Record<string, string> = {
     'system-a.json': JSON.stringify([{ type: 'text', text: 'You are Claude.' }]),
@@ -371,15 +399,18 @@ test('an open request too long for the pane shows its opening, and opens whole i
   expect((await pane.find({ type: 'Link' }))?.props).toMatchObject({
     href: 'http://localhost:43180/view/session-1?t=0123456789abcdef0123456789abcdef',
   })
-  await pane.press({ key: 'open-trace-0' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   const links = (await pane.findAll({ type: 'Link' })).map(one => one.props.href)
   expect(links).toContain(
     'http://localhost:43180/view/session-1/0?t=0123456789abcdef0123456789abcdef',
   )
   // No pages in the pane: its opening, and where the rest is.
   expect(await pane.find({ key: 'page-next' })).toBeUndefined()
-  expect(String((await pane.find({ type: 'Code' }))?.props.source).length).toBeLessThan(45_000)
-  expect(await pane.find({ type: 'Text', text: /the browser shows it whole\.$/ })).toBeDefined()
+  // A dozen lines: "Read it whole here" shows the rest.
+  const preview = String((await pane.find({ type: 'Code' }))?.props.source)
+  expect(preview.split('\n')).toHaveLength(12)
+  expect(await pane.find({ type: 'Text', text: /^4,9\d\d more lines$/ })).toBeDefined()
+  expect(await pane.find({ key: 'read-0' })).toBeDefined()
 
   await pane.unmount()
 })
@@ -436,4 +467,173 @@ test('the browser pages show every message, escaped, and link to each other', ()
     link,
   })
   expect(index).toContain('href="/view/s/2?t=x"')
+})
+
+test('wrapped rows are each one line, cut at a space where one fits', () => {
+  expect(wrapRows('aaaa bbbb cccc\n\nshort', 10)).toEqual(['aaaa bbbb ', 'cccc', '', 'short'])
+  expect(wrapRows('x'.repeat(25), 10)).toEqual(['x'.repeat(10), 'x'.repeat(10), 'x'.repeat(5)])
+})
+
+test('the reader draws only the rows near the window, and empty space for the rest', async ($, on) => {
+  const long = Array.from({ length: 20_000 }, (_, index) => `line ${index}`).join('\n')
+  const files: Record<string, string> = {
+    'system-a.json': JSON.stringify([{ type: 'text', text: 'You are Claude.' }]),
+    'tools-b.json': JSON.stringify([{ name: 'Bash' }]),
+    '000000.json': JSON.stringify({
+      seq: 0,
+      at: '2026-10-19T12:00:05Z',
+      source: 'sdk',
+      model: 'claude-opus-5-5',
+      promptId: 'p1',
+      system: 'a',
+      tools: 'b',
+      toolCount: 1,
+      messageCount: 1,
+      from: 0,
+      added: [{ role: 'user', content: long }],
+      usage: null,
+      response: null,
+    } satisfies TraceRecord),
+  }
+  tracedEngine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+
+  // At the top: the way back, then the start of the request.
+  expect((await pane.find({ type: 'Client', key: 'reader' }))?.props).toMatchObject({ height: 1 })
+  const drawnRows = async () =>
+    (await pane.findAll({ type: 'Text' }))
+      .filter(one => one.props.mono === true)
+      .map(one => one.text)
+  const atTop = await drawnRows()
+  expect(atTop[0]).toBe('══ System prompt: 1 blocks')
+  expect(atTop.length).toBeLessThanOrEqual(80)
+  // Scrolled far down: the rows there, and every row before stood in for.
+  await pane.redraw({ ...PANE.props, scroll: { offset: 15_002, bodyRows: 40 } })
+  const below = await drawnRows()
+  expect(below.length).toBeLessThanOrEqual(120)
+  expect(below).toContain('line 14990')
+  // The rows before stand in as space, in Boxes no taller than the engine draws.
+  const spaces = (await pane.findAll({ type: 'Box' }))
+    .map(one => one.props.height)
+    .filter((height): height is number => typeof height === 'number' && height > 100)
+  expect(spaces.every(height => height <= 10_000)).toBe(true)
+  expect(spaces.reduce((sum, height) => sum + height, 0)).toBeGreaterThan(14_000)
+
+  // Back to the trace.
+  await pane.post({ back: true }, { in: 'reader' })
+  expect(await pane.find({ type: 'Client', key: 'reader' })).toBeUndefined()
+  expect(await pane.find({ type: 'Client', key: 'disclose-trace-0' })).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('a search finds every match in a row, ignoring case', () => {
+  expect(findMatches(['Bash and bash', 'none', 'BASH'], 'bash')).toEqual([
+    { row: 0, start: 0, end: 4 },
+    { row: 0, start: 9, end: 13 },
+    { row: 2, start: 0, end: 4 },
+  ])
+  expect(findMatches(['anything'], '   ')).toEqual([])
+})
+
+test('the reader draws the window and the rows around the current match', () => {
+  // Far apart: two stretches.
+  expect(readerRanges(100_000, 500, 40, 90_000)).toEqual([
+    { first: 460, last: 580 },
+    { first: 89_960, last: 90_040 },
+  ])
+  // Near each other: one.
+  expect(readerRanges(100_000, 500, 40, 520)).toEqual([{ first: 460, last: 580 }])
+  // Clamped at the ends.
+  expect(readerRanges(50, 0, 40, null)).toEqual([{ first: 0, last: 50 }])
+})
+
+test('searching the reader marks each match and steps to the next', async ($, on) => {
+  const long = Array.from({ length: 20_000 }, (_, index) => `line ${index}`).join('\n')
+  const files: Record<string, string> = {
+    'system-a.json': JSON.stringify([{ type: 'text', text: 'You are Claude.' }]),
+    'tools-b.json': JSON.stringify([]),
+    '000000.json': JSON.stringify({
+      seq: 0,
+      at: '2026-10-19T12:00:05Z',
+      source: 'sdk',
+      model: 'claude-opus-5-5',
+      promptId: 'p1',
+      system: 'a',
+      tools: 'b',
+      toolCount: 0,
+      messageCount: 1,
+      from: 0,
+      added: [{ role: 'user', content: long }],
+      usage: null,
+      response: null,
+    } satisfies TraceRecord),
+  }
+  tracedEngine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.resize({ columns: 40, rows: 2, in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 35, y: 0, button: 'left', in: 'tabs' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+
+  await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'change' })
+  // line 1999, 19990 to 19999: eleven, the first current and drawn though far below.
+  expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
+  expect((await pane.find({ key: 'reader-hit' }))?.text).toBe('line 1999')
+  await pane.press({ key: 'reader-next' })
+  expect(await pane.find({ type: 'Text', text: '2 of 11' })).toBeDefined()
+  expect((await pane.find({ key: 'reader-hit' }))?.text).toBe('line 19990')
+  await pane.press({ key: 'reader-previous' })
+  await pane.press({ key: 'reader-previous' })
+  expect(await pane.find({ type: 'Text', text: '11 of 11' })).toBeDefined()
+
+  await pane.input({ key: 'reader-search', text: 'nowhere', kind: 'change' })
+  expect(await pane.find({ type: 'Text', text: 'No match' })).toBeDefined()
+  expect(await pane.find({ key: 'reader-next' })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+test('a request that goes on from the one before adds its messages, and keeps the prompt sent before', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const first = [{ role: 'user', content: 'hello' }]
+  store.take(record('api_request_body', { body: requestBody(first), query_source: 'sdk' }))
+  // Newer Claude Code: the billing header alone, no tools, the new messages only.
+  store.take(
+    record('api_request_body', {
+      query_source: 'sdk',
+      body: JSON.stringify({
+        model: 'claude-opus-5-5',
+        system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2' }],
+        tools: [],
+        messages: [{ role: 'user', content: 'how are you' }],
+      }),
+    }),
+  )
+  const records = [0, 1].map(
+    seq => JSON.parse(files[`${SESSION}/00000${seq}.json`]!) as TraceRecord,
+  )
+  expect(records[1]).toMatchObject({ continues: true, from: 1, toolCount: 0 })
+  expect(fullMessages(records, 1)).toEqual([
+    { role: 'user', content: 'hello' },
+    { role: 'user', content: 'how are you' },
+  ])
+  // Its prompt and tools are the first request's.
+  expect(promptRecord(records, 1)?.seq).toBe(0)
+  expect(tracePromptRecord(records, 1)?.seq).toBe(0)
+
+  // One kept before the receiver marked such requests reads the same.
+  const unmarked = records.map(({ continues: _continues, ...one }) =>
+    one.seq === 1 ? { ...one, from: 0 } : one,
+  )
+  expect(fullMessages(unmarked, 1)).toHaveLength(2)
 })

@@ -1,6 +1,18 @@
-import type { CommandInfo, PromptComposeSection, SessionContextBreakdown } from 'claude-code'
+import type {
+  CommandInfo,
+  ContextSkill,
+  PromptComposeSection,
+  SessionContextBreakdown,
+} from 'claude-code'
 
-import type { ContextItem, ContextRow, ContextSnapshot, PromptSection, RowKind } from '../types'
+import type {
+  ContextItem,
+  ContextRow,
+  ContextSnapshot,
+  PromptSection,
+  RowKind,
+  SkillOrigin,
+} from '../types'
 import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
 const SKILL_LINE_MAX = 110
@@ -43,6 +55,28 @@ const SECTION_TITLE: Record<string, string> = {
   action_caution: 'Caution with actions',
   memory: 'Memory',
   total_tokens: 'Token budget',
+}
+
+/**
+ * Who put a skill in the session: Anthropic for the skills Claude Code
+ * bundles (`built-in`, and the default plugins it ships, `cc-plugin-*`) and
+ * the ones the desktop app adds (`anthropic-skills:*`); the organization for
+ * managed settings; else the person, by their settings, a plugin or a server.
+ */
+export function skillOrigin(
+  skill: Pick<ContextSkill, 'name' | 'source' | 'pluginName'>,
+): SkillOrigin {
+  const plugin = skill.pluginName ?? ''
+  if (
+    skill.source === 'built-in' ||
+    skill.name.startsWith('anthropic-skills:') ||
+    plugin === 'anthropic-skills' ||
+    plugin.startsWith('cc-plugin-')
+  ) {
+    return 'anthropic'
+  }
+
+  return skill.source === 'policySettings' ? 'organization' : 'yours'
 }
 
 /** `21k`, `18.2k`, `894.5k`, `1M`: a token count as /context prints it. */
@@ -155,6 +189,7 @@ export function buildSnapshot(
       tokens: one.tokens,
       source: one.pluginName ?? SKILL_SOURCE[String(one.source)] ?? String(one.source),
       description: firstSentence(descriptions.get(one.name) ?? '', SKILL_LINE_MAX),
+      origin: skillOrigin(one),
     }))
     .sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name))
 

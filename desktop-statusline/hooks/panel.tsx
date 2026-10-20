@@ -5,13 +5,16 @@ import type {
   ContextSnapshot,
   PaneTab,
   PromptSection,
+  SkillOrigin,
   TraceItem,
   TraceState,
 } from '../types'
 import { FREE, barSegments, formatShare, formatTokens } from './context'
+import type { DisclosureProps } from './disclosure'
+import type { ReaderBarProps } from './reader'
 import type { TabStripProps } from './tabs'
 import type { ToolRow } from './tools'
-import { sourceLabel, viewLink } from './trace'
+import { MAX_MATCHES, sourceLabel, viewLink } from './trace'
 
 /** The pane the percentage opens. */
 export const PANE_ID = 'context-map'
@@ -44,9 +47,6 @@ const UNREAD_MIN_TOKENS = 100
 const PAGE_CHARS = 40_000
 // A page ends at the last line break this close to its end, so it never cuts a line.
 const PAGE_SLACK = 4_000
-
-const CLOSED = '▸'
-const OPEN = '▾'
 
 /** The tabs in their order, each with its label and the /context row it details. */
 const TABS: readonly { id: PaneTab; label: string; row?: string }[] = [
@@ -245,25 +245,89 @@ function Paged(props: { ui: Ui; text: string; page: number; onPage: (page: numbe
   )
 }
 
+/** How much of a request its open row shows: the reader shows the rest. */
+const PREVIEW_ROWS = 12
+const PREVIEW_CHARS = 1_500
+
 /**
- * An open request as text: whole when it fits in the pane, which draws at most
- * 100000 characters of code; else its opening, and where the rest is.
+ * An open request's opening: a few lines of what it added and what came
+ * back, enough to tell it apart. "Read it whole here" shows all of it.
  */
 function RequestText(props: { ui: Ui; text: string | null }) {
   const { Box, Code, Text } = props.ui
   if (props.text === null) return <Text color="subtle">This request could not be read.</Text>
-  const end = pageStarts(props.text)[1]
-  if (end === undefined) return <Code source={props.text} wrap="wrap" />
+  const lines = props.text.split('\n')
+  let preview = lines.slice(0, PREVIEW_ROWS).join('\n')
+  if (preview.length > PREVIEW_CHARS) preview = `${preview.slice(0, PREVIEW_CHARS)}…`
+  const rest = props.text.length - preview.length
+  const more = lines.length - PREVIEW_ROWS
 
   return (
     <Box flexDirection="column" rowGap={1}>
-      <Code source={props.text.slice(0, end)} wrap="wrap" />
-      <Text color="subtle" size="footnote">
-        {`The pane shows the first ${end.toLocaleString('en-US')} of its ${props.text.length.toLocaleString('en-US')} characters; the browser shows it whole.`}
-      </Text>
+      <Code source={preview} wrap="wrap" />
+      {rest > 0 && (
+        <Text color="subtle" size="footnote">
+          {more > 0
+            ? `${more.toLocaleString('en-US')} more ${more === 1 ? 'line' : 'lines'}`
+            : `${rest.toLocaleString('en-US')} more characters`}
+        </Text>
+      )}
     </Box>
   )
 }
+
+/** The key prefix of a row that opens, which the hooks module hears it post under. */
+export const DISCLOSURE_PREFIX = 'disclose-'
+// A row's own padding and its chevron's column, so what sits under the label lines up with it.
+const DISCLOSURE_INDENT = 4.6
+
+/**
+ * A row that opens what is under it: the chevron, the label, the figure at the
+ * far end, the whole row lit and pressed (./disclosure.tsx).
+ */
+function DisclosureRow(props: { ui: Ui; row: DisclosureProps }) {
+  const { Box, Client, Svg } = props.ui
+
+  return (
+    // The desktop's own chevron, the icon its rows draw, under the row's
+    // region: a region draws no icon, and an icon over it would take the press.
+    // The region, laid over the icon with no background of its own, lets it
+    // show and takes the press on the whole row.
+    <Box flexDirection="row" alignItems="center" height={1} paddingLeft={CARET_INSET}>
+      <Svg
+        source={props.row.isOpen ? CARET_DOWN : CARET_RIGHT}
+        alt={props.row.isOpen ? 'open' : 'closed'}
+        width={CARET_SIZE}
+        height={CARET_SIZE}
+      />
+      <Box position="absolute" top={0} left={0} right={0} bottom={0}>
+        <Client
+          key={`${DISCLOSURE_PREFIX}${props.row.id}`}
+          module="./disclosure.tsx"
+          props={props.row}
+          width="100%"
+          height={1}
+        />
+      </Box>
+    </Box>
+  )
+}
+
+// The desktop's chevrons: Phosphor's CaretRight and CaretDown (regular), as
+// its rows that open draw them, at its `xs` icon size in its muted text colour.
+const CARET_SIZE = 12
+const CARET_COLOR = '#898781'
+const caret = (path: string) =>
+  `<svg xmlns="http://www.w3.org/2000/svg" width="${CARET_SIZE}" height="${CARET_SIZE}" viewBox="0 0 256 256">` +
+  `<path fill="${CARET_COLOR}" d="${path}"/></svg>`
+const CARET_RIGHT = caret(
+  'M181.66,133.66l-80,80a8,8,0,0,1-11.32-11.32L164.69,128,90.34,53.66a8,8,0,0,1,11.32-11.32l80,80A8,8,0,0,1,181.66,133.66Z',
+)
+const CARET_DOWN = caret(
+  'M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z',
+)
+// The row region's own padding, so the icon sits where its room is kept.
+const CARET_INSET = 1
 
 /** A tab's heading: what it lists, and its tokens and share as /context counts them. */
 function Heading(props: { ui: Ui; title: string; snapshot: ContextSnapshot | null; row: string }) {
@@ -299,6 +363,10 @@ function Figure(props: { ui: Ui; text: string; dim?: boolean }) {
   )
 }
 
+function sumTokens(items: readonly { tokens: number }[]): number {
+  return items.reduce((sum, one) => sum + one.tokens, 0)
+}
+
 /** What a tab says before it lists its pieces: small and muted, so the list leads. */
 function Intro(props: { ui: Ui; text: string }) {
   const { Text } = props.ui
@@ -310,20 +378,43 @@ function Intro(props: { ui: Ui; text: string }) {
   )
 }
 
-/** A group's label and how many it holds, small and muted above its list. */
-function GroupLabel(props: { ui: Ui; label: string; count: number }) {
+/**
+ * A group of what a tab lists, set apart as a card: its name, then how many
+ * it holds and their size, then the list.
+ */
+function Group(props: {
+  ui: Ui
+  id: string
+  label: string
+  count: number
+  noun: string
+  tokens?: number
+  /** Said after the size, as `when loaded`. */
+  tokensNote?: string
+  children: JSX.Element
+}) {
   const { Box, Text } = props.ui
+  const figures = [
+    `${props.count} ${props.count === 1 ? props.noun : `${props.noun}s`}`,
+    ...(props.tokens === undefined
+      ? []
+      : [`~${formatTokens(props.tokens)}${props.tokensNote ? ` ${props.tokensNote}` : ''}`]),
+  ].join(' · ')
 
   return (
-    <Box flexDirection="row" columnGap={1}>
-      <Box flexGrow={1}>
-        <Text color="secondaryText" size="footnote" weight="medium">
-          {props.label.toUpperCase()}
+    <Box key={props.id} flexDirection="column" rowGap={1} borderStyle="round">
+      <Box flexDirection="row" alignItems="center" columnGap={2}>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text color="text" weight="semibold">
+            {props.label}
+          </Text>
+        </Box>
+        <Text color="subtle" size="footnote" tabular>
+          {figures}
         </Text>
       </Box>
-      <Text color="subtle" size="footnote" tabular>
-        {String(props.count)}
-      </Text>
+      <Box height={HAIRLINE} flexShrink={0} backgroundColor={RULE} />
+      {props.children}
     </Box>
   )
 }
@@ -397,7 +488,165 @@ export type ContextPaneProps = {
   onPage: (page: number) => void
   /** The pane's width in columns. */
   columns: number
+  /** The request read whole, as the rows on screen and around them; null while the tabs show. */
+  reader: ReaderView | null
+  onRead: (seq: number) => void
+  onSearch: (query: string) => void
+  onStep: (by: number) => void
 }
+
+/** What the reader draws: the rows near the window, and how many rows come before and after. */
+export type ReaderView = {
+  title: string
+  detail: string
+  /** The stretches of rows drawn, each from its row `first` of the text. */
+  stretches: { first: number; rows: ReaderRow[] }[]
+  total: number
+  /** The search: what is looked for, how many matches, and the current one. */
+  search: { query: string; index: number; count: number }
+}
+
+/** One drawn row: its text, the matches in it, and whether it holds the current one. */
+export type ReaderRow = {
+  text: string
+  hits: { start: number; end: number; isCurrent: boolean }[]
+}
+
+/** The reader's top, in rows: its line back, its search, and a row of space under them. */
+export const READER_TOP_ROWS = 4
+
+/** The key of the row the reader scrolls to: the one holding the current match. */
+export const READER_HIT_KEY = 'reader-hit'
+
+// A match, and the current one, as the desktop marks found text.
+const HIT = '#c9850059'
+const HIT_CURRENT = '#c98500'
+
+/** A row, its matches marked. */
+function RowText(props: { ui: Ui; row: ReaderRow }) {
+  const { Text } = props.ui
+  const row = props.row
+  if (row.hits.length === 0) {
+    return (
+      <Text color="text" mono wrap="truncate-end">
+        {row.text === '' ? ' ' : row.text}
+      </Text>
+    )
+  }
+  const parts: JSX.Element[] = []
+  let at = 0
+  for (const hit of row.hits) {
+    if (hit.start > at) parts.push(<Text>{row.text.slice(at, hit.start)}</Text>)
+    parts.push(
+      <Text
+        backgroundColor={hit.isCurrent ? HIT_CURRENT : HIT}
+        color={hit.isCurrent ? 'inverseText' : 'text'}
+      >
+        {row.text.slice(hit.start, hit.end)}
+      </Text>,
+    )
+    at = hit.end
+  }
+  if (at < row.text.length) parts.push(<Text>{row.text.slice(at)}</Text>)
+
+  return (
+    <Text color="text" mono wrap="truncate-end">
+      {parts}
+    </Text>
+  )
+}
+
+/**
+ * A request whole, read in the pane: its rows drawn only near the window and
+ * around the current match, the rest stood in for by empty space of the same
+ * height, so the pane scrolls through all of it and draws no more than a
+ * drawing holds. Its top is a fixed height, so the rows below are counted true.
+ */
+function Reader(props: {
+  ui: Ui
+  view: ReaderView
+  onSearch: (query: string) => void
+  onStep: (by: number) => void
+}) {
+  const { Box, Button, Client, Input, Text } = props.ui
+  const view = props.view
+  const bar: ReaderBarProps = { title: view.title, detail: view.detail }
+  const search = view.search
+  const status =
+    search.query.trim() === ''
+      ? ''
+      : search.count === 0
+        ? 'No match'
+        : `${search.index + 1} of ${search.count.toLocaleString('en-US')}${search.count >= MAX_MATCHES ? '+' : ''}`
+  const drawn: JSX.Element[] = []
+  let row = 0
+  for (const stretch of view.stretches) {
+    drawn.push(...Space({ ui: props.ui, rows: stretch.first - row }))
+    stretch.rows.forEach(one => {
+      const line = RowText({ ui: props.ui, row: one })
+      drawn.push(
+        one.hits.some(hit => hit.isCurrent) ? (
+          <Box key={READER_HIT_KEY} flexDirection="column">
+            {line}
+          </Box>
+        ) : (
+          line
+        ),
+      )
+    })
+    row = stretch.first + stretch.rows.length
+  }
+  drawn.push(...Space({ ui: props.ui, rows: view.total - row }))
+
+  return (
+    <Box flexDirection="column" paddingX={1}>
+      <Box height={READER_TOP_ROWS - 1} flexShrink={0} flexDirection="column" overflow="hidden">
+        <Client key={READER_KEY} module="./reader.tsx" props={bar} width="100%" height={1} />
+        <Box height={2} flexShrink={0} flexDirection="row" alignItems="center" columnGap={1}>
+          <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            <Input
+              key="reader-search"
+              placeholder="Search this request"
+              value={search.query}
+              submitLabel="next"
+              onInput={value => props.onSearch(value)}
+              onSubmit={() => props.onStep(1)}
+            />
+          </Box>
+          <Box flexShrink={0}>
+            <Text color={search.count === 0 && status !== '' ? 'error' : 'subtle'} tabular>
+              {status}
+            </Text>
+          </Box>
+          {search.count > 0 && (
+            <Button key="reader-previous" label="↑" onPress={() => props.onStep(-1)} />
+          )}
+          {search.count > 0 && (
+            <Button key="reader-next" label="↓" onPress={() => props.onStep(1)} />
+          )}
+        </Box>
+      </Box>
+      <Box height={1} flexShrink={0} />
+      {drawn}
+    </Box>
+  )
+}
+
+/** The tallest Box the engine draws, in rows. */
+const MAX_BOX_ROWS = 10_000
+
+/** Empty space `rows` high: as many Boxes as it takes, each no taller than the engine draws. */
+function Space(props: { ui: Ui; rows: number }) {
+  const { Box } = props.ui
+  const heights: number[] = []
+  for (let left = props.rows; left > 0; left -= MAX_BOX_ROWS)
+    heights.push(Math.min(left, MAX_BOX_ROWS))
+
+  return heights.map(height => <Box height={height} flexShrink={0} />)
+}
+
+/** The key of the reader's top line, which the hooks module hears it post under. */
+export const READER_KEY = 'reader'
 
 const STATUS_NOTE: Record<ToolRow['status'], string> = {
   in: '',
@@ -429,7 +678,7 @@ function ToolLines(props: ContextPaneProps & { rows: ToolRow[] }) {
           </Box>
           {Figure({
             ui: props.ui,
-            text: tool.status === 'deferred' ? '0' : `~${formatTokens(tool.tokens)}`,
+            text: `~${formatTokens(tool.tokens)}`,
             dim: isRemoved,
           })}
           <Button
@@ -452,7 +701,11 @@ function ToolsTab(props: ContextPaneProps) {
       label: 'In context',
       rows: props.tools.filter(one => one.status === 'in' || one.status === 'back-next-session'),
     },
-    { label: 'Loaded on demand', rows: props.tools.filter(one => one.status === 'deferred') },
+    {
+      label: 'Deferred (loaded on demand)',
+      isDeferred: true,
+      rows: props.tools.filter(one => one.status === 'deferred'),
+    },
     { label: 'Removed', rows: props.tools.filter(one => one.status === 'removed') },
   ].filter(group => group.rows.length > 0)
 
@@ -471,12 +724,25 @@ function ToolsTab(props: ContextPaneProps) {
           'it) and adds it to permissions.deny in your user settings, so new sessions in every ' +
           'project start without it. Put back undoes both.',
       })}
-      {groups.map(group => (
-        <Box key={`group-${slug(group.label)}`} flexDirection="column" rowGap={1} paddingTop={1}>
-          {GroupLabel({ ui: props.ui, label: group.label, count: group.rows.length })}
-          {ToolLines({ ...props, rows: group.rows })}
-        </Box>
-      ))}
+      <Box flexDirection="column" rowGap={2} paddingTop={1}>
+        {groups.map(group =>
+          Group({
+            ui: props.ui,
+            id: `group-${slug(group.label)}`,
+            label: group.label,
+            count: group.rows.length,
+            noun: 'tool',
+            // What loads on demand is out of the window: its size is what it
+            // would take, as /context counts the row where it can.
+            tokens:
+              'isDeferred' in group
+                ? (rowTokens(props.snapshot, 'System tools (deferred)') ?? sumTokens(group.rows))
+                : sumTokens(group.rows),
+            tokensNote: 'isDeferred' in group ? 'when loaded' : undefined,
+            children: ToolLines({ ...props, rows: group.rows }),
+          }),
+        )}
+      </Box>
     </Box>
   )
 }
@@ -519,16 +785,16 @@ function PromptTab(props: ContextPaneProps) {
 
             return (
               <Box key={id} flexDirection="column" rowGap={1}>
-                <Box flexDirection="row" alignItems="center" columnGap={1}>
-                  <Box flexGrow={1} flexShrink={1} minWidth={0}>
-                    <Button key={`open-${id}`} plain onPress={() => props.onExpand(id)}>
-                      <Text color="text">{section.title}</Text>
-                      {section.isAdded && <Text color="subtle">{' added'}</Text>}{' '}
-                      <Text color="inactive">{isOpen ? OPEN : CLOSED}</Text>
-                    </Button>
-                  </Box>
-                  {Figure({ ui: props.ui, text: `~${formatTokens(section.tokens)}` })}
-                </Box>
+                {DisclosureRow({
+                  ui: props.ui,
+                  row: {
+                    id,
+                    label: section.title,
+                    ...(section.isAdded ? { tag: 'added' } : {}),
+                    figure: `~${formatTokens(section.tokens)}`,
+                    isOpen,
+                  },
+                })}
                 {isOpen &&
                   Paged({
                     ui: props.ui,
@@ -558,10 +824,23 @@ function PromptTab(props: ContextPaneProps) {
   )
 }
 
-/** The Skills tab: each skill's listing as the model sees it. */
+const SKILL_GROUPS: readonly { origin: SkillOrigin; label: string }[] = [
+  { origin: 'yours', label: 'User installed skills' },
+  { origin: 'organization', label: 'Your organization' },
+  { origin: 'anthropic', label: 'Anthropic skills' },
+]
+
+/**
+ * The Skills tab: each skill's listing as the model sees it, the ones the
+ * person added apart from the ones Claude Code and the app bring.
+ */
 function SkillsTab(props: ContextPaneProps) {
   const { Box } = props.ui
   const skills = props.snapshot?.skills ?? []
+  const groups = SKILL_GROUPS.map(group => ({
+    ...group,
+    skills: skills.filter(one => one.origin === group.origin),
+  })).filter(group => group.skills.length > 0)
 
   return (
     <Box flexDirection="column" rowGap={1}>
@@ -571,21 +850,38 @@ function SkillsTab(props: ContextPaneProps) {
         text:
           skills.length === 0
             ? 'No skills are listed in this session.'
-            : "Each skill's listing as the model sees it. Removing skills is not supported yet.",
+            : "Each skill's listing as the model sees it: the ones you added, then the ones " +
+              'Claude Code and the desktop app bring. Removing skills is not supported yet.',
       })}
-      {skills.length > 0 &&
-        Ruled({
-          ui: props.ui,
-          children: skills.map(skill => (
-            <Box key={`skill-${skill.name}`} flexDirection="column">
-              {ItemLine({
-                ui: props.ui,
-                item: { name: skill.name, tokens: skill.tokens, detail: '' },
-                note: skill.description || `From ${skill.source}.`,
-              })}
-            </Box>
-          )),
-        })}
+      <Box flexDirection="column" rowGap={2} paddingTop={1}>
+        {groups.map(group =>
+          Group({
+            ui: props.ui,
+            id: `skills-${group.origin}`,
+            label: group.label,
+            count: group.skills.length,
+            noun: 'skill',
+            tokens: sumTokens(group.skills),
+            children: Ruled({
+              ui: props.ui,
+              children: group.skills.map(skill => (
+                <Box key={`skill-${skill.name}`} flexDirection="column">
+                  {ItemLine({
+                    ui: props.ui,
+                    // Anthropic's are named under one prefix; their group says so.
+                    item: {
+                      name: skill.name.replace(/^anthropic-skills:/, ''),
+                      tokens: skill.tokens,
+                      detail: '',
+                    },
+                    note: skill.description || `From ${skill.source}.`,
+                  })}
+                </Box>
+              )),
+            }),
+          }),
+        )}
+      </Box>
     </Box>
   )
 }
@@ -683,13 +979,19 @@ function TraceTab(props: ContextPaneProps) {
 
             return (
               <Box key={id} flexDirection="column" rowGap={1}>
-                <Box flexDirection="row" alignItems="flex-start" columnGap={1}>
-                  <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-                    <Button key={`open-${id}`} plain onPress={() => props.onExpand(id)}>
-                      <Text color="text">{`#${item.seq + 1} ${sourceLabel(item.source)}`}</Text>
-                      <Text color="subtle">{` ${clock(item.at)}`}</Text>{' '}
-                      <Text color="inactive">{isOpen ? OPEN : CLOSED}</Text>
-                    </Button>
+                <Box flexDirection="column">
+                  {DisclosureRow({
+                    ui: props.ui,
+                    row: {
+                      id,
+                      label: `#${item.seq + 1} ${sourceLabel(item.source)}`,
+                      tag: clock(item.at),
+                      figure: usageLine(item),
+                      isOpen,
+                    },
+                  })}
+                  {/* Under the label, past the chevron. */}
+                  <Box flexDirection="column" paddingLeft={DISCLOSURE_INDENT}>
                     <Text color="subtle" wrap="truncate-end">
                       {`+ ${item.added.join(', ') || 'nothing new'}`}
                     </Text>
@@ -699,19 +1001,24 @@ function TraceTab(props: ContextPaneProps) {
                       </Text>
                     )}
                   </Box>
-                  <Box flexShrink={0}>
-                    <Text color="subtle" size="footnote" tabular>
-                      {usageLine(item)}
-                    </Text>
-                  </Box>
                 </Box>
-                {isOpen && traced.view && (
-                  <Link
-                    href={viewLink(traced.view.session, traced.view.token, item.seq)}
-                    label="Open this request whole in your browser"
-                  />
-                )}
                 {isOpen && RequestText({ ui: props.ui, text: props.traceText })}
+                {isOpen && (
+                  <Box flexDirection="row" alignItems="center" columnGap={2}>
+                    <Button
+                      key={`read-${item.seq}`}
+                      label="Read it whole here"
+                      variant="primary"
+                      onPress={() => props.onRead(item.seq)}
+                    />
+                    {traced.view && (
+                      <Link
+                        href={viewLink(traced.view.session, traced.view.token, item.seq)}
+                        label="Open in your browser"
+                      />
+                    )}
+                  </Box>
+                )}
               </Box>
             )
           }),
@@ -728,6 +1035,14 @@ function TraceTab(props: ContextPaneProps) {
  */
 export function ContextPane(props: ContextPaneProps) {
   const { Box, Text } = props.ui
+  if (props.reader) {
+    return Reader({
+      ui: props.ui,
+      view: props.reader,
+      onSearch: props.onSearch,
+      onStep: props.onStep,
+    })
+  }
   const snapshot = props.snapshot
   const content = {
     tools: ToolsTab,

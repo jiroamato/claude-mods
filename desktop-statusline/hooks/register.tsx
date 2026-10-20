@@ -3,9 +3,21 @@ import type { EngineInterface, PromptComposeSection, Register } from 'claude-cod
 
 import type { Effort, GitInfo, PaneTab, TraceItem, TraceState, TraceStatus } from '../types'
 import { buildSnapshot, currentSnapshot } from './context'
-import { ContextPane, PANE_ID, PANE_TITLE, TABS_KEY } from './panel'
+import {
+  ContextPane,
+  DISCLOSURE_PREFIX,
+  PANE_ID,
+  PANE_TITLE,
+  READER_HIT_KEY,
+  READER_KEY,
+  READER_TOP_ROWS,
+  TABS_KEY,
+} from './panel'
+import type { ReaderView } from './panel'
+import type { DisclosurePick } from './disclosure'
+import type { ReaderBarPick } from './reader'
 import type { TabStripPick } from './tabs'
-import type { TraceRecord } from './trace'
+import type { RowMatch, TraceRecord } from './trace'
 import {
   editTraceEnv,
   isMainSource,
@@ -13,8 +25,14 @@ import {
   RECEIVER_HEALTH,
   RECEIVER_NAME,
   requestText,
+  findMatches,
+  promptRecord,
+  readerRanges,
   sentPrompt,
+  sourceLabel,
   summarize,
+  wholeRequestText,
+  wrapRows,
   TRACE_PORT,
 } from './trace'
 import {
@@ -43,6 +61,11 @@ const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, nu
 const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, null)
 const expanded = atom({ plugin: 'desktop-statusline', key: 'expanded' } as const, [])
 const page = atom({ plugin: 'desktop-statusline', key: 'page' } as const, 0)
+const reader = atom({ plugin: 'desktop-statusline', key: 'reader' } as const, null)
+const readerSearch = atom({ plugin: 'desktop-statusline', key: 'readerSearch' } as const, {
+  query: '',
+  index: 0,
+})
 const tab = atom({ plugin: 'desktop-statusline', key: 'tab' } as const, 'tools' as PaneTab)
 const PANE_TABS: readonly PaneTab[] = ['tools', 'prompt', 'skills', 'trace']
 const NO_TRACE: TraceState = { status: 'off', items: [], prompt: null, view: null }
@@ -459,7 +482,15 @@ function refreshTrace($: EngineInterface): Promise<void> {
         }
       }
       const records = [...traceCache.values()].sort((a, b) => a.item.seq - b.item.seq)
-      const main = records.findLast(one => isMainSource(one.record.source))?.record
+      // The last main request's prompt: a request that went on from the one
+      // before carried none of its own, only the billing header.
+      const last = records.findLast(one => isMainSource(one.record.source))?.record
+      const main = last
+        ? promptRecord(
+            records.map(one => one.record),
+            last.seq,
+          )
+        : null
       let prompt: TraceState['prompt'] = null
       if (main) {
         let blocks = systemCache.get(main.system)
@@ -483,6 +514,97 @@ function refreshTrace($: EngineInterface): Promise<void> {
   traceQueue = run.catch(() => undefined)
 
   return run
+}
+
+/** The request the reader last laid out, as rows at a width: kept while the person scrolls. */
+let readerCache: { key: string; title: string; detail: string; rows: string[] } | null = null
+
+/** A request whole as rows `columns` wide, for the reader; null when it cannot be read. */
+async function readerRows(
+  $: EngineInterface,
+  seq: number,
+  columns: number,
+): Promise<{ key: string; title: string; detail: string; rows: string[] } | null> {
+  const key = `${seq}:${columns}`
+  if (readerCache?.key === key) return readerCache
+  const cached = [...traceCache.values()].find(one => one.item.seq === seq)
+  if (!cached) return null
+  const folder = `${await traceRoot($)}/${await $.session.id()}`
+  const readJson = async <T,>(name: string): Promise<T | null> => {
+    try {
+      return JSON.parse(String(await $.fs.read(`${folder}/${name}`))) as T
+    } catch {
+      return null
+    }
+  }
+  const record = cached.record
+  const base = promptRecord(
+    [...traceCache.values()].map(one => one.record),
+    seq,
+  )!
+  const system =
+    systemCache.get(base.system) ??
+    (await readJson<{ type: string; text: string }[]>(`system-${base.system}.json`))
+  const tools = await readJson<{ name?: string }[]>(`tools-${base.tools}.json`)
+  const text = wholeRequestText(
+    [...traceCache.values()].map(one => one.record),
+    seq,
+    system,
+    tools,
+  )
+  if (text === null) return null
+  readerCache = {
+    key,
+    title: `Request #${seq + 1} · ${sourceLabel(record.source)}`,
+    detail: `${text.length.toLocaleString('en-US')} characters`,
+    rows: wrapRows(text, columns),
+  }
+
+  return readerCache
+}
+
+/** Matches of the reader's search, kept while neither the rows nor the query change. */
+let matchCache: { key: string; query: string; matches: RowMatch[] } | null = null
+
+function readerMatches(laid: { key: string; rows: string[] }, query: string): RowMatch[] {
+  if (matchCache?.key === laid.key && matchCache.query === query) return matchCache.matches
+  matchCache = { key: laid.key, query, matches: findMatches(laid.rows, query) }
+
+  return matchCache.matches
+}
+
+/** How long a redraw takes to put the current match's row in the tree, before scrolling to it. */
+const HIT_SETTLE_MS = 150
+
+/** Scrolls the pane to the current match, once the redraw has drawn its row. */
+async function revealHit($: EngineInterface): Promise<void> {
+  try {
+    await $.clock.sleep(HIT_SETTLE_MS)
+    await $.ui.scroll({ in: PANE_ID, to: { key: READER_HIT_KEY }, block: 'center' })
+  } catch {
+    // The pane closed, or the plugin unloaded, meanwhile: there is nothing to scroll.
+  }
+}
+
+/** A new search in the reader: its first match current. */
+async function searchReader($: EngineInterface, query: string): Promise<void> {
+  await update($, readerSearch, () => ({ query, index: 0 }))
+  if (query.trim() !== '') await revealHit($)
+}
+
+/** Steps the reader's current match on or back, round the ends. */
+async function stepReader($: EngineInterface, by: number): Promise<void> {
+  const count = matchCache?.matches.length ?? 0
+  if (count === 0) return
+  await update($, readerSearch, now => ({ ...now, index: (now.index + by + count) % count }))
+  await revealHit($)
+}
+
+/** Opens a request whole in the pane's reader, at its top. */
+async function openReader($: EngineInterface, seq: number): Promise<void> {
+  await update($, readerSearch, () => ({ query: '', index: 0 }))
+  await update($, reader, () => seq)
+  await $.ui.scroll({ in: PANE_ID, to: 'start' }).catch(() => undefined)
 }
 
 /** One recorded request as text, for the Trace tab's open row; null when it is not read. */
@@ -530,6 +652,7 @@ async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
 async function openPane($: EngineInterface): Promise<void> {
   try {
     await update($, tab, () => 'tools')
+    await update($, reader, () => null)
     // Focused, so the first click in the pane presses its button: an
     // unfocused pane spends that click on taking the focus.
     await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
@@ -658,6 +781,13 @@ export const register: Register = on => {
     const picked = (e.data as Partial<TabStripPick> | null)?.tab
     const isTab = (value: unknown): value is PaneTab => PANE_TABS.includes(value as PaneTab)
     if (e.element === TABS_KEY && isTab(picked)) await update($, tab, () => picked)
+    const toggled = (e.data as Partial<DisclosurePick> | null)?.toggle
+    if (e.element.startsWith(DISCLOSURE_PREFIX) && typeof toggled === 'string') {
+      await toggleExpanded($, toggled)
+    }
+    if (e.element === READER_KEY && (e.data as Partial<ReaderBarPick> | null)?.back) {
+      await update($, reader, () => null)
+    }
 
     return next(e)
   })
@@ -669,20 +799,78 @@ export const register: Register = on => {
       return <Text>The context details draw in the desktop app.</Text>
     }
     const ui = $.ui.resolve(e)
-    const [snapshot, open, shown, seen, names, back, error, traced, tracingError, shownPage] =
-      await Promise.all([
-        read($, context).then(currentSnapshot),
-        read($, expanded),
-        read($, tab),
-        read($, tools),
-        read($, removed),
-        read($, putBack),
-        read($, toolError),
-        read($, trace),
-        read($, traceError),
-        read($, page),
-      ])
+    const [
+      snapshot,
+      open,
+      shown,
+      seen,
+      names,
+      back,
+      error,
+      traced,
+      tracingError,
+      shownPage,
+      readingSeq,
+      searching,
+    ] = await Promise.all([
+      read($, context).then(currentSnapshot),
+      read($, expanded),
+      read($, tab),
+      read($, tools),
+      read($, removed),
+      read($, putBack),
+      read($, toolError),
+      read($, trace),
+      read($, traceError),
+      read($, page),
+      read($, reader),
+      read($, readerSearch),
+    ])
     const openSeq = open.map(key => /^trace-(\d+)$/.exec(key)?.[1]).find(Boolean)
+    // The reader draws the rows near the window only: a screen above, the
+    // screen in view and one below, so a scroll in either direction lands on
+    // drawn text, and the rest is empty space of the same height.
+    const readerView = async (): Promise<ReaderView | null> => {
+      const laid = await readerRows($, readingSeq!, Math.max(20, e.props.bodyColumns - 2))
+      if (!laid) return null
+      const matches = readerMatches(laid, searching.query)
+      const current =
+        matches.length > 0 ? matches[Math.min(searching.index, matches.length - 1)]! : null
+      const ranges = readerRanges(
+        laid.rows.length,
+        e.props.scroll.offset - READER_TOP_ROWS,
+        e.props.scroll.bodyRows,
+        current?.row ?? null,
+      )
+      // The matches by row, for the rows drawn.
+      const byRow = new Map<number, RowMatch[]>()
+      for (const match of matches) {
+        if (!ranges.some(range => match.row >= range.first && match.row < range.last)) continue
+        byRow.set(match.row, [...(byRow.get(match.row) ?? []), match])
+      }
+
+      return {
+        title: laid.title,
+        detail: laid.detail,
+        total: laid.rows.length,
+        search: {
+          query: searching.query,
+          index: current ? matches.indexOf(current) : 0,
+          count: matches.length,
+        },
+        stretches: ranges.map(range => ({
+          first: range.first,
+          rows: laid.rows.slice(range.first, range.last).map((text, at) => ({
+            text,
+            hits: (byRow.get(range.first + at) ?? []).map(match => ({
+              start: match.start,
+              end: match.end,
+              isCurrent: match === current,
+            })),
+          })),
+        })),
+      }
+    }
 
     return ContextPane({
       ui,
@@ -702,6 +890,10 @@ export const register: Register = on => {
       onExpand: key => void toggleExpanded($, key),
       page: shownPage,
       columns: e.props.bodyColumns,
+      reader: readingSeq === null || shown !== 'trace' ? null : await readerView(),
+      onRead: seq => void openReader($, seq),
+      onSearch: query => void searchReader($, query),
+      onStep: by => void stepReader($, by),
       onPage: next => void update($, page, () => next),
     })
   })

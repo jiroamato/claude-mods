@@ -76,7 +76,12 @@ export function firstSentence(text: string, max = SUMMARY_MAX): string {
   const flat = text.replace(/\s+/g, ' ').trim()
   const sentence = /^(.+?[.!?])(\s|$)/.exec(flat)?.[1] ?? flat
 
-  return sentence.length > max ? `${sentence.slice(0, max - 1)}…` : sentence
+  if (sentence.length <= max) return sentence
+  // Cut at the last whole word, and before a parenthesis or dash it opens.
+  const cut = sentence.slice(0, max - 1)
+  const word = cut.slice(0, Math.max(cut.lastIndexOf(' '), max / 2)).replace(/[\s(\[{,;:–-]+$/, '')
+
+  return `${word}…`
 }
 
 /** The tool's one-liner: the catalog's, else the first sentence of its description. */
@@ -121,7 +126,8 @@ export function toolRows(
     rows.push({
       name,
       summary: summarize(name, tool.description),
-      tokens: tool.isDeferred ? 0 : estimateTokens(name, tool.description),
+      // A tool loaded on demand costs nothing until loaded: its size is what it would take.
+      tokens: estimateTokens(name, tool.description),
       status: isRemoved ? 'removed' : tool.isDeferred ? 'deferred' : 'in',
     })
   }

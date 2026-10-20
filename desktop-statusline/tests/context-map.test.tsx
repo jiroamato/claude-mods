@@ -7,6 +7,7 @@ import {
   formatShare,
   formatTokens,
   sectionTitle,
+  skillOrigin,
 } from '../hooks/context'
 import { deniedTools, editDeny, summarize, toolRows } from '../hooks/tools'
 
@@ -93,6 +94,7 @@ function breakdown(): SessionContextBreakdown {
       skillFrontmatter: [
         { name: 'deploy', source: 'userSettings', tokens: 300 },
         { name: 'review', source: 'plugin', pluginName: 'reviewer', tokens: 120 },
+        { name: 'plugin-authoring', source: 'built-in', tokens: 90 },
       ],
     },
     isAutoCompactEnabled: true,
@@ -147,7 +149,7 @@ function engine(
   }))
   on('session.id', async () => ({ value: 'session-1' }))
   on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 2' },
+    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 5' },
   }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)
@@ -245,7 +247,8 @@ test('toolRows orders the tools by status, then by size', () => {
   expect(rows.find(one => one.name === 'Grep')?.tokens).toBe(
     Math.round((4 + 400 + 2776 + 40) / 3.6),
   )
-  expect(rows.find(one => one.name === 'Monitor')?.tokens).toBe(0)
+  // Loaded on demand, its size is what it would take once loaded.
+  expect(rows.find(one => one.name === 'Monitor')?.tokens).toBeGreaterThan(0)
 })
 
 test('a tool put back that the session started without waits for a new session', () => {
@@ -287,8 +290,16 @@ test('the snapshot lists the rows as /context does, and what the pane details', 
       tokens: 300,
       source: 'your settings',
       description: 'Ships the app to production.',
+      origin: 'yours',
     },
-    { name: 'review', tokens: 120, source: 'reviewer', description: '' },
+    { name: 'review', tokens: 120, source: 'reviewer', description: '', origin: 'yours' },
+    {
+      name: 'plugin-authoring',
+      tokens: 90,
+      source: 'Claude Code',
+      description: '',
+      origin: 'anthropic',
+    },
   ])
 })
 
@@ -469,38 +480,59 @@ test('the pane opens the system prompt section by section, one at a time', async
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  expect(await pane.find({ type: 'Text', text: 'Introduction' })).toBeUndefined()
+  expect(await pane.find({ type: 'Client', key: 'disclose-prompt-intro' })).toBeUndefined()
   await openTab(pane, 'prompt')
-  expect(await pane.find({ type: 'Text', text: 'Introduction' })).toBeDefined()
+  expect(
+    (await pane.find({ type: 'Client', key: 'disclose-prompt-intro' }))?.props.props,
+  ).toMatchObject({ label: 'Introduction' })
   // /context counts 8k; the sections hold a few tokens, the rest no plugin can read.
   expect((await pane.find({ type: 'Box', text: /^Not readable by plugins.*~8k$/ }))?.text).toMatch(
     /output style/,
   )
   expect(await pane.find({ type: 'Code' })).toBeUndefined()
 
-  await pane.press({ key: 'open-prompt-intro' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-prompt-intro' })
   expect((await pane.findAll({ type: 'Code' })).map(one => one.props.source)).toEqual([
     'You are Claude Code, an interactive CLI tool.',
   ])
-  await pane.press({ key: 'open-prompt-env-info-simple' })
+  await pane.pointer({
+    type: 'down',
+    x: 5,
+    y: 0,
+    button: 'left',
+    in: 'disclose-prompt-env-info-simple',
+  })
   expect((await pane.findAll({ type: 'Code' })).map(one => one.props.source)).toEqual([
     '# Environment\n - Platform: linux',
   ])
 
   // Pressing the open section again closes it.
-  await pane.press({ key: 'open-prompt-env-info-simple' })
+  await pane.pointer({
+    type: 'down',
+    x: 5,
+    y: 0,
+    button: 'left',
+    in: 'disclose-prompt-env-info-simple',
+  })
   expect(await pane.find({ type: 'Code' })).toBeUndefined()
 
   await pane.unmount()
 })
 
-test('the Skills tab lists each skill', async ($, on) => {
+test('the Skills tab lists each skill, yours apart from the ones Anthropic ships', async ($, on) => {
   engine(on, { text: '{}' })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
   await openTab(pane, 'skills')
   expect(await pane.find({ type: 'Text', text: 'Ships the app to production.' })).toBeDefined()
+  expect((await pane.find({ key: 'skills-yours' }))?.text).toMatch(
+    /^User installed skills2 skills · ~420deploy/,
+  )
+  expect((await pane.find({ key: 'skills-anthropic' }))?.text).toMatch(
+    /^Anthropic skills1 skill · ~90plugin-authoring/,
+  )
+  expect(await pane.find({ key: 'skills-organization' })).toBeUndefined()
 
   await pane.unmount()
 })
@@ -526,7 +558,9 @@ test('removing a tool denies it in the settings and moves it out of the window a
     label: 'Put back',
   })
   // Grouped: the removed tool under its own label.
-  expect((await pane.find({ key: 'group-removed' }))?.text).toMatch(/^REMOVED1EnterPlanMode/)
+  expect((await pane.find({ key: 'group-removed' }))?.text).toMatch(
+    /^Removed1 tool · ~181EnterPlanMode/,
+  )
 
   const before = invalidated
   await pane.press({ key: 'toggle-Bash' })
@@ -702,4 +736,35 @@ test('a breakdown an earlier version kept in the state is read as none', () => {
   expect(currentSnapshot(null)).toBeNull()
   const snapshot = buildSnapshot(breakdown(), [DEPLOY], SECTIONS)
   expect(currentSnapshot(snapshot)).toBe(snapshot)
+})
+
+test('a skill is the person’s, Anthropic’s or the organization’s by where it comes from', () => {
+  expect(skillOrigin({ name: 'plugin-authoring', source: 'built-in' })).toBe('anthropic')
+  expect(skillOrigin({ name: 'anthropic-skills:computer-use', source: 'plugin' })).toBe('anthropic')
+  expect(skillOrigin({ name: 'x', source: 'plugin', pluginName: 'cc-plugin-telemetry' })).toBe(
+    'anthropic',
+  )
+  expect(skillOrigin({ name: 'treg', source: 'userSettings' })).toBe('yours')
+  expect(skillOrigin({ name: 'review', source: 'plugin', pluginName: 'reviewer' })).toBe('yours')
+  expect(skillOrigin({ name: 'policy', source: 'policySettings' })).toBe('organization')
+})
+
+test('a row that opens lights under the pointer and goes dark when it leaves', async ($, on) => {
+  engine(on, { text: '{}' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await openTab(pane, 'prompt')
+  const row = 'disclose-prompt-intro'
+  const fill = async () =>
+    ((await pane.drawn({ in: row })) as { props?: { backgroundColor?: string } }).props
+      ?.backgroundColor
+
+  expect(await fill()).toBe('#00000000')
+  await pane.pointer({ type: 'enter', x: 3, y: 0, in: row })
+  await pane.pointer({ type: 'move', x: 4, y: 0, in: row })
+  expect(await fill()).toBe('#ffffff0f')
+  await pane.pointer({ type: 'leave', x: 4, y: 0, in: row })
+  expect(await fill()).toBe('#00000000')
+
+  await pane.unmount()
 })

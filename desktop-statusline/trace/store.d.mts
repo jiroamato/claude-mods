@@ -3,6 +3,7 @@
 export declare const HEALTH: string
 export declare const KEPT_EVENTS: Set<string>
 export declare function hashText(text: string): string
+export declare function isBillingBlock(block: unknown): boolean
 export declare function logRecords(payload: unknown): Record<string, unknown>[]
 export declare function sessionFolder(id: unknown): string | null
 export declare class TraceStore {
