@@ -760,7 +760,7 @@ function ToolsTab(props: ContextPaneProps) {
         ui: props.ui,
         text:
           "Remove takes a tool out of this session's context at once (Claude can no longer call " +
-          'it) and adds it to permissions.deny in your user settings, so new sessions in every ' +
+          'it) and adds it to `permissions.deny` in your user settings, so new sessions in every ' +
           'project start without it. Put back undoes both.',
       })}
       <Box flexDirection="column" rowGap={2} paddingTop={1}>
