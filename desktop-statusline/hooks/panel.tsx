@@ -325,6 +325,30 @@ function Intro(props: { ui: Ui; text: string }) {
   )
 }
 
+/** A recommendation, set apart from a tab's intro by an info icon. */
+function Tip(props: { ui: Ui; text: string }) {
+  const { Box, Svg, Text } = props.ui
+
+  return (
+    <Box flexDirection="row" columnGap={1} alignItems="flex-start">
+      {/* As tall as the footnote's line, so the icon sits by its first line. */}
+      <Box height={1} flexShrink={0} justifyContent="center">
+        <Svg source={INFO_ICON} alt="tip" width={CARET_SIZE} height={CARET_SIZE} />
+      </Box>
+      <Box flexGrow={1} flexShrink={1} minWidth={0}>
+        <Text color="subtle" size="footnote">
+          {props.text}
+        </Text>
+      </Box>
+    </Box>
+  )
+}
+
+// Phosphor's Info (regular), in the chevrons' size and colour.
+const INFO_ICON = caret(
+  'M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a8,8,0,0,1-8,8,16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40A8,8,0,0,1,144,176ZM112,84a12,12,0,1,1,12,12A12,12,0,0,1,112,84Z',
+)
+
 // Inline code's ground: the raised surface the desktop sets code on.
 const INLINE_CODE = 'bashMessageBackgroundColor'
 
@@ -715,13 +739,13 @@ function ToolsTab(props: ContextPaneProps) {
           'it) and adds it to `permissions.deny` in your user settings, so new sessions in every ' +
           'project start without it. Put back undoes both.',
       })}
-      {Intro({
+      {Tip({
         ui: props.ui,
         // The tools are the start of what the prompt cache keeps, so a change
         // to them leaves nothing of it to read.
         text:
-          'Best done at the start of a session: a change to the tools later clears the prompt ' +
-          'cache, so the next request sends the whole conversation again uncached and costs more.',
+          'Change tools at the start of a session. Later, a change clears the prompt cache and ' +
+          'the next request costs more.',
       })}
       {Groups({
         ui: props.ui,

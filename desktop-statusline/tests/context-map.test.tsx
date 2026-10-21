@@ -750,8 +750,13 @@ test('each group of tools opens and closes on its own, and starts open', async (
   expect(await heading('group-in-context')).toMatchObject({ label: 'In context', isOpen: true })
   // A change to the tools mid-session clears the prompt cache: the tab says so.
   expect(
-    await pane.find({ type: 'Text', text: /^Best done at the start of a session: .* uncached/ }),
+    await pane.find({
+      type: 'Text',
+      text: /^Change tools at the start of a session\. Later, a change clears the prompt cache/,
+    }),
   ).toBeDefined()
+  // Set apart by an info icon.
+  expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'tip')).toBe(true)
   expect(await pane.find({ key: 'tool-Bash' })).toBeDefined()
 
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-group-in-context' })
