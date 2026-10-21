@@ -88,10 +88,10 @@ test('the store keeps each request once: what it added, its usage and its answer
   expect(one).toMatchObject({ seq: 0, source: 'sdk', from: 0, messageCount: 1 })
   expect(one.usage).toMatchObject({ input: 5, output: 7, costUsd: 0.01 })
   expect(one.response).toMatchObject({ stop_reason: 'end_turn' })
-  // The second carries only what follows the first.
+  // The second carries only what follows the first and its answer.
   const two = JSON.parse(files[`${SESSION}/000001.json`]!) as TraceRecord
-  expect(two).toMatchObject({ seq: 1, from: 1, messageCount: 3, usage: null, response: null })
-  expect(two.added).toHaveLength(2)
+  expect(two).toMatchObject({ seq: 1, from: 2, messageCount: 3, usage: null, response: null })
+  expect(two.added).toEqual([{ role: 'user', content: 'list the files' }])
 })
 
 test('usage lands on its own request by the API request id, whichever comes first', () => {
@@ -1354,8 +1354,12 @@ test('a receiver started mid-conversation goes on from the requests already on d
     }),
   )
   const namedRecords = keptRecords(named)
-  expect(namedRecords[1]).toMatchObject({ continues: true, after: 0, from: 1, messageCount: 2 })
-  expect(fullMessages(namedRecords, 1)).toEqual([user('hello'), user('how are you')])
+  expect(namedRecords[1]).toMatchObject({ continues: true, after: 0, from: 2, messageCount: 3 })
+  expect(fullMessages(namedRecords, 1)).toEqual([
+    user('hello'),
+    assistant('ok'),
+    user('how are you'),
+  ])
   expect(promptRecord(namedRecords, 1)?.seq).toBe(0)
 })
 
@@ -1388,10 +1392,10 @@ test('switching the output style mid-session keeps the main conversation and its
     continues: true,
     after: 0,
   })
-  expect(fullMessages(records, 1)).toEqual([user('hello'), user('explain')])
+  expect(fullMessages(records, 1)).toEqual([user('hello'), assistant('hi'), user('explain')])
   expect(promptRecord(records, 1)?.seq).toBe(0)
   expect(tracePromptRecord(records, 1)?.seq).toBe(0)
-  expect(records[2]).toMatchObject({ from: 1 })
+  expect(records[2]).toMatchObject({ from: 3 })
   expect(fullMessages(records, 2)).toEqual([
     user('hello'),
     assistant('hi'),
@@ -1432,9 +1436,9 @@ test('a body sent twice adds its messages once', () => {
   expect(fullMessages(records, 1)).toEqual([user('hello'), user('again')])
   expect(fullMessages(records, 2)).toEqual([user('hello'), user('again')])
   expect(records[3]).toMatchObject({ from: 2 })
-  const whole = [user('hello'), user('again'), user('next'), user('last')]
-  expect(records[4]).toMatchObject({ continues: true, after: 3, messageCount: 4 })
-  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 4 })
+  const whole = [user('hello'), user('again'), user('next'), assistant('ok'), user('last')]
+  expect(records[4]).toMatchObject({ continues: true, after: 3, messageCount: 5 })
+  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 5 })
   expect(fullMessages(records, 4)).toEqual(whole)
   expect(fullMessages(records, 5)).toEqual(whole)
 })
@@ -1478,10 +1482,10 @@ test('parallel subagents of one type are each rebuilt whole', () => {
   store.take(record('api_request_body', { body: requestBody([user('main')]), query_source: 'sdk' }))
   const records = keptRecords(files)
   bodies.forEach((messages, index) => expect(fullMessages(records, index)).toEqual(messages))
-  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 4 })
-  expect(fullMessages(records, 5)).toEqual([...bodies[3]!, user('b: end')])
-  expect(records[6]).toMatchObject({ continues: true, after: 4, messageCount: 6 })
-  expect(fullMessages(records, 6)).toEqual([...bodies[4]!, user('a: after')])
+  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 5 })
+  expect(fullMessages(records, 5)).toEqual([...bodies[3]!, assistant('ok'), user('b: end')])
+  expect(records[6]).toMatchObject({ continues: true, after: 4, messageCount: 7 })
+  expect(fullMessages(records, 6)).toEqual([...bodies[4]!, assistant('ok'), user('a: after')])
   expect(records[7]).toMatchObject({ continues: false, after: null, messageCount: 1 })
   expect(fullMessages(records, 7)).toEqual([user('c: lost')])
   expect(fullMessages(records, 8)).toEqual([user('main')])
@@ -1567,8 +1571,8 @@ test('the store keeps a head beside a large request, in step as its answer lands
     seq: 1,
     isHead: true,
     added: [],
-    roles: ['assistant', 'user'],
-    from: 1,
+    roles: ['user'],
+    from: 2,
     messageCount: 3,
     usage: null,
     response: null,
@@ -1657,7 +1661,7 @@ test('a request too large to read is listed from its head, and the ones after ke
   const row = (await pane.find({ type: 'Client', key: 'disclose-trace-1' }))?.props.props
   expect(row).toMatchObject({
     figure: '2k in · 30 out · $0.20 · 2.5s',
-    lines: ['+ 2 messages too large to read here: open it in your browser', '→ "done"'],
+    lines: ['+ 1 message too large to read here: open it in your browser', '→ "done"'],
   })
 
   // Expand on it says so, and still shows what it was sent with.
@@ -1668,22 +1672,24 @@ test('a request too large to read is listed from its head, and the ones after ke
       .join('\n')
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
   expect(String((await pane.find({ type: 'Code' }))?.props.source)).toMatch(
-    /^This request is too large to read here: open it in your browser to read it whole\.\n\n── Sent: 2 new messages \(3 in all\)/,
+    /^This request is too large to read here: open it in your browser to read it whole\.\n\n── Sent: 1 new message \(3 in all\)/,
   )
   await pane.press({ key: 'read-1' })
   expect(await drawnText()).toMatch(/^This request is too large to read here/)
   expect(await drawnText()).toMatch(/── #3 user \(new\)\n\(Not shown: request #2 is too large/)
   await pane.post({ back: true }, { in: 'reader' })
 
-  // The request after it: every message in its place, its own whole.
+  // The request after it: every message in its place, the answers between
+  // them included, its own whole.
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-2' })
   await pane.press({ key: 'read-2' })
   // An empty row is drawn as a space.
   const text = await drawnText()
-  expect(text).toMatch(/══ Messages: 5, the last 2 new in this request/)
-  expect(text).toMatch(/── #1 user\nhello\n \n── #2 assistant\n\(Not shown: request #2 is too/)
-  expect(text).toMatch(/── #3 user\n\(Not shown: request #2/)
-  expect(text).toMatch(/── #4 assistant \(new\)\ndone\n \n── #5 user \(new\)\nnext/)
+  expect(text).toMatch(/══ Messages: 5, the last 1 new in this request/)
+  expect(text).toMatch(
+    /── #1 user\nhello\n \n── #2 assistant\nhi\n \n── #3 user\n\(Not shown: request #2/,
+  )
+  expect(text).toMatch(/── #4 assistant\ndone\n \n── #5 user \(new\)\nnext/)
 
   await pane.unmount()
 })
@@ -1765,4 +1771,193 @@ test('the browser pages read a large request whole, with no head', () => {
   expect(html).toContain('BIGxxxx')
   expect(html).not.toContain('Not shown')
   expect(fullMessages(records, 2)).toHaveLength(5)
+})
+
+/** A main request's answer: what it said, and a tool it called. */
+function toolAnswer(bodyId: string, id: string) {
+  return record('api_response_body', {
+    request_body_id: bodyId,
+    body: JSON.stringify({
+      id,
+      content: [
+        { type: 'text', text: 'Running ls.' },
+        { type: 'tool_use', id: 'tu_1', name: 'Bash', input: { command: 'ls' } },
+      ],
+      stop_reason: 'tool_use',
+    }),
+  })
+}
+
+const toolTurn = {
+  role: 'assistant',
+  content: [
+    { type: 'text', text: 'Running ls.' },
+    { type: 'tool_use', id: 'tu_1', name: 'Bash', input: { command: 'ls' } },
+  ],
+}
+const toolResult = {
+  role: 'user',
+  content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'a.txt' }],
+}
+
+test('a request that goes on has the answer it goes on from in its conversation, and counts it', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('list the files')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(toolAnswer('b0', 'msg_0'))
+  // Naming the answer, and told by its shape alone.
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([toolResult], 'msg_0'),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+  )
+  store.take(answer('b1', 'msg_1', 'There is a.txt.'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user('thanks')]),
+      query_source: 'sdk',
+      request_body_id: 'b2',
+    }),
+  )
+  store.take(answer('b2', 'msg_2'))
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ continues: true, after: 0, from: 2, messageCount: 3 })
+  expect(records[1]!.added).toEqual([toolResult])
+  expect(fullMessages(records, 1)).toEqual([user('list the files'), toolTurn, toolResult])
+  expect(records[2]).toMatchObject({ continues: true, after: 1, from: 4, messageCount: 5 })
+  expect(fullMessages(records, 2)).toEqual([
+    user('list the files'),
+    toolTurn,
+    toolResult,
+    assistant('There is a.txt.'),
+    user('thanks'),
+  ])
+  // Each rebuilt conversation is as long as the store counted it.
+  for (const one of records) expect(fullMessages(records, one.seq)).toHaveLength(one.messageCount)
+
+  // A receiver started after it counts the answer the same, read from the folder.
+  const later = { ...files }
+  memoryStore(later, () => 3).take(
+    record('api_request_body', { body: continuationBody([user('more')]), query_source: 'sdk' }),
+  )
+  const read = keptRecords(later)
+  expect(read[3]).toMatchObject({ continues: true, after: 2, from: 6, messageCount: 7 })
+  expect(fullMessages(read, 3)).toHaveLength(7)
+  expect(fullMessages(read, 3)!.at(-2)).toEqual(assistant('ok'))
+})
+
+test('an answer that lands after the request that goes on from it is not put before it', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(
+    record('api_request_body', { body: continuationBody([user('more')]), query_source: 'sdk' }),
+  )
+  store.take(answer('b0', 'msg_0', 'hi'))
+  // As a request an older receiver kept reads, which counted no answer:
+  // the answer is on disk, and the request starts before it.
+  const records = keptRecords(files)
+  expect(records[0]!.response).not.toBeNull()
+  expect(records[1]).toMatchObject({ continues: true, from: 1, messageCount: 2 })
+  expect(fullMessages(records, 1)).toEqual([user('hello'), user('more')])
+})
+
+test('a whole body sent again after a request that went on rebuilds as sent', () => {
+  const sent = (answerBlock: Record<string, unknown>) => {
+    const files: Record<string, string> = {}
+    const store = memoryStore(files)
+    store.take(
+      record('api_request_body', {
+        body: requestBody([user('hello')]),
+        query_source: 'sdk',
+        request_body_id: 'b0',
+      }),
+    )
+    store.take(answer('b0', 'msg_0', 'hi'))
+    // Goes on, and is never answered: Claude Code sends the conversation whole.
+    store.take(
+      record('api_request_body', {
+        body: continuationBody([user('more')], 'msg_0'),
+        query_source: 'sdk',
+      }),
+    )
+    const whole = [user('hello'), { role: 'assistant', content: [answerBlock] }, user('more')]
+    store.take(record('api_request_body', { body: requestBody(whole), query_source: 'sdk' }))
+
+    return { records: keptRecords(files), whole }
+  }
+
+  // The answer as Claude Code keeps it is the response's: the diff goes past it.
+  const same = sent({ type: 'text', text: 'hi' })
+  expect(same.records[2]).toMatchObject({ continues: false, from: 3, messageCount: 3, added: [] })
+  expect(fullMessages(same.records, 2)).toEqual(same.whole)
+
+  // Kept otherwise (a field added): the diff stops before it, and the body's own is kept.
+  const other = sent({ type: 'text', text: 'hi', citations: null })
+  expect(other.records[2]).toMatchObject({ continues: false, from: 1, messageCount: 3 })
+  expect(other.records[2]!.added).toEqual(other.whole.slice(1))
+  expect(fullMessages(other.records, 2)).toEqual(other.whole)
+})
+
+test('the pane’s reader and the browser page show the answer a request goes on from', async ($, on) => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('list the files')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(toolAnswer('b0', 'msg_0'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([toolResult], 'msg_0'),
+      query_source: 'sdk',
+    }),
+  )
+
+  const html = requestPage({
+    session: SESSION,
+    records: keptRecords(files),
+    seq: 1,
+    system: null,
+    tools: null,
+    link: () => '#',
+  })!
+  const roles = [
+    ...html.matchAll(/<span class="seq">#(\d)<\/span><span class="pill tone-\w+">(\w+)</g),
+  ]
+  expect(roles.map(match => `${match[1]} ${match[2]}`)).toEqual(['1 user', '2 assistant', '3 user'])
+
+  tracedEngine(on, sessionFiles(files))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
+  await pane.press({ key: 'read-1' })
+  const text = (await pane.findAll({ type: 'Text' }))
+    .filter(one => one.props.mono === true)
+    .map(one => one.text)
+    .join('\n')
+  expect(text).toMatch(/══ Messages: 3, the last 1 new in this request/)
+  expect(text).toMatch(
+    /── #1 user\nlist the files\n \n── #2 assistant\nRunning ls\.\n→ Bash \{[\s\S]*── #3 user \(new\)\n← tool result\na\.txt/,
+  )
+
+  await pane.unmount()
 })

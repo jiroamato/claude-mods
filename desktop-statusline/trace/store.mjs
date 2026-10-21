@@ -94,7 +94,8 @@ export function sourceKind(source) {
 /**
  * The messages a request sent, whole: each request keeps only what followed
  * the previous one of its kind, so they are rebuilt from the first. One that
- * goes on from an earlier request it names (`after`) adds to that one's.
+ * goes on from an earlier request it names (`after`) adds to that one's, and
+ * to its answer, which no body carries: the API holds it.
  */
 export function fullMessages(records, seq) {
   const target = records.find(one => one.seq === seq)
@@ -103,6 +104,8 @@ export function fullMessages(records, seq) {
   const named = new Set(records.map(one => one.after).filter(after => typeof after === 'number'))
   const chains = new Map()
   let messages = []
+  /** The request `messages` are what it sent. */
+  let previous = null
   for (const record of [...records].sort((a, b) => a.seq - b.seq)) {
     if (sourceKind(record.source) !== kind) continue
     // One that could not be read sent what is not known: the store diffed
@@ -113,14 +116,38 @@ export function fullMessages(records, seq) {
     }
     // A head (a request too large for the pane) stands in for its messages.
     const added = record.isHead === true ? headMessages(record) : record.added
-    messages = goesOn(record, messages.length > 0)
-      ? [...(chains.get(record.after) ?? messages), ...added]
-      : [...messages.slice(0, record.from), ...added]
-    if (named.has(record.seq)) chains.set(record.seq, messages)
+    if (goesOn(record, messages.length > 0)) {
+      const base = chains.get(record.after) ?? { messages, record: previous }
+      messages = [...withAnswer(base.messages, base.record, record.from), ...added]
+    } else {
+      messages = [...withAnswer(messages, previous, record.from).slice(0, record.from), ...added]
+    }
+    previous = record
+    if (named.has(record.seq)) chains.set(record.seq, { messages, record })
     if (record.seq === seq) break
   }
 
   return messages
+}
+
+/** A request's answer as a message, as the conversation after it holds it; null for none. */
+function answerMessage(record) {
+  const content = record?.response?.content
+
+  return Array.isArray(content) ? { role: 'assistant', content } : null
+}
+
+/**
+ * A request's messages, and after them its answer where the store counted it.
+ * The store counts an answer in the request's chain once it lands
+ * (`TraceStore.answered`), so a request taken after that starts past it: its
+ * `from` is one more than the messages before. One taken before it landed, or
+ * kept by an older receiver, which counted none, starts at them, and gets none.
+ */
+function withAnswer(messages, record, from) {
+  const answer = answerMessage(record)
+
+  return answer && from > messages.length ? [...messages, answer] : messages
 }
 
 /**
@@ -453,10 +480,14 @@ export class TraceStore {
       previous === null ? undefined : records.findLast(one => one.response?.id === previous)
     const record = named ?? (kind === 'main' ? records.at(-1) : undefined)
     if (!record) return null
+    // Its answer counted as `answered` counts it, had this receiver kept it.
+    const answer = answerMessage(record)
 
     return {
       seq: record.seq,
-      hashes: (fullMessages(records, record.seq) ?? []).map(hashMessage),
+      hashes: [...(fullMessages(records, record.seq) ?? []), ...(answer ? [answer] : [])].map(
+        hashMessage,
+      ),
       named: named !== undefined,
     }
   }
@@ -530,6 +561,7 @@ export class TraceStore {
   takeResponse(folder, session, attributes) {
     const record = session.byBody.get(attributes.request_body_id)
     if (!record) return
+    const isFirst = record.response === null
     try {
       record.response = JSON.parse(String(attributes.body ?? ''))
     } catch {
@@ -537,6 +569,7 @@ export class TraceStore {
     }
     if (typeof record.response?.id === 'string')
       remember(session.byMessageId, record.response.id, record.seq)
+    if (isFirst) this.answered(session, record)
     const requestId = attributes.request_id ? String(attributes.request_id) : null
     if (requestId) {
       record.requestId = requestId
@@ -549,6 +582,34 @@ export class TraceStore {
     }
     this.save(folder, record)
     this.settle(session, record)
+  }
+
+  /**
+   * Counts a request's answer in its chain, as the conversation after it
+   * holds it, by its hash alone: a request that goes on from it starts past
+   * it (`from`), and counts it in `messageCount`. Readers put the answer
+   * there from the record's `response` (`withAnswer`).
+   *
+   * A whole body sent again after it carries the answer as Claude Code keeps
+   * it, which may or may not be `{ role, content }` of the response exactly
+   * (the API may add fields to a block, or Claude Code drop some). Where its
+   * hash is the same, the diff against the chain goes on past it; where not,
+   * `from` stops before it, the body's own copy is among the messages the
+   * request added, and the readers' `messages.slice(0, from)` is still a
+   * prefix of the conversation. Either way the rebuilt body is the one sent.
+   */
+  answered(session, record) {
+    const answer = answerMessage(record)
+    if (!answer) return
+    const kind = sourceKind(record.source)
+    const known = session.chains.get(record.seq)
+    const last = session.last.get(kind)
+    const hashes = known?.hashes ?? (last?.seq === record.seq ? last.hashes : null)
+    if (!hashes) return
+    // A new list: a body sent again shares its chain with the request before.
+    const chain = [...hashes, hashMessage(answer)]
+    if (known) session.chains.set(record.seq, { ...known, hashes: chain })
+    if (last?.seq === record.seq) session.last.set(kind, { seq: record.seq, hashes: chain })
   }
 
   settle(session, record) {
