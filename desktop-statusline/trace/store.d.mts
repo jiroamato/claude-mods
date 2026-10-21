@@ -11,11 +11,16 @@ export type ChainRecord = {
   seq: number
   source: string
   continues?: boolean
+  /** For one that goes on: the request it goes on from. */
+  after?: number | null
   toolCount: number
   from: number
   added: readonly unknown[]
+  /** For one that could not be read: how long its body was. */
+  unreadable?: number
 }
 export declare function isMain(source: string): boolean
+export declare function sourceKind(source: string): string
 export declare function goesOn(record: ChainRecord, hasBefore: boolean): boolean
 export declare function promptRecord<R extends ChainRecord>(
   records: readonly R[],
@@ -30,6 +35,7 @@ export declare class TraceStore {
     write: (name: string, text: string) => void,
     firstSeq?: (folder: string) => number,
     exists?: (name: string) => boolean,
+    read?: (folder: string) => readonly ChainRecord[],
   )
   take(attributes: Record<string, unknown>): void
 }

@@ -68,6 +68,7 @@ const store = new TraceStore(
     }
   },
   name => fs.existsSync(path.join(root, name)),
+  folder => sessionRecords(folder) ?? [],
 )
 
 /**

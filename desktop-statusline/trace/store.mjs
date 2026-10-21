@@ -10,15 +10,17 @@
 //   <session>/<seq>.json           one request: what it added, and its answer
 //
 // A request body carries the whole conversation, so a request's file keeps
-// only the messages that follow the previous request of the same kind; the
-// system prompt and the tools, which seldom change, are kept once each.
+// only the messages that follow the previous request of the same kind, or,
+// for one that goes on from an earlier request, the new messages and which
+// request that was; the system prompt and the tools, which seldom change, are
+// kept once each.
 
 /**
  * What the receiver's `GET /health` answers, so the plugin can tell it from
  * another server, and an older receiver from this one (hooks/trace.ts keeps
  * the same text). Bumped whenever what the receiver serves changes.
  */
-export const HEALTH = 'desktop-statusline trace receiver 9'
+export const HEALTH = 'desktop-statusline trace receiver 10'
 
 /** The events the receiver keeps; the others are left unread. */
 export const KEPT_EVENTS = new Set(['api_request_body', 'api_request', 'api_response_body'])
@@ -74,28 +76,48 @@ export function sessionFolder(id) {
 // How the pane and the pages read a session's requests back: a request
 // keeps only what followed the one before it of its kind.
 
+/** The main loop's requests, by the engine's name for where a request came from. */
+export function isMain(source) {
+  return source === 'sdk' || String(source).startsWith('repl_main_thread')
+}
+
+/**
+ * Which conversation a request belongs to, by its source: the main loop's
+ * sources are one (the CLI's names the output style, which `/output-style`
+ * changes mid-session); any other source is its own.
+ */
+export function sourceKind(source) {
+  return isMain(source) ? 'main' : String(source)
+}
+
 /**
  * The messages a request sent, whole: each request keeps only what followed
- * the previous one of its kind, so they are rebuilt from the first.
+ * the previous one of its kind, so they are rebuilt from the first. One that
+ * goes on from an earlier request it names (`after`) adds to that one's.
  */
 export function fullMessages(records, seq) {
   const target = records.find(one => one.seq === seq)
   if (!target) return null
+  const kind = sourceKind(target.source)
+  const named = new Set(records.map(one => one.after).filter(after => typeof after === 'number'))
+  const chains = new Map()
   let messages = []
   for (const record of [...records].sort((a, b) => a.seq - b.seq)) {
-    if (record.source !== target.source) continue
+    if (sourceKind(record.source) !== kind) continue
+    // One that could not be read sent what is not known: the store diffed
+    // the next against the one before it.
+    if (record.unreadable !== undefined) {
+      if (record.seq === seq) return []
+      continue
+    }
     messages = goesOn(record, messages.length > 0)
-      ? [...messages, ...record.added]
+      ? [...(chains.get(record.after) ?? messages), ...record.added]
       : [...messages.slice(0, record.from), ...record.added]
+    if (named.has(record.seq)) chains.set(record.seq, messages)
     if (record.seq === seq) break
   }
 
   return messages
-}
-
-/** The main loop's requests, by the engine's name for where a request came from. */
-export function isMain(source) {
-  return source === 'sdk' || String(source).startsWith('repl_main_thread')
 }
 
 /**
@@ -116,21 +138,62 @@ export function goesOn(record, hasBefore) {
 
 /**
  * The request whose system prompt and tools a request was sent with: itself,
- * or for one that goes on from the one before, the last of its kind that
- * carried them.
+ * or for one that goes on from an earlier one, the last before it in its
+ * conversation that carried them. One that goes on sends the billing header
+ * alone, and tools only when they changed: those tools are its own.
  */
 export function promptRecord(records, seq) {
   const target = records.find(one => one.seq === seq)
   if (!target) return null
-  const before = records
-    .filter(one => one.source === target.source && one.seq <= seq && one.toolCount > 0)
-    .sort((a, b) => b.seq - a.seq)
+  const kind = sourceKind(target.source)
+  const mine = records
+    .filter(one => sourceKind(one.source) === kind && one.seq <= seq)
+    .sort((a, b) => a.seq - b.seq)
+  const at = new Map(mine.map((one, index) => [one.seq, index]))
+  let tools = null
+  let index = at.get(seq)
+  while (index !== undefined && index >= 0) {
+    const record = mine[index]
+    if (tools === null && record.toolCount > 0) tools = record
+    if (record.toolCount > 0 && record.continues !== true) {
+      return tools === record
+        ? record
+        : { ...record, tools: tools.tools, toolCount: tools.toolCount }
+    }
+    const after = record.continues === true ? at.get(record.after) : undefined
+    index = after !== undefined && after < index ? after : index - 1
+  }
 
-  return target.toolCount > 0 ? target : (before[0] ?? target)
+  return tools ?? target
 }
 
 /** How many requests may wait for their usage or answer at once, per session. */
 const MAX_WAITING = 200
+
+/**
+ * How many requests' conversations, and answers' ids, are kept in memory per
+ * session, for a request that goes on from one of them; an older one is read
+ * back from the folder.
+ */
+const MAX_CHAINS = 200
+
+function hashMessage(message) {
+  return hashText(JSON.stringify(message))
+}
+
+/** Whether a list of hashes ends with another. */
+function endsWith(list, tail) {
+  if (tail.length > list.length) return false
+
+  return tail.every((hash, index) => list[list.length - tail.length + index] === hash)
+}
+
+/** Sets a key in a map that keeps only its newest entries. */
+function remember(map, key, value) {
+  map.delete(key)
+  map.set(key, value)
+  while (map.size > MAX_CHAINS) map.delete(map.keys().next().value)
+}
 
 function number(value) {
   const parsed = Number(value)
@@ -144,12 +207,15 @@ function number(value) {
  * where a session already on disk goes on from, so a restarted receiver adds
  * to it rather than writing over it. `exists(path)` says whether a file is
  * still there, so one the person deleted is written again when next needed.
+ * `read(folder)` gives back the requests a session has on disk, for one that
+ * goes on from a request an earlier receiver kept.
  */
 export class TraceStore {
-  constructor(write, firstSeq = () => 0, exists = () => true) {
+  constructor(write, firstSeq = () => 0, exists = () => true, read = () => []) {
     this.write = write
     this.firstSeq = firstSeq
     this.exists = exists
+    this.read = read
     /** Per session: the next request number, what was written, what waits. */
     this.sessions = new Map()
   }
@@ -160,7 +226,12 @@ export class TraceStore {
       session = {
         next: this.firstSeq(id),
         written: new Set(),
+        /** Per kind (`sourceKind`): the last request's number and its messages' hashes. */
         last: new Map(),
+        /** Recent requests' messages' hashes and kind, by number. */
+        chains: new Map(),
+        /** Recent requests' numbers, by the API's id for their answer. */
+        byMessageId: new Map(),
         byBody: new Map(),
         byRequestId: new Map(),
         /** Usage that came before its request's answer named it, by request id. */
@@ -212,6 +283,7 @@ export class TraceStore {
         messageCount: 0,
         from: 0,
         continues: false,
+        after: null,
         added: [],
         unreadable: String(attributes.body ?? '').length,
       })
@@ -228,23 +300,48 @@ export class TraceStore {
     this.keep(folder, session, `system-${systemHash}.json`, system)
     this.keep(folder, session, `tools-${toolsHash}.json`, tools)
 
-    // The messages after what the previous request of this kind already sent.
-    // A request that goes on from the one before (newer Claude Code sends the
-    // system prompt and the tools once, then only the billing header, no tools
-    // and the new messages, the API holding the rest) adds all it carries.
-    const hashes = body.messages.map(message => hashText(JSON.stringify(message)))
-    const before = session.last.get(source) ?? []
-    const continues =
-      before.length > 0 && tools.length === 0 && system.length > 0 && system.every(isBillingBlock)
+    // Newer Claude Code sends the system prompt and the tools once, then
+    // bodies that name the answer they go on from (`thread.previous_message_id`)
+    // and carry the billing header alone, tools only when they changed, and
+    // the new messages, the API holding the rest. Told by the body alone, so
+    // a receiver started mid-session tells it too; a body with no `thread` is
+    // told by its shape.
+    const kind = sourceKind(source)
+    const hashes = body.messages.map(hashMessage)
+    const thread = body.thread !== null && typeof body.thread === 'object' ? body.thread : null
+    const isContinuation = thread
+      ? thread.type === 'continue'
+      : tools.length === 0 && system.length > 0 && system.every(isBillingBlock)
+    const previous =
+      typeof thread?.previous_message_id === 'string' ? thread.previous_message_id : null
+    const base = isContinuation ? this.chainBefore(folder, session, kind, previous) : null
+    let continues = false
+    let after = null
     let from = 0
-    if (continues) {
-      from = before.length
-      session.last.set(source, [...before, ...hashes])
+    let chain
+    let added = body.messages
+    if (base && !base.named && endsWith(base.hashes, hashes)) {
+      // The same body again, the conversation already ending with it: kept
+      // as one that sent the conversation whole, so it is not added twice.
+      from = base.hashes.length - hashes.length
+      chain = base.hashes
+    } else if (base || (isContinuation && kind === 'main')) {
+      // A main request goes on from the main requests before it even when
+      // none is to be found here: the pages rebuild those from the folder.
+      continues = true
+      after = base?.seq ?? null
+      from = base?.hashes.length ?? 0
+      chain = [...(base?.hashes ?? []), ...hashes]
     } else {
+      // The messages after what the previous request of this kind already sent.
+      const before = session.last.get(kind)?.hashes ?? []
       while (from < before.length && from < hashes.length && before[from] === hashes[from])
         from += 1
-      session.last.set(source, hashes)
+      chain = hashes
+      added = body.messages.slice(from)
     }
+    session.last.set(kind, { seq: session.next, hashes: chain })
+    remember(session.chains, session.next, { kind, hashes: chain })
 
     this.open(folder, session, attributes, {
       source,
@@ -252,11 +349,58 @@ export class TraceStore {
       system: systemHash,
       tools: toolsHash,
       toolCount: tools.length,
-      messageCount: body.messages.length,
+      // The conversation's length with this request's messages, not only theirs.
+      messageCount: chain.length,
       from,
       continues,
-      added: continues ? body.messages : body.messages.slice(from),
+      after,
+      added,
     })
+  }
+
+  /**
+   * The request one that goes on was sent after, with its messages' hashes:
+   * the one whose answer it names, else, for the main loop, the last main
+   * request. Read back from the folder only while this receiver has kept no
+   * request of the kind (one started mid-session), so the folder is read once
+   * per kind at most. `named` says it was found by its answer's id.
+   *
+   * Every subagent of a type shares one source, parallel ones interleave, and
+   * the log record names no agent: so a subagent's request whose answer is not
+   * to be found is not joined to the last of its source, which may be another
+   * subagent's. It is kept as a conversation of its own.
+   */
+  chainBefore(folder, session, kind, previous) {
+    if (previous !== null) {
+      const seq = session.byMessageId.get(previous)
+      const known = seq === undefined ? undefined : session.chains.get(seq)
+      if (known?.kind === kind) return { seq, hashes: known.hashes, named: true }
+    }
+    const last = session.last.get(kind)
+    if (last) return kind === 'main' ? { ...last, named: false } : null
+    if (previous === null && kind !== 'main') return null
+    const records = this.kept(folder, kind)
+    const named =
+      previous === null ? undefined : records.findLast(one => one.response?.id === previous)
+    const record = named ?? (kind === 'main' ? records.at(-1) : undefined)
+    if (!record) return null
+
+    return {
+      seq: record.seq,
+      hashes: (fullMessages(records, record.seq) ?? []).map(hashMessage),
+      named: named !== undefined,
+    }
+  }
+
+  /** The requests of a kind a session has on disk, in order, those read whole. */
+  kept(folder, kind) {
+    try {
+      return this.read(folder)
+        .filter(one => sourceKind(one.source) === kind && one.unreadable === undefined)
+        .sort((a, b) => a.seq - b.seq)
+    } catch {
+      return []
+    }
   }
 
   /** Numbers a request and keeps it, waiting for its usage and its answer. */
@@ -322,6 +466,8 @@ export class TraceStore {
     } catch {
       record.response = { unreadable: String(attributes.body ?? '').slice(0, 2000) }
     }
+    if (typeof record.response?.id === 'string')
+      remember(session.byMessageId, record.response.id, record.seq)
     const requestId = attributes.request_id ? String(attributes.request_id) : null
     if (requestId) {
       record.requestId = requestId

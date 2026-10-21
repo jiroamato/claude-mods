@@ -12,7 +12,7 @@ import { fullMessages, isMain, promptRecord as sharedPromptRecord } from '../tra
 export const TRACE_PORT = 43180
 
 /** What the receiver's `GET /health` answers (trace/store.mjs keeps the same text). */
-export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 9'
+export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 10'
 /** What every version of the receiver's health answer opens with. */
 export const RECEIVER_NAME = 'desktop-statusline trace receiver'
 

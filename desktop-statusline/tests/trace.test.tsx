@@ -1275,3 +1275,252 @@ test('a request that goes on from the one before adds its messages, and keeps th
   )
   expect(fullMessages(unmarked, 1)).toHaveLength(2)
 })
+
+/** What the receiver writes for a request: a TraceRecord, and the one it goes on from. */
+type KeptRecord = TraceRecord & { after?: number | null }
+
+/** A store over files in memory, reading them back as the receiver reads its folder. */
+function memoryStore(files: Record<string, string>, firstSeq = () => 0, readsBack = true) {
+  return new TraceStore(
+    (name: string, text: string) => {
+      files[name] = text
+    },
+    firstSeq,
+    () => true,
+    readsBack ? () => keptRecords(files) : () => [],
+  )
+}
+
+function keptRecords(files: Record<string, string>): KeptRecord[] {
+  return Object.entries(files)
+    .filter(([name]) => /\/\d{6}\.json$/.test(name))
+    .map(([, text]) => JSON.parse(text) as KeptRecord)
+    .sort((a, b) => a.seq - b.seq)
+}
+
+/** A body that goes on from an earlier request: the billing header alone, no tools. */
+function continuationBody(messages: unknown[], previous?: string) {
+  return JSON.stringify({
+    model: 'claude-opus-5-5',
+    system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2' }],
+    tools: [],
+    messages,
+    ...(previous ? { thread: { type: 'continue', previous_message_id: previous } } : {}),
+  })
+}
+
+/** The answer to a request, under the API's id for it. */
+function answer(bodyId: string, id: string, text = 'ok') {
+  return record('api_response_body', {
+    request_body_id: bodyId,
+    body: JSON.stringify({ id, content: [{ type: 'text', text }], stop_reason: 'end_turn' }),
+  })
+}
+
+const user = (content: string) => ({ role: 'user', content })
+const assistant = (text: string) => ({ role: 'assistant', content: [{ type: 'text', text }] })
+
+test('a receiver started mid-conversation goes on from the requests already on disk', () => {
+  const before: Record<string, string> = {}
+  const first = memoryStore(before)
+  first.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  first.take(answer('b0', 'msg_0'))
+
+  // Told by its shape alone, with nothing read back: it still goes on.
+  const shaped = { ...before }
+  memoryStore(shaped, () => 1, false).take(
+    record('api_request_body', {
+      body: continuationBody([user('how are you')]),
+      query_source: 'sdk',
+    }),
+  )
+  const shapedRecords = keptRecords(shaped)
+  expect(shapedRecords[1]).toMatchObject({ continues: true, after: null })
+  expect(fullMessages(shapedRecords, 1)).toEqual([user('hello'), user('how are you')])
+
+  // Naming the answer it goes on from, found in the folder.
+  const named = { ...before }
+  memoryStore(named, () => 1).take(
+    record('api_request_body', {
+      body: continuationBody([user('how are you')], 'msg_0'),
+      query_source: 'sdk',
+    }),
+  )
+  const namedRecords = keptRecords(named)
+  expect(namedRecords[1]).toMatchObject({ continues: true, after: 0, from: 1, messageCount: 2 })
+  expect(fullMessages(namedRecords, 1)).toEqual([user('hello'), user('how are you')])
+  expect(promptRecord(namedRecords, 1)?.seq).toBe(0)
+})
+
+test('switching the output style mid-session keeps the main conversation and its prompt', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'repl_main_thread:outputStyle:default',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(answer('b0', 'msg_0', 'hi'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user('explain')], 'msg_0'),
+      query_source: 'repl_main_thread:outputStyle:Explanatory',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('hi'), user('explain'), user('more')]),
+      query_source: 'repl_main_thread:outputStyle:Explanatory',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({
+    source: 'repl_main_thread:outputStyle:Explanatory',
+    continues: true,
+    after: 0,
+  })
+  expect(fullMessages(records, 1)).toEqual([user('hello'), user('explain')])
+  expect(promptRecord(records, 1)?.seq).toBe(0)
+  expect(tracePromptRecord(records, 1)?.seq).toBe(0)
+  expect(records[2]).toMatchObject({ from: 1 })
+  expect(fullMessages(records, 2)).toEqual([
+    user('hello'),
+    assistant('hi'),
+    user('explain'),
+    user('more'),
+  ])
+})
+
+test('a body sent twice adds its messages once', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', { body: requestBody([user('hello')]), query_source: 'sdk' }),
+  )
+  // Told by its shape: the second time, the conversation already ends with it.
+  for (let times = 0; times < 2; times += 1)
+    store.take(
+      record('api_request_body', { body: continuationBody([user('again')]), query_source: 'sdk' }),
+    )
+  // Naming its answer: each time, it goes on from that one.
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), user('again'), user('next')]),
+      query_source: 'sdk',
+      request_body_id: 'b3',
+    }),
+  )
+  store.take(answer('b3', 'msg_3'))
+  for (let times = 0; times < 2; times += 1)
+    store.take(
+      record('api_request_body', {
+        body: continuationBody([user('last')], 'msg_3'),
+        query_source: 'sdk',
+      }),
+    )
+  const records = keptRecords(files)
+  expect(records[2]).toMatchObject({ continues: false, from: 1, messageCount: 2 })
+  expect(fullMessages(records, 1)).toEqual([user('hello'), user('again')])
+  expect(fullMessages(records, 2)).toEqual([user('hello'), user('again')])
+  expect(records[3]).toMatchObject({ from: 2 })
+  const whole = [user('hello'), user('again'), user('next'), user('last')]
+  expect(records[4]).toMatchObject({ continues: true, after: 3, messageCount: 4 })
+  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 4 })
+  expect(fullMessages(records, 4)).toEqual(whole)
+  expect(fullMessages(records, 5)).toEqual(whole)
+})
+
+test('parallel subagents of one type are each rebuilt whole', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const source = 'agent:builtin:general-purpose'
+  const bodies = [
+    [user('a: task')],
+    [user('b: task')],
+    [user('a: task'), assistant('a: one'), user('a: more')],
+    [user('b: task'), assistant('b: one'), user('b: more')],
+    [user('a: task'), assistant('a: one'), user('a: more'), assistant('a: two'), user('a: end')],
+  ]
+  bodies.forEach((messages, index) =>
+    store.take(
+      record('api_request_body', {
+        body: requestBody(messages),
+        query_source: source,
+        request_body_id: `b${index}`,
+      }),
+    ),
+  )
+  store.take(answer('b3', 'msg_b'))
+  store.take(answer('b4', 'msg_a'))
+  // Going on, each from the answer it names, whichever came last.
+  for (const [text, previous] of [
+    ['b: end', 'msg_b'],
+    ['a: after', 'msg_a'],
+    // One whose answer is nowhere is not joined to another subagent's.
+    ['c: lost', 'msg_c'],
+  ] as const)
+    store.take(
+      record('api_request_body', {
+        body: continuationBody([user(text)], previous),
+        query_source: source,
+      }),
+    )
+  // The main conversation, meanwhile, is apart.
+  store.take(record('api_request_body', { body: requestBody([user('main')]), query_source: 'sdk' }))
+  const records = keptRecords(files)
+  bodies.forEach((messages, index) => expect(fullMessages(records, index)).toEqual(messages))
+  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 4 })
+  expect(fullMessages(records, 5)).toEqual([...bodies[3]!, user('b: end')])
+  expect(records[6]).toMatchObject({ continues: true, after: 4, messageCount: 6 })
+  expect(fullMessages(records, 6)).toEqual([...bodies[4]!, user('a: after')])
+  expect(records[7]).toMatchObject({ continues: false, after: null, messageCount: 1 })
+  expect(fullMessages(records, 7)).toEqual([user('c: lost')])
+  expect(fullMessages(records, 8)).toEqual([user('main')])
+})
+
+test('a request that goes on counts the whole conversation, not only its new messages', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('one'), assistant('two'), user('three')]),
+      query_source: 'sdk',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([assistant('four'), user('five')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ continues: true, messageCount: 5 })
+  expect(records[1]!.added).toHaveLength(2)
+  expect(summarize(records[1]!).messageCount).toBe(5)
+})
+
+test('a request that could not be read leaves the conversation as it was', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(record('api_request_body', { body: requestBody([user('one')]), query_source: 'sdk' }))
+  store.take(record('api_request_body', { body: '{"messages": [', query_source: 'sdk' }))
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('one'), assistant('two'), user('three')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ unreadable: 14 })
+  expect(fullMessages(records, 1)).toEqual([])
+  expect(records[2]).toMatchObject({ from: 1 })
+  expect(fullMessages(records, 2)).toEqual([user('one'), assistant('two'), user('three')])
+})
