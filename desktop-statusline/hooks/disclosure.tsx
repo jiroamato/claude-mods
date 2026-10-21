@@ -11,10 +11,24 @@ export type DisclosureProps = {
   isOpen: boolean
   /** A card's heading: its label set as the card's, its figures smaller. */
   isHeading?: boolean
+  /** Lines under the label, quieter, one row each: lit and pressed with the row. */
+  lines?: string[]
 }
 
 /** A row's height: room above and below its line, so its lit pill is not cramped. */
 export const DISCLOSURE_ROWS = 1.7
+// Under lines below the label, the room the label has under it, so the pill sits even.
+const LINES_BOTTOM = (DISCLOSURE_ROWS - 1) / 2
+// Past the row's padding, the chevron's room and the gap after it: where the label starts.
+const CHEVRON_COLUMNS = 1.6
+const LABEL_INDENT = CHEVRON_COLUMNS + 1
+
+/** How tall a row draws: its line, and the lines under it with room below them. */
+export function disclosureRows(props: Pick<DisclosureProps, 'lines'>): number {
+  const count = props.lines?.length ?? 0
+
+  return count === 0 ? DISCLOSURE_ROWS : DISCLOSURE_ROWS + count + LINES_BOTTOM
+}
 
 /** What the row posts to the hooks module when pressed. */
 export type DisclosurePick = { toggle: string }
@@ -63,35 +77,51 @@ export default function Disclosure(
     })
   }
 
+  const lines = props.lines ?? []
+
   return (
+    // One pill: the row's line and the lines under it light and take the press together.
     <Box
-      flexDirection="row"
-      alignItems="center"
-      columnGap={1}
+      flexDirection="column"
       paddingX={1}
       borderStyle="round"
       borderColor={CLEAR}
       paddingY={0}
-      height={DISCLOSURE_ROWS}
+      height={disclosureRows(props)}
       backgroundColor={isHover ? HOVER : CLEAR}
     >
-      {/* The chevron's room: the pane draws the icon under this region. */}
-      <Box width={1.6} flexShrink={0} />
-      <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text
-          color="text"
-          wrap="truncate-end"
-          {...(props.isHeading ? { weight: 'semibold' as const } : {})}
-        >
-          {props.label}
-        </Text>
-        {props.tag !== undefined && <Text color="subtle">{props.tag}</Text>}
+      <Box flexDirection="row" alignItems="center" columnGap={1} height={DISCLOSURE_ROWS}>
+        {/* The chevron's room: the pane draws the icon under this region. */}
+        <Box width={CHEVRON_COLUMNS} flexShrink={0} />
+        <Box flexDirection="row" columnGap={1} flexGrow={1} flexShrink={1} minWidth={0}>
+          <Text
+            color="text"
+            wrap="truncate-end"
+            {...(props.isHeading ? { weight: 'semibold' as const } : {})}
+          >
+            {props.label}
+          </Text>
+          {props.tag !== undefined && <Text color="subtle">{props.tag}</Text>}
+        </Box>
+        <Box flexShrink={0}>
+          <Text color="subtle" tabular {...(props.isHeading ? { size: 'footnote' as const } : {})}>
+            {props.figure}
+          </Text>
+        </Box>
       </Box>
-      <Box flexShrink={0}>
-        <Text color="subtle" tabular {...(props.isHeading ? { size: 'footnote' as const } : {})}>
-          {props.figure}
-        </Text>
-      </Box>
+      {lines.length > 0 && (
+        // Under the label, past the chevron: a padding is drawn in whole cells, a width is not.
+        <Box flexDirection="row">
+          <Box width={LABEL_INDENT} flexShrink={0} />
+          <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
+            {lines.map(line => (
+              <Text color="subtle" wrap="truncate-end">
+                {line}
+              </Text>
+            ))}
+          </Box>
+        </Box>
+      )}
     </Box>
   )
 }

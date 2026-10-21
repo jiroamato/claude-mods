@@ -319,8 +319,10 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
       isOpen: false,
     },
   )
-  expect(await pane.find({ type: 'Text', text: '+ "list the files"' })).toBeDefined()
-  expect(await pane.find({ type: 'Text', text: '→ "Here they are."' })).toBeDefined()
+  // What it added and what came back, in the row's own region, so they light with it.
+  const row = await pane.find({ type: 'Client', key: 'disclose-trace-0' })
+  expect(row?.props.props).toMatchObject({ lines: ['+ "list the files"', '→ "Here they are."'] })
+  expect(Math.abs(Number(row?.props.height) - 4.05)).toBeLessThan(1e-9)
   expect((await pane.find({ type: 'Client', key: 'disclose-trace-0' }))?.props.props).toMatchObject(
     {
       figure: '10 in · 5 out · $0.25 · 1.5s',

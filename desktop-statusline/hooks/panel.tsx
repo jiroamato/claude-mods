@@ -11,7 +11,7 @@ import type {
   TraceState,
 } from '../types'
 import { formatShare, formatTokens } from './context'
-import { DISCLOSURE_ROWS } from './disclosure'
+import { DISCLOSURE_ROWS, disclosureRows } from './disclosure'
 import type { DisclosureProps } from './disclosure'
 import type { ReaderBarProps } from './reader'
 import { TAB_PREFIX } from './tabs'
@@ -206,8 +206,6 @@ function RequestText(props: { ui: Ui; text: string | null }) {
 
 /** The key prefix of a row that opens, which the hooks module hears it post under. */
 export const DISCLOSURE_PREFIX = 'disclose-'
-// The chevron's column and the gap after it, so what sits under the label lines up with it.
-const DISCLOSURE_INDENT = 2.6
 
 /**
  * A row that opens what is under it: the chevron, the label, the figure at the
@@ -224,26 +222,28 @@ function DisclosureRow(props: { ui: Ui; row: DisclosureProps }) {
     // Set out into its card's padding by the row's own, so the chevron lines up
     // with the card's heading and the figure with its figures, as the lit row
     // runs past them both.
+    // The chevron sits by the row's first line, whatever lines the region draws under it.
     <Box
-      flexDirection="row"
-      alignItems="center"
-      height={DISCLOSURE_ROWS}
+      flexDirection="column"
+      height={disclosureRows(props.row)}
       paddingLeft={CARET_INSET}
       marginX={-CARET_INSET}
     >
-      <Svg
-        source={props.row.isOpen ? CARET_DOWN : CARET_RIGHT}
-        alt={props.row.isOpen ? 'open' : 'closed'}
-        width={CARET_SIZE}
-        height={CARET_SIZE}
-      />
+      <Box flexDirection="row" alignItems="center" height={DISCLOSURE_ROWS}>
+        <Svg
+          source={props.row.isOpen ? CARET_DOWN : CARET_RIGHT}
+          alt={props.row.isOpen ? 'open' : 'closed'}
+          width={CARET_SIZE}
+          height={CARET_SIZE}
+        />
+      </Box>
       <Box position="absolute" top={0} left={0} right={0} bottom={0}>
         <Client
           key={`${DISCLOSURE_PREFIX}${props.row.id}`}
           module="./disclosure.tsx"
           props={props.row}
           width="100%"
-          height={DISCLOSURE_ROWS}
+          height={disclosureRows(props.row)}
         />
       </Box>
     </Box>
@@ -1044,33 +1044,22 @@ function TraceTab(props: ContextPaneProps) {
 
     return (
       <Box key={id} flexDirection="column" rowGap={1}>
-        <Box flexDirection="column">
-          {DisclosureRow({
-            ui: props.ui,
-            row: {
-              id,
-              // Its group names the main loop; a side request says where it came from.
-              label: isMain ? `#${item.seq + 1}` : `#${item.seq + 1} ${sourceLabel(item.source)}`,
-              tag: clock(item.at),
-              figure: usageLine(item),
-              isOpen,
-            },
-          })}
-          {/* Under the label, past the chevron: a padding is drawn in whole cells, a width is not. */}
-          <Box flexDirection="row">
-            <Box width={DISCLOSURE_INDENT} flexShrink={0} />
-            <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-              <Text color="subtle" wrap="truncate-end">
-                {`+ ${item.added.join(', ') || 'nothing new'}`}
-              </Text>
-              {item.reply !== null && (
-                <Text color="subtle" wrap="truncate-end">
-                  {`→ ${item.reply}`}
-                </Text>
-              )}
-            </Box>
-          </Box>
-        </Box>
+        {DisclosureRow({
+          ui: props.ui,
+          row: {
+            id,
+            // Its group names the main loop; a side request says where it came from.
+            label: isMain ? `#${item.seq + 1}` : `#${item.seq + 1} ${sourceLabel(item.source)}`,
+            tag: clock(item.at),
+            figure: usageLine(item),
+            isOpen,
+            // What it added and what came back, lit with the row as one pill.
+            lines: [
+              `+ ${item.added.join(', ') || 'nothing new'}`,
+              ...(item.reply === null ? [] : [`→ ${item.reply}`]),
+            ],
+          },
+        })}
         {isOpen && RequestText({ ui: props.ui, text: props.traceText })}
         {isOpen && (
           <Box flexDirection="row" alignItems="center" columnGap={2}>
