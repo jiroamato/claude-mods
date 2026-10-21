@@ -91,8 +91,8 @@ behind a token it writes beside them. The first session after you install the
 plugin makes the folder, tracing on or off, with a `README.txt` saying what it
 holds. Nothing in it is ever deleted for you: delete the folder to remove every
 trace, and the next session makes it again, empty. The Trace tab shows its full
-path, and **Open traces folder** opens it in Explorer, Finder or your desktop's
-file manager.
+path, and **Open traces folder** opens it in Explorer (on Windows, and from WSL),
+Finder, or your Linux desktop's file manager through `xdg-open`.
 
 A trace holds the whole conversation, file contents and command output included.
 It never leaves your machine, but anyone who can read your files can read it.

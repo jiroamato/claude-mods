@@ -11,7 +11,7 @@ import type {
   TraceStatus,
 } from '../types'
 import { buildSnapshot, currentSnapshot } from './context'
-import { FOLDER_VARIABLE, SHOW_FOLDER_SCRIPT, encodedCommand } from './folder'
+import { showFolder } from './folder'
 import {
   ContextPane,
   DISCLOSURE_PREFIX,
@@ -407,41 +407,13 @@ async function ensureTraceFolder($: EngineInterface): Promise<void> {
 }
 
 /**
- * Opens the traces folder in the system's file manager: Explorer on Windows,
- * Finder on macOS, the desktop's own through `xdg-open` elsewhere. The folder
- * is made first, so there is always one to open.
+ * Opens the traces folder in the system's file manager (./folder.ts). The
+ * folder is made first, so there is always one to open.
  */
 async function showTraceFolder($: EngineInterface): Promise<void> {
   try {
     await ensureTraceFolder($)
-    const folder = await traceRoot($)
-    if ((await $.env.get('OS')) === 'Windows_NT') {
-      // Explorer, shown and in front (./folder.ts). An encoded command runs
-      // whatever the machine's script execution policy.
-      const shown = await $.process.run(
-        [
-          'powershell.exe',
-          '-NoProfile',
-          '-NonInteractive',
-          '-EncodedCommand',
-          encodedCommand(SHOW_FOLDER_SCRIPT),
-        ],
-        { env: { [FOLDER_VARIABLE]: folder.replace(/\//g, '\\') } },
-      )
-      if (shown.exitCode !== 0) {
-        throw new Error(
-          /Explorer did not open[^\r\n]*/.exec(shown.stderr)?.[0] ??
-            `PowerShell exited with ${shown.exitCode}`,
-        )
-      }
-    } else {
-      const system = await $.process.run(['uname', '-s'])
-      const opener = system.stdout.trim() === 'Darwin' ? 'open' : 'xdg-open'
-      const shown = await $.process.run([opener, folder])
-      if (shown.exitCode !== 0) {
-        throw new Error(shown.stderr.trim() || `${opener} exited with ${shown.exitCode}`)
-      }
-    }
+    await showFolder($, await traceRoot($))
     await update($, traceError, () => null)
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)

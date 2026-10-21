@@ -231,6 +231,8 @@ function tracedEngine(
     /** The variables each command was given. */
     env: [] as Record<string, string>[],
     system: 'Linux',
+    /** Programs that are not installed: running one rejects. */
+    absent: [] as string[],
   }
   mock.clock(on, { now: 1_000 })
   mock.store(on)
@@ -272,14 +274,20 @@ function tracedEngine(
   on('command.list', async () => ({ value: [] }))
   on('prompt.compose', async () => ({ sections: [] }))
   on('process.run', async (_$, e) => {
+    const program = e.argv[0]!
     settings.ran.push([...e.argv])
     settings.env.push({ ...e.init?.env })
+    if (settings.absent.includes(program)) throw new Error(`spawn ${program} ENOENT`)
+    const stdout: Record<string, string> = {
+      uname: `${settings.system}\n`,
+      wslpath: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude\\desktop-statusline\\traces\n',
+    }
 
     return {
       value: {
-        exitCode: e.argv[0] === 'uname' || e.argv[0] === 'powershell.exe' ? 0 : 1,
-        stdout: e.argv[0] === 'uname' ? `${settings.system}\n` : '',
-        stderr: e.argv[0] === 'xdg-open' ? 'no method available for opening' : '',
+        exitCode: program === 'xdg-open' || program === 'git' ? 1 : 0,
+        stdout: stdout[program] ?? '',
+        stderr: program === 'xdg-open' ? 'no method available for opening' : '',
         isStdoutTruncated: false,
         isStderrTruncated: false,
       },
@@ -493,7 +501,7 @@ test('the traces folder opens in Finder on macOS and through xdg-open elsewhere'
   expect(opened()).toEqual([['open', expect.stringMatching(/traces$/)]])
 
   // A file manager that fails says why.
-  settings.system = 'Linux'
+  settings.system = 'Linux 6.8.0-45-generic'
   await pane.press({ key: 'trace-folder' })
   expect(opened()[1]).toEqual(['xdg-open', expect.stringMatching(/traces$/)])
   expect(
@@ -502,6 +510,54 @@ test('the traces folder opens in Finder on macOS and through xdg-open elsewhere'
       text: 'Could not open the traces folder: no method available for opening',
     }),
   ).toBeDefined()
+
+  // So does a desktop with no opener at all.
+  settings.absent = ['xdg-open']
+  await pane.press({ key: 'trace-folder' })
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: 'Could not open the traces folder: xdg-open is not installed.',
+    }),
+  ).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('under WSL the traces folder opens in Windows Explorer, as Windows reaches it', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { WSLENV: 'USERPROFILE/p' })
+  settings.system = 'Linux 6.6.87.2-microsoft-standard-WSL2'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  const opened = () => settings.ran.filter(argv => argv[0] !== 'git' && argv[0] !== 'uname')
+  const script = [
+    '-NoProfile',
+    '-NonInteractive',
+    '-EncodedCommand',
+    encodedCommand(SHOW_FOLDER_SCRIPT),
+  ]
+
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()).toEqual([
+    ['wslpath', '-w', expect.stringMatching(/\/home\/me\/\.claude\/desktop-statusline\/traces$/)],
+    ['powershell.exe', ...script],
+  ])
+  // The folder crosses to Windows only as WSLENV names it, beside what it named before.
+  expect(settings.env.at(-1)).toEqual({
+    [FOLDER_VARIABLE]: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude\\desktop-statusline\\traces',
+    WSLENV: `USERPROFILE/p:${FOLDER_VARIABLE}`,
+  })
+  expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
+
+  // With Windows left out of the PATH, PowerShell is found where WSL mounts it.
+  settings.absent = ['powershell.exe']
+  await pane.press({ key: 'trace-folder' })
+  expect(opened().slice(-2)).toEqual([
+    ['powershell.exe', ...script],
+    ['/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe', ...script],
+  ])
+  expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
 
   await pane.unmount()
 })
