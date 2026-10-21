@@ -36,9 +36,7 @@ the figures a terminal status line shows, its text in the app's own theme colour
 
 The desktop app's own Context card lists what fills the context window. Click the
 percentage beside the meter to open the **Context details** pane for what that card
-cannot show. The window sits on top as a bar, counted as `/context` counts it: hover
-a segment to see what it holds, each row a grey segment draws named in turn. Under it
-are four tabs:
+cannot show, in four tabs, each with its size as `/context` counts it:
 
 - **Tools**: every built-in tool with a one-line summary and its approximate size,
   grouped as in the context, deferred (loaded on demand), and removed, each group open
@@ -55,7 +53,8 @@ are four tabs:
   added to them when the request was sent, such as the billing header, the line that
   introduces Claude, an output style and the desktop app's own instructions.
 - **Skills**: each skill's listing as Claude sees it, read-only for now: the ones you
-  installed apart from the ones Claude Code and the desktop app bring.
+  installed apart from the ones Claude Code and the desktop app bring, each group open
+  until you close it.
 - **Trace**: every request the session sends to the model, newest first, the
   conversation's apart from side requests such as titles and subagents, with what it
   added to the conversation, what came back, and its tokens, cost and time. Open one
@@ -94,7 +93,7 @@ path, and the next session makes it again, empty.
 A trace holds the whole conversation, file contents and command output included.
 It never leaves your machine, but anyone who can read your files can read it.
 
-![The Context details pane: the context window as a bar, the tabs, and the Tools tab with Remove beside each tool](docs/context-pane.png)
+![The Context details pane: its tabs, and the Tools tab's In context group with Remove beside each tool](docs/context-pane.png)
 
 It draws on the desktop surface only. In the terminal it stays out of the way,
 so a `statusLine` command in your settings keeps working there.

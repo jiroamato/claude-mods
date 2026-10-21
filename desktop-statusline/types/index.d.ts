@@ -11,8 +11,6 @@ export type ContextRow = {
   name: string
   tokens: number
   kind: RowKind
-  /** The swatch's colour: a theme key, or a fixed chart colour for the four largest rows. */
-  color: string
 }
 
 /** One piece of a row, listed when the row is expanded. */

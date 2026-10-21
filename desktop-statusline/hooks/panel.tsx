@@ -10,7 +10,7 @@ import type {
   TracePlaces,
   TraceState,
 } from '../types'
-import { FREE, barSegments, formatShare, formatTokens } from './context'
+import { formatShare, formatTokens } from './context'
 import { DISCLOSURE_ROWS } from './disclosure'
 import type { DisclosureProps } from './disclosure'
 import type { ReaderBarProps } from './reader'
@@ -26,17 +26,7 @@ export const PANE_TITLE = 'Context details'
 type Ui = ElementTable<'desktop'>
 
 // Sizes in cells: across in character widths, down in rows.
-// The desktop Context card's bar: 4px tall, its pills a pixel apart, the
-// smallest about 2px wide.
-const BAR_HEIGHT = 0.215
-const BAR_GAP = 0.08
-const BAR_MIN_SEGMENT = 0.25
 const TOKENS_COLUMNS = 7
-// A pill's card: as wide as its text, in footnote type a little narrower than
-// a column a character, and no wider than the pane.
-const CARD_CHARS_PER_COLUMN = 0.75
-// The pane's padding and the card's own border, which the card leaves inside the pane.
-const CARD_EDGE_COLUMNS = 4
 // A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
 // A one-pixel rule between the pieces a tab lists, in the border's own faint colour.
@@ -70,96 +60,6 @@ function rowTokens(snapshot: ContextSnapshot | null, name: string | undefined): 
   const row = snapshot?.rows.find(one => one.name === name)
 
   return row ? row.tokens : null
-}
-
-/** `Context window   72.6k / 1M (7%)`. */
-function Header(props: { ui: Ui; snapshot: ContextSnapshot }) {
-  const { Box, Text } = props.ui
-  const snapshot = props.snapshot
-
-  return (
-    <Box flexDirection="row" alignItems="center" columnGap={2}>
-      <Box flexGrow={1} flexShrink={1} minWidth={0}>
-        <Text color="text" size="heading">
-          Context window
-        </Text>
-      </Box>
-      <Text color="subtle" tabular>
-        {`${formatTokens(snapshot.used)} / ${formatTokens(snapshot.window)} (${snapshot.percent}%)`}
-      </Text>
-    </Box>
-  )
-}
-
-/**
- * The window as one bar, drawn as the desktop's own Context card draws it: a
- * rounded pill per segment, a hair from the next, then the free space as a
- * pill of bare track. Nothing in it is positioned: the desktop draws a
- * positioned Box on a layer of its own, which shifts its colours.
- */
-function Bar(props: { ui: Ui; snapshot: ContextSnapshot; columns: number }) {
-  const { Box, Text } = props.ui
-  const window = props.snapshot.window
-  const free = props.snapshot.rows.find(one => one.kind === 'free')
-  const segments = [
-    ...barSegments(props.snapshot.rows),
-    ...(free && free.tokens > 0 ? [{ color: FREE, tokens: free.tokens, rows: [free] }] : []),
-  ]
-  // Each segment grows by its share of the window, in thousandths: a Box's
-  // flexGrow is capped, where a token count is not.
-  const grow = (tokens: number) => (tokens / Math.max(1, window)) * 1000
-  // Only a Box with a border has rounded corners; a clear one lets the colour
-  // fill the whole Box, so each pill keeps the bar's full height.
-  const pill = { borderStyle: 'round', borderColor: CLEAR, padding: 0 } as const
-
-  return (
-    <Box flexDirection="row" width="100%" height={BAR_HEIGHT} columnGap={BAR_GAP}>
-      {segments.map(segment => {
-        // One line, the rows a grey pill draws side by side: the card sits
-        // between the bar and the pane's top, where a second line is cut off.
-        const text = segment.rows
-          .map(
-            row => `${row.name}: ${formatTokens(row.tokens)}, ${formatShare(row.tokens, window)}`,
-          )
-          .join('  ·  ')
-
-        return (
-          // Keyed, so the pointer over a pill shows its card, as the desktop's
-          // own Context card names the segment under the pointer.
-          <Box
-            key={`bar-${slug(segment.rows[0]!.name)}`}
-            flexGrow={grow(segment.tokens)}
-            flexShrink={segment.color === FREE ? 1 : 0}
-            minWidth={BAR_MIN_SEGMENT}
-            {...pill}
-            backgroundColor={segment.color}
-          >
-            <Box
-              // The desktop places the card itself, above the pill. Its width
-              // is the text's own: a card takes no width from a pill this thin.
-              position="absolute"
-              bottom={1}
-              left={0}
-              width={Math.min(
-                props.columns - CARD_EDGE_COLUMNS,
-                Math.ceil(text.length * CARD_CHARS_PER_COLUMN) + 2,
-              )}
-              display="none"
-              hover={{ display: 'flex' }}
-              borderStyle="round"
-              backgroundColor="userMessageBackground"
-              paddingX={1}
-              paddingY={0}
-            >
-              <Text color="text" size="footnote" wrap="truncate-end">
-                {text}
-              </Text>
-            </Box>
-          </Box>
-        )
-      })}
-    </Box>
-  )
 }
 
 /**
@@ -579,8 +479,6 @@ export type ContextPaneProps = {
   /** The page of the open request or section's text. */
   page: number
   onPage: (page: number) => void
-  /** The pane's width in columns. */
-  columns: number
   /** The request read whole, as the rows on screen and around them; null while the tabs show. */
   reader: ReaderView | null
   onRead: (seq: number) => void
@@ -964,8 +862,9 @@ function SkillsTab(props: ContextPaneProps) {
         children: groups.map(group =>
           Group({
             ui: props.ui,
-            id: `skills-${group.origin}`,
+            id: `${GROUP_PREFIX}skills-${group.origin}`,
             label: group.label,
+            isOpen: !props.collapsed.includes(`${GROUP_PREFIX}skills-${group.origin}`),
             count: group.skills.length,
             noun: 'skill',
             tokens: sumTokens(group.skills),
@@ -1210,9 +1109,9 @@ const TRACE_GROUPS: readonly { isMain: boolean; label: string }[] = [
 ]
 
 /**
- * The pane: the window as a bar, then a tab for each thing the desktop's own
- * Context card cannot show: the built-in tools (which can be removed), the
- * system prompt as sent, the skills' listings and the conversation's trace.
+ * The pane: a tab for each thing the desktop's own Context card cannot show:
+ * the built-in tools (which can be removed), the system prompt as sent, the
+ * skills' listings and the conversation's trace.
  */
 export function ContextPane(props: ContextPaneProps) {
   const { Box, Text } = props.ui
@@ -1224,7 +1123,6 @@ export function ContextPane(props: ContextPaneProps) {
       onStep: props.onStep,
     })
   }
-  const snapshot = props.snapshot
   const content = {
     tools: ToolsTab,
     prompt: PromptTab,
@@ -1234,16 +1132,6 @@ export function ContextPane(props: ContextPaneProps) {
 
   return (
     <Box flexDirection="column" rowGap={1} paddingX={1}>
-      {snapshot ? (
-        // Room above the heading, so a pill's card has a line between the bar
-        // and the pane's top.
-        <Box flexDirection="column" rowGap={1} paddingTop={1}>
-          {Header({ ui: props.ui, snapshot })}
-          {Bar({ ui: props.ui, snapshot, columns: props.columns })}
-        </Box>
-      ) : (
-        <Text color="secondaryText">The breakdown appears after Claude's first reply.</Text>
-      )}
       {Tabs(props)}
       {props.error && <Text color="error">{props.error}</Text>}
       <Box flexDirection="column" paddingTop={1}>

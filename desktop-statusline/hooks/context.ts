@@ -17,17 +17,6 @@ import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
 const SKILL_LINE_MAX = 110
 
-// The desktop's own /context card colours its four largest rows from its
-// palette (blue-400, orange-400, aqua-400, yellow-350) and the rest in its warm
-// grey (gray-350): solid for the rest of what is in the window, then fainter for
-// the reserve and what loads on demand, and faintest for the free space. On the
-// card's dark surface the faint ones land on its #5f5e5a and #292827; being
-// see-through, they lighten on a light one.
-const CHART = ['#3987e5', '#d95926', '#199e70', '#c98500'] as const
-const OTHER_USED = '#97958d'
-const RESERVED = '#97958d91'
-export const FREE = '#97958d27'
-
 const KIND_ORDER: Record<RowKind, number> = { used: 0, buffer: 1, free: 2, deferred: 3 }
 
 // Where a skill comes from, in words, by the engine's name for the source.
@@ -104,49 +93,15 @@ function estimate(text: string): number {
 }
 
 /**
- * /context's rows in the order its card lists them, each with its swatch:
- * what is in the window largest first, then the reserve, the free space and
- * what loads on demand.
+ * /context's rows in the order its card lists them: what is in the window
+ * largest first, then the reserve, the free space and what loads on demand.
  */
 export function contextRows(breakdown: SessionContextBreakdown): ContextRow[] {
-  const rows = breakdown.categories
+  return breakdown.categories
     .filter(row => row.tokens > 0)
     .map(row => ({ name: row.name, tokens: row.tokens, kind: row.kind }))
     .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.tokens - a.tokens)
-  let rank = 0
-
-  return rows.map(row => {
-    if (row.kind !== 'used') return { ...row, color: row.kind === 'free' ? FREE : RESERVED }
-    const color = CHART[rank] ?? OTHER_USED
-    rank += 1
-
-    return { ...row, color }
-  })
 }
-
-/**
- * What the window holds as a bar draws it, left to right: each row in it,
- * neighbouring rows of one colour as one segment, as the desktop's card draws
- * its greys. The free space is the track left over.
- */
-export function barSegments(rows: readonly ContextRow[]): BarSegment[] {
-  const segments: BarSegment[] = []
-  for (const row of rows) {
-    if (row.kind !== 'used' && row.kind !== 'buffer') continue
-    const last = segments.at(-1)
-    if (last?.color === row.color) {
-      last.tokens += row.tokens
-      last.rows.push(row)
-    } else {
-      segments.push({ color: row.color, tokens: row.tokens, rows: [row] })
-    }
-  }
-
-  return segments
-}
-
-/** One pill of the bar: its colour, its tokens, and the rows it draws. */
-export type BarSegment = { color: string; tokens: number; rows: ContextRow[] }
 
 /** A section's title: its own heading, else its id in words. */
 export function sectionTitle(section: Pick<PromptComposeSection, 'id' | 'text'>): string {

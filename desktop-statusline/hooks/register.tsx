@@ -955,7 +955,6 @@ export const register: Register = on => {
         ),
       onExpand: key => void toggleExpanded($, key),
       page: shownPage,
-      columns: e.props.bodyColumns,
       reader: readingSeq === null || shown !== 'trace' ? null : await readerView(),
       onRead: seq => void openReader($, seq),
       onSearch: query => void searchReader($, query),

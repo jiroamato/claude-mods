@@ -265,19 +265,17 @@ test('a tool put back that the session started without waits for a new session',
 test('the snapshot lists the rows as /context does, and what the pane details', () => {
   const snapshot = buildSnapshot(breakdown(), [DEPLOY], SECTIONS)
   expect(snapshot).toMatchObject({ used: 93_600, window: 200_000, percent: 46 })
-  // In the window largest first, the four largest in the desktop's chart
-  // colours and the rest in its grey; then the reserve, the free space and
-  // what loads on demand, in fainter steps of that grey.
-  expect(snapshot.rows.map(one => [one.name, one.color])).toEqual([
-    ['Messages', '#3987e5'],
-    ['System tools', '#d95926'],
-    ['System prompt', '#199e70'],
-    ['Skills', '#c98500'],
-    ['MCP tools', '#97958d'],
-    ['Memory files', '#97958d'],
-    ['Autocompact buffer', '#97958d91'],
-    ['Free space', '#97958d27'],
-    ['MCP tools (deferred)', '#97958d91'],
+  // In the window largest first; then the reserve, the free space and what loads on demand.
+  expect(snapshot.rows.map(one => one.name)).toEqual([
+    'Messages',
+    'System tools',
+    'System prompt',
+    'Skills',
+    'MCP tools',
+    'Memory files',
+    'Autocompact buffer',
+    'Free space',
+    'MCP tools (deferred)',
   ])
   // An empty section is not sent, so it is not listed.
   expect(snapshot.prompt.map(one => [one.id, one.title, one.text])).toEqual([
@@ -377,15 +375,13 @@ test('the meter has no hover card; the percentage opens the pane on its Tools ta
   await band.unmount()
 })
 
-test('the pane draws the window as a bar of pills over its tabs', async ($, on) => {
+test('the pane opens on its tabs, each naming what /context counts for it', async ($, on) => {
   engine(on, { text: '{}' })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  expect(
-    await pane.find({ type: 'Box', text: /^Context window93\.6k \/ 200k \(46%\)$/ }),
-  ).toBeDefined()
-  // Each tab names what /context counts for it.
+  // No bar of the window over them: the tabs lead.
+  expect(await pane.find({ type: 'Text', text: 'Context window' })).toBeUndefined()
   const tabs = (await pane.findAll({ type: 'Client' })).filter(one =>
     String(one.props.key).startsWith('tab-'),
   )
@@ -396,45 +392,6 @@ test('the pane draws the window as a bar of pills over its tabs', async ($, on) 
     { id: 'skills', label: 'Skills', figure: '4k', isOpen: false },
     { id: 'trace', label: 'Trace', figure: null, isOpen: false, next: null },
   ])
-  // A pill per segment, largest first, then the free space; no pill
-  // positioned, or the desktop draws it on a layer of its own and shifts its colours.
-  const boxes = await pane.findAll({ type: 'Box' })
-  const bar = boxes.find(one => one.props.height === 0.215)
-  const pills = (bar!.children ?? []) as unknown as {
-    props: { backgroundColor?: string; borderStyle?: string; position?: string }
-    children?: unknown[]
-  }[]
-  expect(pills.every(one => one.props.borderStyle === 'round')).toBe(true)
-  expect(pills.every(one => one.props.position === undefined)).toBe(true)
-  expect(pills.map(one => one.props.backgroundColor)).toEqual([
-    '#3987e5',
-    '#d95926',
-    '#199e70',
-    '#c98500',
-    '#97958d',
-    '#97958d91',
-    '#97958d27',
-  ])
-  // Under the pointer each pill shows a card naming the rows it draws: a grey
-  // pill draws several.
-  const card = async (key: string) => {
-    const shown = pills
-      .find(one => (one.props as { key?: string }).key === key)
-      ?.children?.find(
-        (one): one is { props: Record<string, unknown>; hover?: unknown } =>
-          typeof one === 'object' && one !== null && 'props' in one,
-      )
-
-    return { props: shown?.props, hover: shown?.hover, text: (await pane.find({ key }))?.text }
-  }
-  const messages = await card('bar-messages')
-  expect(messages.props).toMatchObject({ position: 'absolute', display: 'none' })
-  expect(messages.hover).toEqual({ display: 'flex' })
-  expect(messages.text).toBe('Messages: 60k, 30.0%')
-  expect((await card('bar-mcp-tools')).text).toBe(
-    'MCP tools: 900, 0.4%  ·  Memory files: 700, 0.4%',
-  )
-  expect((await card('bar-free-space')).text).toBe('Free space: 100k, 50.0%')
 
   await pane.unmount()
 })
@@ -520,14 +477,43 @@ test('the Skills tab lists each skill, yours apart from the ones Anthropic ships
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
   await openTab(pane, 'skills')
+  const heading = async (origin: string) =>
+    (await pane.find({ type: 'Client', key: `disclose-group-skills-${origin}` }))?.props.props as
+      { label: string; figure: string; isOpen: boolean } | undefined
   expect(await pane.find({ type: 'Text', text: 'Ships the app to production.' })).toBeDefined()
-  expect((await pane.find({ key: 'skills-yours' }))?.text).toMatch(
-    /^User installed skills2 skills · ~420deploy/,
-  )
-  expect((await pane.find({ key: 'skills-anthropic' }))?.text).toMatch(
-    /^Anthropic skills1 skill · ~90plugin-authoring/,
-  )
-  expect(await pane.find({ key: 'skills-organization' })).toBeUndefined()
+  expect(await heading('yours')).toMatchObject({
+    label: 'User installed skills',
+    figure: '2 skills · ~420',
+    isOpen: true,
+  })
+  expect((await pane.find({ key: 'group-skills-yours' }))?.text).toMatch(/deploy/)
+  expect(await heading('anthropic')).toMatchObject({
+    label: 'Anthropic skills',
+    figure: '1 skill · ~90',
+    isOpen: true,
+  })
+  expect((await pane.find({ key: 'group-skills-anthropic' }))?.text).toMatch(/plugin-authoring/)
+  expect(await pane.find({ key: 'group-skills-organization' })).toBeUndefined()
+
+  // Each group closes on its own, and opens again.
+  await pane.pointer({
+    type: 'down',
+    x: 5,
+    y: 0,
+    button: 'left',
+    in: 'disclose-group-skills-yours',
+  })
+  expect((await heading('yours'))?.isOpen).toBe(false)
+  expect(await pane.find({ type: 'Text', text: 'Ships the app to production.' })).toBeUndefined()
+  expect((await heading('anthropic'))?.isOpen).toBe(true)
+  await pane.pointer({
+    type: 'down',
+    x: 5,
+    y: 0,
+    button: 'left',
+    in: 'disclose-group-skills-yours',
+  })
+  expect(await pane.find({ type: 'Text', text: 'Ships the app to production.' })).toBeDefined()
 
   await pane.unmount()
 })
@@ -712,16 +698,23 @@ test('a deny added by hand is picked up when the pane opens', async ($, on) => {
   await band.unmount()
 })
 
-test('the pane says when there is no breakdown yet, and still lists the tools', async ($, on) => {
+test('with no breakdown yet, the pane still lists the tools, its tabs without sizes', async ($, on) => {
   // No session has started, so no breakdown has been read.
   engine(on, { text: '{}' })
   await $.tool.describe({ tool: 'Bash', description: 'Executes a command.', provider: ENGINE })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  expect(
-    await pane.find({ type: 'Text', text: /The breakdown appears after Claude's first reply/ }),
-  ).toBeDefined()
   expect((await pane.find({ key: 'toggle-Bash' }))?.props).toMatchObject({ label: 'Remove' })
+  expect((await pane.find({ type: 'Client', key: 'tab-tools' }))?.props.props).toMatchObject({
+    figure: null,
+  })
+  await openTab(pane, 'prompt')
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: "The system prompt appears after Claude's first reply.",
+    }),
+  ).toBeDefined()
 
   await pane.unmount()
 })
