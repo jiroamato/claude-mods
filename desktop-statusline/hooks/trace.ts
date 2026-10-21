@@ -50,40 +50,66 @@ export function isTraceOn(settings: unknown): boolean {
 }
 
 /**
+ * What the person had under each of tracing's names before it was turned on:
+ * the value, or null where none was set. Kept whole, a value equal to
+ * tracing's included, so off gives back exactly what on found.
+ */
+export type TraceEnvBefore = Record<string, unknown>
+
+/**
  * The settings file's text with tracing's `env` values added or taken out,
- * everything else kept. Off takes out only what still holds tracing's value,
- * so a value the person set by hand stays.
+ * everything else kept, and what on found there, to give back.
+ *
+ * On notes every name's value first; pressed again while on, it keeps what it
+ * noted then. Off gives back what was noted for each name that still holds
+ * tracing's value, so one the person changed since stays theirs. A name with
+ * nothing noted is taken out, and `isLost` says so.
  */
 export function editTraceEnv(
   text: string,
   isOn: boolean,
-  before: Record<string, string> = {},
-): { text: string; before: Record<string, string> } {
+  before?: TraceEnvBefore,
+): { text: string; before: TraceEnvBefore | null; isLost: boolean } {
   const settings = parseSettings(text)
   const env = settings.env ?? {}
   if (!isPlainObject(env)) {
     throw new SettingsShapeError('env in settings.json is not an object, so it was left as is.')
   }
+  // Already on: what it holds now is tracing's, not the person's to note.
+  if (isOn && isTraceOn(settings)) return { text, before: before ?? null, isLost: false }
   const next: Record<string, unknown> = { ...env }
-  // On, what the person had set under one of tracing's names is kept, to give
-  // back; off, a value tracing set goes, or the person's own comes back. One
-  // the person changed since is theirs, and stays.
-  const replaced: Record<string, string> = {}
+  const noted: TraceEnvBefore = {}
+  let isLost = false
   for (const [key, value] of Object.entries(TRACE_ENV)) {
+    const had = next[key]
+    const known = before !== undefined && Object.hasOwn(before, key)
     if (isOn) {
-      const had = next[key]
-      if (typeof had === 'string' && had !== value) replaced[key] = had
+      // Tracing's value left from an earlier turn on keeps what was noted then.
+      noted[key] = had === value && known ? before[key] : (had ?? null)
       next[key] = value
-    } else if (next[key] === value) {
-      if (before[key] !== undefined) next[key] = before[key]
-      else delete next[key]
+    } else if (had === value) {
+      const given = known ? before[key] : null
+      if (given === null || given === undefined) delete next[key]
+      else next[key] = given
+      if (!known) isLost = true
     }
   }
-  const kept = isOn ? { ...before, ...replaced } : {}
-  if (JSON.stringify(next) === JSON.stringify(env)) return { text, before: kept }
+  const kept = isOn ? noted : null
+  if (JSON.stringify(next) === JSON.stringify(env)) return { text, before: kept, isLost }
   settings.env = next
 
-  return { text: writeSettings(text, settings), before: kept }
+  return { text: writeSettings(text, settings), before: kept, isLost }
+}
+
+/** The names whose own value of the person's tracing holds in place of, by what on noted. */
+export function replacedNames(before: unknown): string[] {
+  if (!isPlainObject(before)) return []
+
+  return Object.entries(TRACE_ENV)
+    .filter(
+      ([key, value]) => before[key] !== null && before[key] !== undefined && before[key] !== value,
+    )
+    .map(([key]) => key)
 }
 
 /** A request the receiver kept: what trace/store.mjs writes for each. */

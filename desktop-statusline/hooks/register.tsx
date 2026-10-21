@@ -38,6 +38,7 @@ import {
   findMatches,
   promptRecord,
   readerRanges,
+  replacedNames,
   sentPrompt,
   sourceLabel,
   summarize,
@@ -49,6 +50,7 @@ import {
 import {
   deniedTools,
   editDeny,
+  isPlainObject,
   KEPT_TOOLS,
   parseSettings,
   SettingsShapeError,
@@ -80,12 +82,17 @@ const readerSearch = atom({ plugin: 'desktop-statusline', key: 'readerSearch' } 
 })
 const tab = atom({ plugin: 'desktop-statusline', key: 'tab' } as const, 'tools' as PaneTab)
 const PANE_TABS: readonly PaneTab[] = ['tools', 'prompt', 'skills', 'trace']
-const NO_TRACE: TraceState = { status: 'off', items: [], prompt: null, view: null }
+const NO_TRACE: TraceState = { status: 'off', items: [], prompt: null, view: null, replaced: [] }
 const trace = atom({ plugin: 'desktop-statusline', key: 'trace' } as const, NO_TRACE)
 const traceError = atom({ plugin: 'desktop-statusline', key: 'traceError' } as const, null)
 const folderError = atom({ plugin: 'desktop-statusline', key: 'folderError' } as const, null)
-/** The store key under which the telemetry values tracing replaced are kept, to give back. */
+/** The store key under which what tracing found under its names is kept, to give back. */
 const TRACE_ENV_BEFORE = 'trace-env-before'
+/** Said when off had nothing noted to give back, so took tracing's values out alone. */
+const TRACE_ENV_LOST =
+  'Tracing is off, but what you had under its settings before it was turned on was not found ' +
+  '(the plugin’s store was cleared, or another copy of the plugin turned it on), so its values ' +
+  'were taken out and none of yours put back. Check the `env` block of settings.json.'
 const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
@@ -605,12 +612,18 @@ function refreshTrace($: EngineInterface): Promise<void> {
       if (status === 'on' && endpoint && endpoint !== TRACE_ENV.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT) {
         status = 'elsewhere'
       }
+      // The person's own values tracing holds in place of while it is on.
+      const replaced =
+        status === 'off'
+          ? []
+          : replacedNames(await $.store.get(TRACE_ENV_BEFORE).catch(() => undefined))
       if (status !== 'on') {
         // Off, the list goes: what it held is no longer this tab's to show.
         await update($, trace, current => ({
           ...current,
           status,
           items: status === 'off' ? [] : current.items,
+          replaced,
         }))
         return
       }
@@ -676,7 +689,8 @@ function refreshTrace($: EngineInterface): Promise<void> {
       }
       const token = await viewToken($)
       const view = token ? { session, token } : null
-      await update($, trace, () => ({ status, items: records.map(one => one.item), prompt, view }))
+      const items = records.map(one => one.item)
+      await update($, trace, () => ({ status, items, prompt, view, replaced }))
     } catch {
       // The folder could not be read just now; the next turn tries again.
     }
@@ -786,16 +800,6 @@ function traceRequestText(seq: number): string | null {
   return cached ? requestText(cached.record) : null
 }
 
-/** Whether a kept value is an object of strings, as the telemetry values tracing replaced are. */
-function isPlainRecord(value: unknown): value is Record<string, string> {
-  return (
-    value !== null &&
-    typeof value === 'object' &&
-    !Array.isArray(value) &&
-    Object.values(value).every(one => typeof one === 'string')
-  )
-}
-
 /** Turns tracing on or off in the user settings; new sessions follow it. */
 async function setTracing($: EngineInterface, isOn: boolean): Promise<void> {
   await serially(async () => {
@@ -803,15 +807,13 @@ async function setTracing($: EngineInterface, isOn: boolean): Promise<void> {
       const path = await settingsPath($)
       const text = await readSettingsText($)
       const kept = await $.store.get(TRACE_ENV_BEFORE).catch(() => undefined)
-      const before = isPlainRecord(kept) ? kept : {}
-      const next = editTraceEnv(text, isOn, before)
+      const next = editTraceEnv(text, isOn, isPlainObject(kept) ? kept : undefined)
+      // What on found is kept before the file changes, so tracing is never on
+      // with nothing to give back; off forgets it once it is given back.
+      if (isOn && next.before) await $.store.set(TRACE_ENV_BEFORE, next.before)
       if (next.text !== text) await $.fs.write(path, next.text)
-      // What tracing replaced, kept until it is given back; then nothing.
-      if (isOn && Object.keys(next.before).length > 0) {
-        await $.store.set(TRACE_ENV_BEFORE, next.before)
-      }
       if (!isOn) await $.store.delete(TRACE_ENV_BEFORE).catch(() => undefined)
-      await update($, traceError, () => null)
+      await update($, traceError, () => (next.isLost ? TRACE_ENV_LOST : null))
     } catch (error) {
       const reason =
         error instanceof SettingsShapeError

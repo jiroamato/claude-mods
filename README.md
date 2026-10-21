@@ -69,9 +69,13 @@ cannot show, in four tabs, each with its size as `/context` counts it:
 **Turn on tracing** in the Trace tab turns on Claude Code's own telemetry for the
 sessions you start after it, in the terminal and in the desktop app alike. It adds
 these to the `env` block of your user settings (`~/.claude/settings.json`, or
-`$CLAUDE_CONFIG_DIR`), so they apply globally. **Turn off tracing** takes back the
-ones it set, and puts back any value of your own one of them replaced; a value you
-changed while tracing was on stays as you left it:
+`$CLAUDE_CONFIG_DIR`), so they apply globally. Before it does, it notes what you had
+under each of these names, or that you had nothing, in the plugin's store
+(`~/.claude/plugins/store/`). **Turn off tracing** puts exactly that back: your own
+value, the same as tracing's or not, comes back, and a name you never set goes. A value
+you changed while tracing was on stays as you left it. While tracing holds the place of
+a value of yours, the Trace tab says which. If the store lost what it noted, off takes
+tracing's values out and says it could not put yours back:
 
 | Variable                              | Value                               |
 | ------------------------------------- | ----------------------------------- |

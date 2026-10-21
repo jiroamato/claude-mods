@@ -8,6 +8,7 @@ import {
   RECEIVER_HEALTH,
   RECEIVER_NAME,
   editTraceEnv,
+  replacedNames,
   findMatches,
   isTraceOn,
   promptRecord as tracePromptRecord,
@@ -217,22 +218,67 @@ test('tracing’s switch adds its env values, and off gives back the person’s 
   expect(settings.env.MINE).toBe('1')
   // The file's own indentation stays.
   expect(on.text).toMatch(/^\{\n {4}"env"/)
-  // What it replaced is kept, to give back.
-  expect(on.before).toEqual({ OTEL_LOGS_EXPORTER: 'console' })
+  // Every name is noted, null where the person had nothing.
+  expect(on.before).toEqual({
+    ...Object.fromEntries(Object.keys(TRACE_ENV).map(key => [key, null])),
+    OTEL_LOGS_EXPORTER: 'console',
+  })
+  expect(replacedNames(on.before)).toEqual(['OTEL_LOGS_EXPORTER'])
 
-  const off = editTraceEnv(on.text, false, on.before)
+  const off = editTraceEnv(on.text, false, on.before!)
   const offSettings = JSON.parse(off.text) as { env: Record<string, string> }
   expect(isTraceOn(offSettings)).toBe(false)
   expect(offSettings.env).toEqual({ MINE: '1', OTEL_LOGS_EXPORTER: 'console' })
-  expect(off.before).toEqual({})
+  expect(off).toMatchObject({ before: null, isLost: false })
 
   // A value the person changed while tracing was on is theirs, and stays.
   const changed = editTraceEnv(
     JSON.stringify({ env: { ...TRACE_ENV, OTEL_LOGS_EXPORTER: 'none' } }),
     false,
-    { OTEL_LOGS_EXPORTER: 'console' },
+    on.before!,
   )
   expect(JSON.parse(changed.text).env).toEqual({ OTEL_LOGS_EXPORTER: 'none' })
+})
+
+test('a value of the person’s equal to tracing’s is noted, and stays when tracing goes off', () => {
+  const text = JSON.stringify({ env: { CLAUDE_CODE_ENABLE_TELEMETRY: '1' } })
+  const on = editTraceEnv(text, true)
+  expect(on.before?.CLAUDE_CODE_ENABLE_TELEMETRY).toBe('1')
+  // Not a replacement: the Trace tab does not list it.
+  expect(replacedNames(on.before)).toEqual([])
+
+  const off = editTraceEnv(on.text, false, on.before!)
+  expect(JSON.parse(off.text).env).toEqual({ CLAUDE_CODE_ENABLE_TELEMETRY: '1' })
+})
+
+test('turning tracing on again keeps what it noted the first time', () => {
+  const on = editTraceEnv(JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'console' } }), true)
+  // Pressed again while on: nothing changes, and what was noted stays.
+  const again = editTraceEnv(on.text, true, on.before!)
+  expect(again.text).toBe(on.text)
+  expect(again.before).toEqual(on.before)
+
+  // Turned on again after a hand edit took one value out: tracing's values
+  // still in place keep what was noted, the edited one is noted afresh.
+  const edited = JSON.stringify({
+    env: { ...JSON.parse(on.text).env, OTEL_LOG_RAW_API_BODIES: '0' },
+  })
+  const reOn = editTraceEnv(edited, true, on.before!)
+  expect(reOn.before).toMatchObject({ OTEL_LOGS_EXPORTER: 'console', OTEL_LOG_RAW_API_BODIES: '0' })
+  const off = editTraceEnv(reOn.text, false, reOn.before!)
+  expect(JSON.parse(off.text).env).toEqual({
+    OTEL_LOGS_EXPORTER: 'console',
+    OTEL_LOG_RAW_API_BODIES: '0',
+  })
+})
+
+test('off with nothing noted takes tracing’s values out, and says yours were not found', () => {
+  const lost = editTraceEnv(JSON.stringify({ env: { ...TRACE_ENV, MINE: '1' } }), false)
+  expect(JSON.parse(lost.text).env).toEqual({ MINE: '1' })
+  expect(lost.isLost).toBe(true)
+
+  // Nothing of tracing's left to take out: nothing was lost.
+  expect(editTraceEnv(JSON.stringify({ env: { MINE: '1' } }), false).isLost).toBe(false)
 })
 
 test('the sent prompt reads as the engine’s sections, and what was added around them', () => {
@@ -829,15 +875,39 @@ test('telemetry sent to an endpoint set elsewhere is said, not shown as recorded
 
 test('turning tracing off gives back the telemetry values it replaced', async ($, on) => {
   const settings = tracedEngine(on, {})
-  settings.text = JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'console', MINE: '1' } })
+  const mine = { OTEL_LOGS_EXPORTER: 'console', CLAUDE_CODE_ENABLE_TELEMETRY: '1', MINE: '1' }
+  settings.text = JSON.stringify({ env: mine })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
 
   await pane.press({ key: 'tracing' })
   expect(JSON.parse(settings.text).env.OTEL_LOGS_EXPORTER).toBe('otlp')
+  // The tab says whose place tracing holds, the same value not counted.
+  const note = await pane.find({ type: 'Text', text: /^Tracing set its own values in place/ })
+  expect(note?.text).toMatch(/your +OTEL_LOGS_EXPORTER +; turning it off puts yours back/)
+  expect(note?.text).not.toMatch(/CLAUDE_CODE_ENABLE_TELEMETRY/)
+  expect(note?.text).toMatch(/your log events come here, not to where you had them go\.$/)
+
   await pane.press({ key: 'tracing' })
-  expect(JSON.parse(settings.text).env).toEqual({ OTEL_LOGS_EXPORTER: 'console', MINE: '1' })
+  expect(JSON.parse(settings.text).env).toEqual(mine)
+  expect(await pane.find({ type: 'Text', text: /was not found/ })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+test('turning tracing off with nothing noted says your own values were not put back', async ($, on) => {
+  // Tracing on in the settings, and an empty store: what on noted is gone.
+  const settings = tracedEngine(on, {})
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  await pane.press({ key: 'tracing' })
+  expect(JSON.parse(settings.text).env).toEqual({})
+  expect(
+    await pane.find({ type: 'Text', text: /^Tracing is off, but what you had under its settings/ }),
+  ).toBeDefined()
 
   await pane.unmount()
 })

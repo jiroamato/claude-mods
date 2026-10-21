@@ -943,12 +943,25 @@ function tracingNotes(places: TracePlaces | null): string[] {
       'and the messages exactly as sent, and what came back.',
     `Turning it on adds seven telemetry settings to the \`env\` block of ${settings}, so it ` +
       'applies to every Claude Code session you start after it, in the terminal and in the ' +
-      'desktop app. Turning it off takes them back out, and puts back any of your own it ' +
-      'replaced.',
+      'desktop app. It notes what you had under those names first, and turning it off puts ' +
+      'that back.',
     `The requests go only to a receiver on this machine, which keeps them in ${traces}, a ` +
       'folder per session, until you delete them. They hold the whole conversation, file ' +
       'contents and command output included. Delete the folder to remove them.',
   ]
+}
+
+/** What tracing holds in place of the person's own `env` values, and that off puts them back. */
+function replacedNote(names: string[]): string {
+  const listed = names.map(name => `\`${name}\``)
+  const joined =
+    listed.length === 1 ? listed[0] : `${listed.slice(0, -1).join(', ')} and ${listed.at(-1)}`
+  const isLogs = names.some(name => /^OTEL_(LOGS_EXPORTER|EXPORTER_OTLP_LOGS_)/.test(name))
+
+  return (
+    `Tracing set its own values in place of your ${joined}; turning it off puts yours back.` +
+    (isLogs ? ' Meanwhile your log events come here, not to where you had them go.' : '')
+  )
 }
 
 /** Where traces are kept, said under the list: the one folder, to find or delete. */
@@ -999,6 +1012,10 @@ function TraceTab(props: ContextPaneProps) {
   const traced = props.trace
   const items = [...traced.items].reverse()
   const cost = traced.items.reduce((sum, one) => sum + (one.usage?.costUsd ?? 0), 0)
+  const replaced =
+    traced.status !== 'off' &&
+    traced.replaced.length > 0 &&
+    Intro({ ui: props.ui, text: replacedNote(traced.replaced) })
   const switchButton = (
     <Box flexDirection="row" columnGap={1}>
       {/* Where the traces are, in Explorer, Finder or the desktop's file manager. */}
@@ -1040,6 +1057,7 @@ function TraceTab(props: ContextPaneProps) {
       {traced.status !== 'on' &&
         traced.status !== 'off' &&
         Intro({ ui: props.ui, text: TRACE_NOTE[traced.status] })}
+      {traced.status !== 'on' && replaced}
       {traced.status !== 'on' && switchButton}
       {traced.status === 'on' &&
         Intro({
@@ -1052,6 +1070,7 @@ function TraceTab(props: ContextPaneProps) {
                 'prompt, tools and every message.',
         })}
       {traced.status === 'on' && Intro({ ui: props.ui, text: keptNote(props.places) })}
+      {traced.status === 'on' && replaced}
       {traced.status === 'on' && (
         // The tab's actions on one line: the whole trace, and the switch at the far end.
         <Box flexDirection="row" alignItems="center" columnGap={2}>

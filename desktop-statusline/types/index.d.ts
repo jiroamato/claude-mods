@@ -83,6 +83,8 @@ export type TraceState = {
   prompt: PromptSection[] | null
   /** What links to the trace's pages in the browser; null while none can be served. */
   view: { session: string; token: string } | null
+  /** The names of the person's own `env` values tracing holds in place of while it is on. */
+  replaced: string[]
 }
 
 /** The files tracing touches: the settings it writes, and the one folder its traces are kept in. */
