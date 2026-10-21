@@ -47,8 +47,8 @@ cannot show, in four tabs, each with its size as `/context` counts it:
   project start without it. **Put back** undoes both. A tool the session started
   without comes back in the next session. Deleting the name from `permissions.deny`
   by hand works too. Best done at the start of a session: the tools lead what the
-  prompt cache keeps, so changing them later sends the next request uncached, at
-  full price.
+  prompt cache keeps, so a change mid-session invalidates it, and the next request
+  costs more as it caches the whole conversation again.
 - **Prompt**: the system prompt, section by section, with each section's approximate
   size. Open a section to read its text. With tracing on, it shows the prompt exactly
   as the last request sent it, in two groups: Claude Code's own sections, and what was

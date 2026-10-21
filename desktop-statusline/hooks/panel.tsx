@@ -744,8 +744,8 @@ function ToolsTab(props: ContextPaneProps) {
         // The tools are the start of what the prompt cache keeps, so a change
         // to them leaves nothing of it to read.
         text:
-          'Changing tools at the start of a session is recommended. A mid-session change costs ' +
-          'more, as the prompt cache becomes invalidated.',
+          'Changing tools at the start of a session is recommended. A mid-session change ' +
+          'invalidates the prompt cache, so the next request costs more.',
       })}
       {Groups({
         ui: props.ui,
