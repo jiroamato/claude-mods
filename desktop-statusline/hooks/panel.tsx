@@ -953,15 +953,45 @@ function tracingNotes(places: TracePlaces | null): string[] {
 
 /** What tracing holds in place of the person's own `env` values, and that off puts them back. */
 function replacedNote(names: string[]): string {
-  const listed = names.map(name => `\`${name}\``)
-  const joined =
-    listed.length === 1 ? listed[0] : `${listed.slice(0, -1).join(', ')} and ${listed.at(-1)}`
+  const joined = joinWords(
+    names.map(name => `\`${name}\``),
+    'and',
+  )
   const isLogs = names.some(name => /^OTEL_(LOGS_EXPORTER|EXPORTER_OTLP_LOGS_)/.test(name))
 
   return (
     `Tracing set its own values in place of your ${joined}; turning it off puts yours back.` +
     (isLogs ? ' Meanwhile your log events come here, not to where you had them go.' : '')
   )
+}
+
+/** What each of tracing's names, set otherwise, does to the requests recorded. */
+const DIFFERING_EFFECT: Readonly<Record<string, string>> = {
+  CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH: 'be cut short',
+  OTEL_LOGS_EXPORT_INTERVAL: 'arrive later',
+  OTEL_LOG_RAW_API_BODIES: 'not be recorded',
+  OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: 'not be recorded',
+}
+
+/** Which of tracing's values the settings hold otherwise while it is on, and how to set them back. */
+function differingNote(names: string[]): string {
+  const effects = [...new Set(names.flatMap(name => DIFFERING_EFFECT[name] ?? []))]
+  const effect = effects.length === 0 ? '' : `, so requests may ${joinWords(effects, 'or')}`
+  const [is, it] = names.length === 1 ? ['is', 'it'] : ['are', 'them']
+  const listed = joinWords(
+    names.map(name => `\`${name}\``),
+    'and',
+  )
+
+  return (
+    `${listed} in your settings ${is} not as tracing sets ${it}${effect}. ` +
+    `Turning tracing off and on again sets ${it} back.`
+  )
+}
+
+/** Words as a list in a sentence: `a`, `a and b`, `a, b and c`. */
+function joinWords(words: string[], last: string): string {
+  return words.length === 1 ? words[0]! : `${words.slice(0, -1).join(', ')} ${last} ${words.at(-1)}`
 }
 
 /** Where traces are kept, said under the list: the one folder, to find or delete. */
@@ -982,6 +1012,9 @@ const TRACE_NOTE: Record<Exclude<TraceState['status'], 'on' | 'off'>, string> = 
   'next-session':
     'Tracing is on. This session started before it was, so it is not traced: start a new ' +
     'session to trace it.',
+  emptied:
+    'Tracing is on, but none of this session’s requests are in its traces folder: it was ' +
+    'deleted, or they were not recorded. Each request from now on appears here once it is sent.',
   'no-node':
     'Tracing is on, but the receiver could not start: it runs on Node.js, which was not found ' +
     'on your PATH. Install Node.js, then start a new session.',
@@ -1016,6 +1049,10 @@ function TraceTab(props: ContextPaneProps) {
     traced.status !== 'off' &&
     traced.replaced.length > 0 &&
     Intro({ ui: props.ui, text: replacedNote(traced.replaced) })
+  const differing =
+    traced.status !== 'off' &&
+    traced.differing.length > 0 &&
+    Intro({ ui: props.ui, text: differingNote(traced.differing) })
   const switchButton = (
     <Box flexDirection="row" columnGap={1}>
       {/* Where the traces are, in Explorer, Finder or the desktop's file manager. */}
@@ -1057,6 +1094,7 @@ function TraceTab(props: ContextPaneProps) {
       {traced.status !== 'on' &&
         traced.status !== 'off' &&
         Intro({ ui: props.ui, text: TRACE_NOTE[traced.status] })}
+      {traced.status !== 'on' && differing}
       {traced.status !== 'on' && replaced}
       {traced.status !== 'on' && switchButton}
       {traced.status === 'on' &&
@@ -1070,6 +1108,7 @@ function TraceTab(props: ContextPaneProps) {
                 'prompt, tools and every message.',
         })}
       {traced.status === 'on' && Intro({ ui: props.ui, text: keptNote(props.places) })}
+      {traced.status === 'on' && differing}
       {traced.status === 'on' && replaced}
       {traced.status === 'on' && (
         // The tab's actions on one line: the whole trace, and the switch at the far end.

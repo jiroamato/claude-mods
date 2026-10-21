@@ -29,8 +29,10 @@ import { TAB_PREFIX } from './tabs'
 import type { TabPick } from './tabs'
 import type { RowMatch, TraceRecord } from './trace'
 import {
+  differingNames,
   editTraceEnv,
   isMainSource,
+  isRoutedHere,
   isTraceOn,
   RECEIVER_HEALTH,
   RECEIVER_NAME,
@@ -82,7 +84,14 @@ const readerSearch = atom({ plugin: 'desktop-statusline', key: 'readerSearch' } 
 })
 const tab = atom({ plugin: 'desktop-statusline', key: 'tab' } as const, 'tools' as PaneTab)
 const PANE_TABS: readonly PaneTab[] = ['tools', 'prompt', 'skills', 'trace']
-const NO_TRACE: TraceState = { status: 'off', items: [], prompt: null, view: null, replaced: [] }
+const NO_TRACE: TraceState = {
+  status: 'off',
+  items: [],
+  prompt: null,
+  view: null,
+  replaced: [],
+  differing: [],
+}
 const trace = atom({ plugin: 'desktop-statusline', key: 'trace' } as const, NO_TRACE)
 const traceError = atom({ plugin: 'desktop-statusline', key: 'traceError' } as const, null)
 const folderError = atom({ plugin: 'desktop-statusline', key: 'folderError' } as const, null)
@@ -596,6 +605,28 @@ async function traceFolder($: EngineInterface): Promise<{ session: string; folde
 }
 
 /**
+ * Whether this process's telemetry started sending its log events to the
+ * receiver, read from its environment at the module's first `session.start`,
+ * which fires before the first prompt: the settings' `env` as the process
+ * started, since a later change to the settings reaches its environment but
+ * not its telemetry. Null before it is read, or when it could not be.
+ */
+let startedTraced: Promise<boolean | null> = Promise.resolve(null)
+let hasReadStart = false
+
+/** Reads whether telemetry was sent here as this process started; once, at the first `session.start`. */
+function readStartedTraced($: EngineInterface): void {
+  if (hasReadStart) return
+  hasReadStart = true
+  startedTraced = (async () =>
+    isRoutedHere({
+      CLAUDE_CODE_ENABLE_TELEMETRY: await $.env.get('CLAUDE_CODE_ENABLE_TELEMETRY'),
+      OTEL_LOGS_EXPORTER: await $.env.get('OTEL_LOGS_EXPORTER'),
+      OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: await $.env.get('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT'),
+    }))().catch(() => null)
+}
+
+/**
  * Reads this session's trace from the receiver's folder: what tracing's
  * switch says, every request recorded, and the system prompt the last main
  * request sent. One reading at a time; a request already read is read again
@@ -612,11 +643,16 @@ function refreshTrace($: EngineInterface): Promise<void> {
       if (status === 'on' && endpoint && endpoint !== TRACE_ENV.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT) {
         status = 'elsewhere'
       }
-      // The person's own values tracing holds in place of while it is on.
+      // Tracing's names the settings hold otherwise, changed by hand while it is on.
+      const differing = status === 'off' ? [] : differingNames(settings)
+      // The person's own values tracing holds in place of while it is on: one
+      // changed by hand since is no longer tracing's, and off leaves it be.
       const replaced =
         status === 'off'
           ? []
-          : replacedNames(await $.store.get(TRACE_ENV_BEFORE).catch(() => undefined))
+          : replacedNames(await $.store.get(TRACE_ENV_BEFORE).catch(() => undefined)).filter(
+              name => !differing.includes(name),
+            )
       if (status !== 'on') {
         // Off, the list goes: what it held is no longer this tab's to show.
         await update($, trace, current => ({
@@ -624,17 +660,21 @@ function refreshTrace($: EngineInterface): Promise<void> {
           status,
           items: status === 'off' ? [] : current.items,
           replaced,
+          differing,
         }))
         return
       }
       const { session, folder } = await traceFolder($)
       const entries = (await $.fs.exists(folder)) ? await $.fs.list(folder) : []
-      // Telemetry starts with the session: one already running when tracing was
+      // Telemetry starts with the process: one already running when tracing was
       // turned on exports nothing, though its environment says otherwise once
       // the settings change. A session that has taken a turn and has no trace
-      // is such a one.
+      // is such a one, unless its telemetry started pointed here: then its
+      // folder was deleted meanwhile, or its requests were not recorded.
       const turns = await $.session.turns().catch(() => 0)
-      if (entries.length === 0 && turns > 0) status = 'next-session'
+      if (entries.length === 0 && turns > 0) {
+        status = (await startedTraced) ? 'emptied' : 'next-session'
+      }
       const names = new Set(entries.map(entry => entry.name))
       // A request the person deleted goes from the list too.
       for (const name of traceCache.keys()) if (!names.has(name)) traceCache.delete(name)
@@ -690,7 +730,7 @@ function refreshTrace($: EngineInterface): Promise<void> {
       const token = await viewToken($)
       const view = token ? { session, token } : null
       const items = records.map(one => one.item)
-      await update($, trace, () => ({ status, items, prompt, view, replaced }))
+      await update($, trace, () => ({ status, items, prompt, view, replaced, differing }))
     } catch {
       // The folder could not be read just now; the next turn tries again.
     }
@@ -860,6 +900,7 @@ export const register: Register = on => {
   const knownTools: Record<string, string> = {}
 
   on('session.start', async ($, e, next) => {
+    readStartedTraced($)
     const started = await next(e)
 
     void (async () => {

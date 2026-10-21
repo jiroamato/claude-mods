@@ -75,7 +75,13 @@ under each of these names, or that you had nothing, in the plugin's store
 value, the same as tracing's or not, comes back, and a name you never set goes. A value
 you changed while tracing was on stays as you left it. While tracing holds the place of
 a value of yours, the Trace tab says which. If the store lost what it noted, off takes
-tracing's values out and says it could not put yours back:
+tracing's values out and says it could not put yours back.
+
+Tracing counts as on while `CLAUDE_CODE_ENABLE_TELEMETRY`, `OTEL_LOGS_EXPORTER` and
+`OTEL_EXPORTER_OTLP_LOGS_ENDPOINT` hold its values, since they decide where telemetry
+goes. If you change any of the other four by hand, the Trace tab names them, as
+requests may then be cut short, arrive later or not be recorded, and turning tracing
+off and on again sets them back:
 
 | Variable                              | Value                               |
 | ------------------------------------- | ----------------------------------- |

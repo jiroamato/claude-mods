@@ -41,12 +41,37 @@ export const TRACE_ENV: Readonly<Record<string, string>> = {
   CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH: '20000000',
 }
 
-/** Whether a settings object turns tracing on, every value as tracing sets it. */
+/** The names that decide where telemetry goes: with these as tracing sets them, it comes here. */
+const TRACE_ROUTE = [
+  'CLAUDE_CODE_ENABLE_TELEMETRY',
+  'OTEL_LOGS_EXPORTER',
+  'OTEL_EXPORTER_OTLP_LOGS_ENDPOINT',
+] as const
+
+/** Whether an environment sends its log events to the receiver: the names that decide it as tracing sets them. */
+export function isRoutedHere(env: Readonly<Record<string, unknown>>): boolean {
+  return TRACE_ROUTE.every(key => env[key] === TRACE_ENV[key])
+}
+
+/**
+ * Whether a settings object turns tracing on: its telemetry goes to the
+ * receiver. The other names may have been changed by hand, and tracing is on
+ * all the same, so it can always be turned off.
+ */
 export function isTraceOn(settings: unknown): boolean {
   const env = (settings as { env?: unknown } | null)?.env
-  if (!isPlainObject(env)) return false
 
-  return Object.entries(TRACE_ENV).every(([key, value]) => env[key] === value)
+  return isPlainObject(env) && isRoutedHere(env)
+}
+
+/** The names of tracing's a settings object holds other than as tracing sets them, or not at all. */
+export function differingNames(settings: unknown): string[] {
+  const env = (settings as { env?: unknown } | null)?.env
+  const held = isPlainObject(env) ? env : {}
+
+  return Object.entries(TRACE_ENV)
+    .filter(([key, value]) => held[key] !== value)
+    .map(([key]) => key)
 }
 
 /**
@@ -75,8 +100,10 @@ export function editTraceEnv(
   if (!isPlainObject(env)) {
     throw new SettingsShapeError('env in settings.json is not an object, so it was left as is.')
   }
-  // Already on: what it holds now is tracing's, not the person's to note.
-  if (isOn && isTraceOn(settings)) return { text, before: before ?? null, isLost: false }
+  // Already on, every value tracing's: what it holds now is not the person's to note.
+  if (isOn && differingNames(settings).length === 0) {
+    return { text, before: before ?? null, isLost: false }
+  }
   const next: Record<string, unknown> = { ...env }
   const noted: TraceEnvBefore = {}
   let isLost = false

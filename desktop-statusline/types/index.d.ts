@@ -65,6 +65,8 @@ export type TraceStatus =
   | 'off'
   /** On in the settings, but this session started before: its next one is traced. */
   | 'next-session'
+  /** On since this session started, but its folder holds none of its requests: deleted, or none recorded. */
+  | 'emptied'
   /** On, but Node.js, which runs the receiver, is not on the PATH. */
   | 'no-node'
   /** On, but no receiver answers on its port: another program holds it, or the receiver stopped. */
@@ -85,6 +87,8 @@ export type TraceState = {
   view: { session: string; token: string } | null
   /** The names of the person's own `env` values tracing holds in place of while it is on. */
   replaced: string[]
+  /** The names of tracing's the settings hold otherwise while it is on: changed by hand, or taken out. */
+  differing: string[]
 }
 
 /** The files tracing touches: the settings it writes, and the one folder its traces are kept in. */
