@@ -10,6 +10,7 @@ import {
   skillOrigin,
 } from '../hooks/context'
 import { deniedTools, editDeny, summarize, toolRows } from '../hooks/tools'
+import { RECEIVER_HEALTH } from '../hooks/trace'
 
 const ENGINE = { plugin: 'engine', tier: 'core' } as const
 // The engine resolves the path for the platform, so compare its tail.
@@ -149,7 +150,7 @@ function engine(
   }))
   on('session.id', async () => ({ value: 'session-1' }))
   on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 8' },
+    value: { status: 200, ok: true, headers: {}, text: RECEIVER_HEALTH },
   }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)
@@ -313,15 +314,6 @@ test('sizes and shares read as /context prints them', () => {
   expect(sectionTitle({ id: 'heron_brook', text: 'The reasoning effort.' })).toBe('Heron brook')
   expect(sectionTitle({ id: 'acme:house_rules', text: 'Be kind.' })).toBe('House rules')
 })
-
-/** Every element under a drawn one, at any depth. */
-function descendants(node: { children?: unknown[] }): { type: string; children?: unknown[] }[] {
-  return (node.children ?? []).flatMap(child =>
-    typeof child === 'object' && child !== null && 'type' in child
-      ? [child as { type: string }, ...descendants(child as { children?: unknown[] })]
-      : [],
-  )
-}
 
 /** The pane's tabs in their order, as the strip lays them out. */
 const TAB_IDS = ['tools', 'prompt', 'skills', 'trace'] as const
@@ -789,7 +781,7 @@ test('a row that opens lights under the pointer and goes dark when it leaves', a
   expect(await fill()).toBe('#00000000')
   await pane.pointer({ type: 'enter', x: 3, y: 0, in: row })
   await pane.pointer({ type: 'move', x: 4, y: 0, in: row })
-  expect(await fill()).toBe('#ffffff0f')
+  expect(await fill()).toBe('#80808020')
   await pane.pointer({ type: 'leave', x: 4, y: 0, in: row })
   expect(await fill()).toBe('#00000000')
 

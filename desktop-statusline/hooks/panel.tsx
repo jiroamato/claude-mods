@@ -495,6 +495,8 @@ export type ContextPaneProps = {
   places: TracePlaces | null
   /** Why the last tracing switch failed, if it did. */
   traceError: string | null
+  /** Why the traces folder did not open. */
+  folderError: string | null
   /** The open request of the Trace tab, as text; null when none is open. */
   traceText: string | null
   onToggle: (name: string, isRemoved: boolean) => void
@@ -941,7 +943,8 @@ function tracingNotes(places: TracePlaces | null): string[] {
       'and the messages exactly as sent, and what came back.',
     `Turning it on adds seven telemetry settings to the \`env\` block of ${settings}, so it ` +
       'applies to every Claude Code session you start after it, in the terminal and in the ' +
-      'desktop app. Turning it off takes them back out, and nothing else.',
+      'desktop app. Turning it off takes them back out, and puts back any of your own it ' +
+      'replaced.',
     `The requests go only to a receiver on this machine, which keeps them in ${traces}, a ` +
       'folder per session, until you delete them. They hold the whole conversation, file ' +
       'contents and command output included. Delete the folder to remove them.',
@@ -956,6 +959,13 @@ function keptNote(places: TracePlaces | null): string {
 }
 
 const TRACE_NOTE: Record<Exclude<TraceState['status'], 'on' | 'off'>, string> = {
+  unreachable:
+    'Tracing is on, but no receiver answers on port 43180: another program may hold the ' +
+    'port, or the receiver stopped. Requests are not being recorded.',
+  elsewhere:
+    'Tracing is on, but this session sends its telemetry to an endpoint set elsewhere (your ' +
+    'organization’s settings or a variable of your own), so its requests go there, whole, and ' +
+    'are not recorded here. Turn tracing off unless you mean them to go there.',
   'next-session':
     'Tracing is on. This session started before it was, so it is not traced: start a new ' +
     'session to trace it.',
@@ -985,7 +995,7 @@ function clock(at: string): string {
 
 /** The Trace tab: every request of the conversation as sent, each opening onto its text. */
 function TraceTab(props: ContextPaneProps) {
-  const { Box, Button, Code, Link, Text } = props.ui
+  const { Box, Button, Link, Text } = props.ui
   const traced = props.trace
   const items = [...traced.items].reverse()
   const cost = traced.items.reduce((sum, one) => sum + (one.usage?.costUsd ?? 0), 0)
@@ -1024,6 +1034,7 @@ function TraceTab(props: ContextPaneProps) {
         )}
       </Box>
       {props.traceError && <Text color="error">{props.traceError}</Text>}
+      {props.folderError && <Text color="error">{props.folderError}</Text>}
       {traced.status === 'off' &&
         tracingNotes(props.places).map(text => Intro({ ui: props.ui, text }))}
       {traced.status !== 'on' &&

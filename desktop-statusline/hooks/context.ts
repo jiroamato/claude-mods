@@ -5,14 +5,7 @@ import type {
   SessionContextBreakdown,
 } from 'claude-code'
 
-import type {
-  ContextItem,
-  ContextRow,
-  ContextSnapshot,
-  PromptSection,
-  RowKind,
-  SkillOrigin,
-} from '../types'
+import type { ContextRow, ContextSnapshot, PromptSection, RowKind, SkillOrigin } from '../types'
 import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
 const SKILL_LINE_MAX = 110
@@ -80,12 +73,6 @@ export function formatTokens(tokens: number): string {
 /** `2.1%`: a row's share of the window, one decimal, as /context prints it. */
 export function formatShare(tokens: number, window: number): string {
   return `${window > 0 ? ((tokens / window) * 100).toFixed(1) : '0.0'}%`
-}
-
-function basename(path: string): string {
-  const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-
-  return index === -1 ? path : path.slice(index + 1)
 }
 
 function estimate(text: string): number {

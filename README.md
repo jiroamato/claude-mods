@@ -69,8 +69,9 @@ cannot show, in four tabs, each with its size as `/context` counts it:
 **Turn on tracing** in the Trace tab turns on Claude Code's own telemetry for the
 sessions you start after it, in the terminal and in the desktop app alike. It adds
 these to the `env` block of your user settings (`~/.claude/settings.json`, or
-`$CLAUDE_CONFIG_DIR`), so they apply globally, and **Turn off tracing** takes back
-the ones it set and nothing else:
+`$CLAUDE_CONFIG_DIR`), so they apply globally. **Turn off tracing** takes back the
+ones it set, and puts back any value of your own one of them replaced; a value you
+changed while tracing was on stays as you left it:
 
 | Variable                              | Value                               |
 | ------------------------------------- | ----------------------------------- |
@@ -84,18 +85,28 @@ the ones it set and nothing else:
 
 Only the log events are exported, to a small receiver on this machine that the
 plugin starts with [Node.js](https://nodejs.org) (which has to be on your `PATH`).
-One receiver serves every session. It keeps each session's requests in a folder of
-its own under `~/.claude/desktop-statusline/traces/`, always there whatever
-`$CLAUDE_CONFIG_DIR` says, and serves the browser pages on `localhost` only,
-behind a token it writes beside them. The first session after you install the
-plugin makes the folder, tracing on or off, with a `README.txt` saying what it
-holds. Nothing in it is ever deleted for you: delete the folder to remove every
-trace, and the next session makes it again, empty. The Trace tab shows its full
-path, and **Open traces folder** opens it in Explorer (on Windows, and from WSL),
-Finder, or your Linux desktop's file manager through `xdg-open`.
+One receiver serves every session, and lives as long as the session that started
+it; each prompt you send checks that one listens and starts another if not, so a
+request sent in the moment between can be missing from a trace. If your
+organization's settings, or a variable of your own, send telemetry elsewhere, that
+endpoint wins and the Trace tab says so: the requests go there, whole, not here.
+
+The receiver keeps each session's requests in a folder of its own under
+`~/.claude/desktop-statusline/traces/`, always there whatever `$CLAUDE_CONFIG_DIR`
+says, and serves the browser pages on `localhost` only, behind a token it writes
+beside them. The first session after you install the plugin makes the folder,
+tracing on or off, with a `README.txt` saying what it holds. Nothing in it is ever
+deleted for you: delete the folder to remove every trace, and the next session
+makes it again, empty. The Trace tab shows its full path, and **Open traces
+folder** opens it in Explorer (on Windows, and from WSL), Finder, or your Linux
+desktop's file manager through `xdg-open`.
 
 A trace holds the whole conversation, file contents and command output included.
-It never leaves your machine, but anyone who can read your files can read it.
+Unless telemetry goes elsewhere as above, it never leaves your machine. On macOS
+and Linux the traces folder is yours alone (mode 700); anyone who can read your
+files can still read it. On a machine you share with other users, another user
+could send the receiver records of their own, or, while no receiver runs, listen
+on its port in its place.
 
 ![The Context details pane: its tabs, and the Tools tab's In context group with Remove beside each tool](docs/context-pane.png)
 

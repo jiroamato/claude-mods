@@ -25,8 +25,10 @@ const latest = new WeakMap<object, TabProps>()
 // A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
 // The open tab raised on the strip's track, a tab under the pointer between.
-const OPEN = '#ffffff14'
-const HOVER = '#ffffff0a'
+// A mid grey, seen through: it lightens a dark theme's track and darkens a
+// light one's, where white would vanish (on the dark track, #252524 open).
+const OPEN = '#8080802c'
+const HOVER = '#80808016'
 
 /**
  * One tab of the Context details pane's strip, a region of its own so its

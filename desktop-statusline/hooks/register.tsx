@@ -43,6 +43,7 @@ import {
   summarize,
   wholeRequestText,
   wrapRows,
+  TRACE_ENV,
   TRACE_PORT,
 } from './trace'
 import {
@@ -82,6 +83,9 @@ const PANE_TABS: readonly PaneTab[] = ['tools', 'prompt', 'skills', 'trace']
 const NO_TRACE: TraceState = { status: 'off', items: [], prompt: null, view: null }
 const trace = atom({ plugin: 'desktop-statusline', key: 'trace' } as const, NO_TRACE)
 const traceError = atom({ plugin: 'desktop-statusline', key: 'traceError' } as const, null)
+const folderError = atom({ plugin: 'desktop-statusline', key: 'folderError' } as const, null)
+/** The store key under which the telemetry values tracing replaced are kept, to give back. */
+const TRACE_ENV_BEFORE = 'trace-env-before'
 const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
@@ -247,11 +251,16 @@ async function configuredEffort($: EngineInterface): Promise<Effort | null> {
   }
 }
 
-/** The person's home folder. */
+/**
+ * The person's home folder: the profile on Windows, `HOME` elsewhere. WSL can
+ * be given the Windows profile's variable too (WSLENV), and its Claude Code
+ * keeps its settings in the Linux home, not there.
+ */
 async function homeDir($: EngineInterface): Promise<string> {
-  const home = (await $.env.get('USERPROFILE')) ?? (await $.env.get('HOME'))
-  if (!home)
-    throw new SettingsShapeError('Cannot find your home folder, so settings.json was not changed.')
+  const [profile, unixHome] = [await $.env.get('USERPROFILE'), await $.env.get('HOME')]
+  const home =
+    (await $.env.get('OS')) === 'Windows_NT' ? (profile ?? unixHome) : (unixHome ?? profile)
+  if (!home) throw new SettingsShapeError('Cannot find your home folder: HOME is not set.')
 
   return home
 }
@@ -314,8 +323,8 @@ async function composedPrompt($: EngineInterface): Promise<readonly PromptCompos
 }
 
 /**
- * Reads the context window broken down, for the hover card and the pane,
- * counted with the token-count API as /context counts it so the two agree.
+ * Reads the context window broken down, for the pane, counted with the
+ * token-count API as /context counts it so the two agree.
  */
 async function refreshContext($: EngineInterface): Promise<void> {
   try {
@@ -414,10 +423,10 @@ async function showTraceFolder($: EngineInterface): Promise<void> {
   try {
     await ensureTraceFolder($)
     await showFolder($, await traceRoot($))
-    await update($, traceError, () => null)
+    await update($, folderError, () => null)
   } catch (error) {
     const reason = error instanceof Error ? error.message : String(error)
-    await update($, traceError, () => `Could not open the traces folder: ${reason}`)
+    await update($, folderError, () => `Could not open the traces folder: ${reason}`)
   }
 }
 
@@ -436,16 +445,34 @@ const RECEIVER_POLL_MS = 150
 /** How long after a turn its last answer has surely been exported. */
 const TRACE_SETTLE_MS = 2500
 
-/** Which receiver answers on the port: this plugin's, an older one of it, or none. */
-async function receiverOnPort($: EngineInterface): Promise<'current' | 'older' | 'none'> {
+/**
+ * Which receiver answers on the port: this plugin's, an older or a newer one
+ * of it, another server, or none. A newer one, from a plugin updated in
+ * another session, is left to serve: the two would otherwise take turns
+ * replacing each other.
+ */
+async function receiverOnPort(
+  $: EngineInterface,
+): Promise<'current' | 'older' | 'newer' | 'other' | 'none'> {
+  let answer
   try {
-    const answer = await $.http.fetch(`http://127.0.0.1:${TRACE_PORT}/health`)
-    if (answer.ok && answer.text === RECEIVER_HEALTH) return 'current'
-
-    return answer.ok && answer.text.startsWith(RECEIVER_NAME) ? 'older' : 'none'
+    answer = await $.http.fetch(`http://127.0.0.1:${TRACE_PORT}/health`)
   } catch {
     return 'none'
   }
+  if (answer.ok && answer.text === RECEIVER_HEALTH) return 'current'
+  const theirs = receiverVersion(answer.text)
+  const ours = receiverVersion(RECEIVER_HEALTH)!
+  if (!answer.ok || theirs === null) return 'other'
+
+  return theirs < ours ? 'older' : 'newer'
+}
+
+/** The version a receiver's health text names, or null for another server's. */
+function receiverVersion(text: string): number | null {
+  const match = new RegExp(`^${RECEIVER_NAME} (\\d+)$`).exec(text.trim())
+
+  return match ? Number(match[1]) : null
 }
 
 /** The token the running receiver's pages answer to, which it writes beside the traces. */
@@ -460,7 +487,9 @@ async function viewToken($: EngineInterface): Promise<string | null> {
 }
 
 async function isReceiverUp($: EngineInterface): Promise<boolean> {
-  return (await receiverOnPort($)) === 'current'
+  const found = await receiverOnPort($)
+
+  return found === 'current' || found === 'newer'
 }
 
 /**
@@ -471,7 +500,8 @@ async function isReceiverUp($: EngineInterface): Promise<boolean> {
  */
 async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
   const found = await receiverOnPort($)
-  if (found === 'current') return 'on'
+  if (found === 'current' || found === 'newer') return 'on'
+  if (found === 'other') return 'unreachable'
   if (found === 'older') {
     // An older receiver serves the trace as it was: asked to leave, it frees the port.
     const token = await viewToken($)
@@ -479,6 +509,9 @@ async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
       await $.http
         .fetch(`http://127.0.0.1:${TRACE_PORT}/quit?t=${token}`, { method: 'POST' })
         .catch(() => undefined)
+    }
+    for (let waited = 0; waited < RECEIVER_START_MS; waited += RECEIVER_POLL_MS) {
+      if ((await receiverOnPort($)) === 'none') break
       await $.clock.sleep(RECEIVER_POLL_MS)
     }
   }
@@ -505,13 +538,55 @@ async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
     if (await isReceiverUp($)) return 'on'
   }
 
-  return hasFailed ? 'no-node' : 'on'
+  // Node ran, but nothing answers: the port is another program's, or the
+  // receiver stopped (it could not make its folder).
+  return hasFailed ? 'no-node' : 'unreachable'
 }
 
-/** Requests read from the trace folder, by file name, with the time each was last read. */
+/**
+ * Requests read from this session's trace folder, by file name, with the time
+ * each was last read. A `/clear` or a resume goes on in the same process under
+ * a new session id, so the cache is the session's it was read for.
+ */
 const traceCache = new Map<string, { mtimeMs: number; item: TraceItem; record: TraceRecord }>()
+let traceSession: string | null = null
 const systemCache = new Map<string, { type: string; text: string }[]>()
 let traceQueue: Promise<unknown> = Promise.resolve()
+/** The largest file `$.fs.read` reads: a larger request is listed, but not read. */
+const MAX_READ_BYTES = 4 * 1024 * 1024
+
+/** A request whose file is too large to read here, listed for the browser, where it opens. */
+function unreadRecord(name: string, at: number): TraceRecord {
+  return {
+    seq: Number(name.slice(0, 6)),
+    at: new Date(at).toISOString(),
+    source: 'unknown',
+    model: '',
+    promptId: null,
+    system: null,
+    tools: null,
+    toolCount: 0,
+    messageCount: 0,
+    from: 0,
+    added: [],
+    tooLarge: true,
+    usage: null,
+    response: null,
+  }
+}
+
+/** Starts the caches afresh when the session they were read for is not this one. */
+async function traceFolder($: EngineInterface): Promise<{ session: string; folder: string }> {
+  const session = await $.session.id()
+  if (session !== traceSession) {
+    traceCache.clear()
+    readerCache = null
+    matchCache = null
+    traceSession = session
+  }
+
+  return { session, folder: `${await traceRoot($)}/${session}` }
+}
 
 /**
  * Reads this session's trace from the receiver's folder: what tracing's
@@ -524,11 +599,22 @@ function refreshTrace($: EngineInterface): Promise<void> {
     try {
       const settings = parseSettings(await readSettingsText($))
       let status: TraceStatus = isTraceOn(settings) ? await ensureReceiver($) : 'off'
+      // Another endpoint wins over the one tracing sets (managed settings, a
+      // variable of the person's own): the requests go there, not here.
+      const endpoint = await $.env.get('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT')
+      if (status === 'on' && endpoint && endpoint !== TRACE_ENV.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT) {
+        status = 'elsewhere'
+      }
       if (status !== 'on') {
-        await update($, trace, current => ({ ...current, status }))
+        // Off, the list goes: what it held is no longer this tab's to show.
+        await update($, trace, current => ({
+          ...current,
+          status,
+          items: status === 'off' ? [] : current.items,
+        }))
         return
       }
-      const folder = `${await traceRoot($)}/${await $.session.id()}`
+      const { session, folder } = await traceFolder($)
       const entries = (await $.fs.exists(folder)) ? await $.fs.list(folder) : []
       // Telemetry starts with the session: one already running when tracing was
       // turned on exports nothing, though its environment says otherwise once
@@ -536,17 +622,25 @@ function refreshTrace($: EngineInterface): Promise<void> {
       // is such a one.
       const turns = await $.session.turns().catch(() => 0)
       if (entries.length === 0 && turns > 0) status = 'next-session'
+      const names = new Set(entries.map(entry => entry.name))
+      // A request the person deleted goes from the list too.
+      for (const name of traceCache.keys()) if (!names.has(name)) traceCache.delete(name)
       for (const entry of entries) {
         if (!/^\d{6}\.json$/.test(entry.name)) continue
         const cached = traceCache.get(entry.name)
         if (cached && cached.mtimeMs === entry.mtimeMs) continue
+        if (entry.size > MAX_READ_BYTES) {
+          const record = unreadRecord(entry.name, entry.mtimeMs)
+          traceCache.set(entry.name, { mtimeMs: entry.mtimeMs, item: summarize(record), record })
+          continue
+        }
         try {
           const record = JSON.parse(
             String(await $.fs.read(`${folder}/${entry.name}`)),
           ) as TraceRecord
           traceCache.set(entry.name, { mtimeMs: entry.mtimeMs, item: summarize(record), record })
         } catch {
-          // Being written, or too large to read: the next reading tries again.
+          // Being written: the next reading tries again.
         }
       }
       const records = [...traceCache.values()].sort((a, b) => a.item.seq - b.item.seq)
@@ -560,20 +654,28 @@ function refreshTrace($: EngineInterface): Promise<void> {
           )
         : null
       let prompt: TraceState['prompt'] = null
-      if (main) {
+      if (main?.system) {
         let blocks = systemCache.get(main.system)
         if (!blocks) {
-          blocks = JSON.parse(String(await $.fs.read(`${folder}/system-${main.system}.json`))) as {
-            type: string
-            text: string
-          }[]
-          systemCache.set(main.system, blocks)
+          try {
+            blocks = JSON.parse(
+              String(await $.fs.read(`${folder}/system-${main.system}.json`)),
+            ) as {
+              type: string
+              text: string
+            }[]
+            systemCache.set(main.system, blocks)
+          } catch {
+            // Deleted, or not written yet: the Prompt tab shows the composed sections.
+          }
         }
-        const snapshot = currentSnapshot(await read($, context))
-        prompt = sentPrompt(blocks, snapshot?.prompt ?? [])
+        if (blocks) {
+          const snapshot = currentSnapshot(await read($, context))
+          prompt = sentPrompt(blocks, snapshot?.prompt ?? [])
+        }
       }
       const token = await viewToken($)
-      const view = token ? { session: await $.session.id(), token } : null
+      const view = token ? { session, token } : null
       await update($, trace, () => ({ status, items: records.map(one => one.item), prompt, view }))
     } catch {
       // The folder could not be read just now; the next turn tries again.
@@ -593,11 +695,12 @@ async function readerRows(
   seq: number,
   columns: number,
 ): Promise<{ key: string; title: string; detail: string; rows: string[] } | null> {
-  const key = `${seq}:${columns}`
-  if (readerCache?.key === key) return readerCache
+  const { session, folder } = await traceFolder($)
   const cached = [...traceCache.values()].find(one => one.item.seq === seq)
   if (!cached) return null
-  const folder = `${await traceRoot($)}/${await $.session.id()}`
+  // Read again once its answer lands, which changes its file.
+  const key = `${session}:${seq}:${cached.mtimeMs}:${columns}`
+  if (readerCache?.key === key) return readerCache
   const readJson = async <T,>(name: string): Promise<T | null> => {
     try {
       return JSON.parse(String(await $.fs.read(`${folder}/${name}`))) as T
@@ -610,10 +713,11 @@ async function readerRows(
     [...traceCache.values()].map(one => one.record),
     seq,
   )!
-  const system =
-    systemCache.get(base.system) ??
-    (await readJson<{ type: string; text: string }[]>(`system-${base.system}.json`))
-  const tools = await readJson<{ name?: string }[]>(`tools-${base.tools}.json`)
+  const system = base.system
+    ? (systemCache.get(base.system) ??
+      (await readJson<{ type: string; text: string }[]>(`system-${base.system}.json`)))
+    : null
+  const tools = base.tools ? await readJson<{ name?: string }[]>(`tools-${base.tools}.json`) : null
   const text = wholeRequestText(
     [...traceCache.values()].map(one => one.record),
     seq,
@@ -682,14 +786,31 @@ function traceRequestText(seq: number): string | null {
   return cached ? requestText(cached.record) : null
 }
 
+/** Whether a kept value is an object of strings, as the telemetry values tracing replaced are. */
+function isPlainRecord(value: unknown): value is Record<string, string> {
+  return (
+    value !== null &&
+    typeof value === 'object' &&
+    !Array.isArray(value) &&
+    Object.values(value).every(one => typeof one === 'string')
+  )
+}
+
 /** Turns tracing on or off in the user settings; new sessions follow it. */
 async function setTracing($: EngineInterface, isOn: boolean): Promise<void> {
   await serially(async () => {
     try {
       const path = await settingsPath($)
       const text = await readSettingsText($)
-      const next = editTraceEnv(text, isOn)
-      if (next !== text) await $.fs.write(path, next)
+      const kept = await $.store.get(TRACE_ENV_BEFORE).catch(() => undefined)
+      const before = isPlainRecord(kept) ? kept : {}
+      const next = editTraceEnv(text, isOn, before)
+      if (next.text !== text) await $.fs.write(path, next.text)
+      // What tracing replaced, kept until it is given back; then nothing.
+      if (isOn && Object.keys(next.before).length > 0) {
+        await $.store.set(TRACE_ENV_BEFORE, next.before)
+      }
+      if (!isOn) await $.store.delete(TRACE_ENV_BEFORE).catch(() => undefined)
       await update($, traceError, () => null)
     } catch (error) {
       const reason =
@@ -780,6 +901,15 @@ export const register: Register = on => {
     }
 
     return yield* next(e)
+  })
+
+  // The receiver lives as long as the session that started it. When that one
+  // ends, the requests of the others would go nowhere until their turn ended:
+  // each prompt makes sure one listens, before the turn's requests are sent.
+  on('prompt.submit', async ($, e, next) => {
+    void refreshTrace($)
+
+    return next(e)
   })
 
   // A turn may have committed, switched branch or touched files: re-read git.
@@ -888,6 +1018,7 @@ export const register: Register = on => {
       error,
       traced,
       tracingError,
+      openingError,
       shownPage,
       readingSeq,
       searching,
@@ -902,6 +1033,7 @@ export const register: Register = on => {
       read($, toolError),
       read($, trace),
       read($, traceError),
+      read($, folderError),
       read($, page),
       read($, reader),
       read($, readerSearch),
@@ -963,6 +1095,7 @@ export const register: Register = on => {
       error,
       trace: traced,
       traceError: tracingError,
+      folderError: openingError,
       traceText: openSeq === undefined ? null : traceRequestText(Number(openSeq)),
       onTracing: isOn => void setTracing($, isOn),
       onShowTraces: () => void showTraceFolder($),
@@ -989,14 +1122,13 @@ export const register: Register = on => {
 
     // Subscribes this drawing to the once-a-second tick.
     await read($, tick)
-    const [model, cwd, usage, repo, level, now, snapshot] = await Promise.all([
+    const [model, cwd, usage, repo, level, now] = await Promise.all([
       $.session.model(),
       $.session.cwd(),
       $.session.usage(),
       read($, git),
       read($, effort),
       $.clock.now(),
-      read($, context).then(currentSnapshot),
     ])
 
     const folder = basename(cwd)

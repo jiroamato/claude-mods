@@ -3,8 +3,8 @@
 // and under WSL. The engine starts a command with its window hidden, and
 // Explorer started so opens the folder in a window it never shows; a window a
 // background process opens also stays behind the app, out of sight. So Explorer
-// opens through a PowerShell script that starts it with `start`, which shows it,
-// waits for it, and brings it to the front.
+// opens through a PowerShell script that starts it through the shell, which
+// shows it, waits for it, and brings it to the front.
 
 import type { EngineInterface } from 'claude-code'
 
@@ -23,7 +23,11 @@ export async function showFolder($: EngineInterface, folder: string): Promise<vo
   if (system.startsWith('Darwin')) return opened($, 'open', folder)
   // WSL's kernel names Microsoft: Explorer, on the folder as Windows reaches it.
   if (/microsoft/i.test(system)) {
-    const path = (await $.process.run(['wslpath', '-w', folder])).stdout.trim()
+    const converted = await $.process.run(['wslpath', '-w', folder])
+    const path = converted.stdout.trim()
+    if (converted.exitCode !== 0 || path === '') {
+      throw new Error(converted.stderr.trim() || 'wslpath could not give its Windows path.')
+    }
     // A variable crosses to a Windows program only when WSLENV names it.
     const shared = [(await $.env.get('WSLENV')) ?? '', FOLDER_VARIABLE].filter(Boolean).join(':')
 
@@ -59,8 +63,10 @@ async function explorer(
       })
     }
     if (shown.exitCode === 0) return
+    // The script says why on its output, as a line of its own: what PowerShell
+    // writes to its error stream, redirected, is XML.
     throw new Error(
-      /Explorer did not open[^\r\n]*/.exec(shown.stderr)?.[0] ??
+      new RegExp(`^${FAILED} (.+)$`, 'm').exec(shown.stdout)?.[1]?.trim() ??
         `PowerShell exited with ${shown.exitCode}.`,
     )
   }
@@ -72,9 +78,9 @@ async function opened($: EngineInterface, opener: string, folder: string): Promi
   try {
     shown = await $.process.run([opener, folder])
   } catch (error) {
-    throw new Error(`${opener} is not installed.`, {
-      cause: error,
-    })
+    // It could not start, or did not finish in time.
+    const reason = error instanceof Error ? error.message : String(error)
+    throw new Error(`${opener} could not be run (${reason}). Is it installed?`, { cause: error })
   }
   if (shown.exitCode !== 0) {
     throw new Error(shown.stderr.trim() || `${opener} exited with ${shown.exitCode}.`)
@@ -83,15 +89,23 @@ async function opened($: EngineInterface, opener: string, folder: string): Promi
 
 /** The variable the script reads the folder from, so the path is never quoted into it. */
 export const FOLDER_VARIABLE = 'DESKTOP_STATUSLINE_FOLDER'
+/** What starts the line the script says why it failed on. */
+const FAILED = 'FOLDER-NOT-SHOWN:'
 
 /**
  * Shows the folder in Explorer, in front: the window already open on it, else
  * a new one. Windows lets only the foreground's thread raise a window, so the
- * script joins that thread's input for the moment it raises its own.
+ * script joins that thread's input for the moment it raises its own. Where
+ * PowerShell may not compile that (Constrained Language Mode), the folder
+ * still opens, wherever Windows puts it. Explorer is started through the
+ * shell, with the folder its one argument: no command line parses the path.
  */
 export const SHOW_FOLDER_SCRIPT = [
   "$ErrorActionPreference = 'Stop'",
+  'try {',
   `$folder = $env:${FOLDER_VARIABLE}`,
+  '$canRaise = $true',
+  'try {',
   "Add-Type @'",
   'using System; using System.Runtime.InteropServices;',
   'public static class Front {',
@@ -115,18 +129,26 @@ export const SHOW_FOLDER_SCRIPT = [
   '  }',
   '}',
   "'@",
+  '} catch { $canRaise = $false }',
   '$shell = New-Object -ComObject Shell.Application',
-  '$url = ([Uri]$folder).AbsoluteUri',
+  // A window on the folder, by the folder's own path: its address escapes a
+  // space or a `%` its own way. A window on no folder (This PC) is none.
+  "$isOn = { param($w) try { $w.Document.Folder.Self.Path -ieq $folder.TrimEnd('\\') } catch { $false } }",
   // Only a shown window: Explorer shows a new one once it has opened the folder,
   // and raising it before then leaves it hidden.
-  '$find = { @($shell.Windows()) | Where-Object { $_.LocationURL -eq $url -and [Front]::IsWindowVisible([IntPtr]$_.HWND) } | Select-Object -Last 1 }',
+  '$find = { @($shell.Windows()) | Where-Object { (& $isOn $_) -and (-not $canRaise -or [Front]::IsWindowVisible([IntPtr]$_.HWND)) } | Select-Object -Last 1 }',
   '$window = & $find',
   'if (-not $window) {',
-  '  & cmd.exe /d /c start explorer.exe "$folder"',
+  "  $start = New-Object System.Diagnostics.ProcessStartInfo 'explorer.exe'",
+  `  $start.Arguments = '"' + $folder + '"'`,
+  '  $start.UseShellExecute = $true',
+  "  $start.WindowStyle = 'Normal'",
+  '  [void][System.Diagnostics.Process]::Start($start)',
   '  for ($i = 0; $i -lt 50 -and -not $window; $i++) { Start-Sleep -Milliseconds 100; $window = & $find }',
   '}',
   'if (-not $window) { throw "Explorer did not open $folder." }',
-  '[Front]::Raise([IntPtr]$window.HWND)',
+  'if ($canRaise) { [Front]::Raise([IntPtr]$window.HWND) }',
+  `} catch { [Console]::Out.WriteLine('${FAILED} ' + $_.Exception.Message); exit 1 }`,
 ].join('\n')
 
 const BASE64 = 'ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/'

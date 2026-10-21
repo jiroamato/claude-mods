@@ -36,7 +36,8 @@ export type DisclosurePick = { toggle: string }
 // A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
 // The row under the pointer, as the desktop lights its own rows that open.
-const HOVER = '#ffffff0f'
+// A mid grey, seen through, so it shows on a light theme too (#272727 on the dark pane).
+const HOVER = '#80808020'
 
 /**
  * The props each instance last drew with, by its surface: its listeners are

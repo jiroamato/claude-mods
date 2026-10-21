@@ -16,7 +16,7 @@
     "context",
     "cost",
     "git",
-    "context-map",
+    "tracing",
     "tools"
   ],
   "types": "./types/index.d.ts"

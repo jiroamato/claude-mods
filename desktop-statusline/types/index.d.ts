@@ -67,6 +67,10 @@ export type TraceStatus =
   | 'next-session'
   /** On, but Node.js, which runs the receiver, is not on the PATH. */
   | 'no-node'
+  /** On, but no receiver answers on its port: another program holds it, or the receiver stopped. */
+  | 'unreachable'
+  /** On, but the session's telemetry goes to an endpoint set elsewhere (managed or own settings). */
+  | 'elsewhere'
   /** On, and this session's requests are recorded. */
   | 'on'
 
@@ -137,6 +141,8 @@ declare module 'claude-code' {
       trace: TraceState
       /** Why the last tracing switch failed, until the next one succeeds. */
       traceError: string | null
+      /** Why the traces folder did not open, until it next does. */
+      folderError: string | null
       /** The built-in tools of this session, by name, as `tool.describe` saw them. */
       tools: Record<string, SeenTool>
       /** Built-in tools denied by bare name in the user settings, read from the file. */

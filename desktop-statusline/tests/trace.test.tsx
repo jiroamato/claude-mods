@@ -1,9 +1,12 @@
 import { expect, mock, test } from 'claude-code/testing'
+import type { TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { FOLDER_VARIABLE, SHOW_FOLDER_SCRIPT, encodedCommand } from '../hooks/folder'
 import { pageStarts } from '../hooks/panel'
 import {
+  RECEIVER_HEALTH,
+  RECEIVER_NAME,
   editTraceEnv,
   findMatches,
   isTraceOn,
@@ -16,7 +19,7 @@ import {
 } from '../hooks/trace'
 import type { TraceRecord } from '../hooks/trace'
 // The receiver's own logic, as Node runs it.
-import { logRecords, TraceStore } from '../trace/store.mjs'
+import { HEALTH, logRecords, TraceStore } from '../trace/store.mjs'
 import { fullMessages, promptRecord, requestPage, sessionPage } from '../trace/view.mjs'
 
 const SESSION = 'session-1'
@@ -89,6 +92,85 @@ test('the store keeps each request once: what it added, its usage and its answer
   expect(two.added).toHaveLength(2)
 })
 
+test('usage lands on its own request by the API request id, whichever comes first', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const kept = (seq: number) =>
+    JSON.parse(files[`${SESSION}/${String(seq).padStart(6, '0')}.json`]!) as TraceRecord
+  const answer = (bodyId: string, requestId: string) =>
+    record('api_response_body', {
+      request_body_id: bodyId,
+      request_id: requestId,
+      body: JSON.stringify({ content: [], stop_reason: 'end_turn' }),
+    })
+  const usage = (requestId: string, input: number) =>
+    record('api_request', { query_source: 'sdk', request_id: requestId, input_tokens: input })
+  for (const one of [
+    // The first is interrupted: no usage, no answer.
+    record('api_request_body', {
+      body: requestBody([]),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+    // The second's answer comes before its usage, the third's after.
+    record('api_request_body', {
+      body: requestBody([]),
+      query_source: 'sdk',
+      request_body_id: 'b2',
+    }),
+    answer('b2', 'req_2'),
+    usage('req_2', 20),
+    record('api_request_body', {
+      body: requestBody([]),
+      query_source: 'sdk',
+      request_body_id: 'b3',
+    }),
+    usage('req_3', 30),
+    answer('b3', 'req_3'),
+  ]) {
+    store.take(one)
+  }
+
+  expect(kept(0).usage).toBeNull()
+  expect(kept(1).usage).toMatchObject({ input: 20 })
+  expect(kept(2).usage).toMatchObject({ input: 30 })
+})
+
+test('a body cut short is kept as a request that could not be read', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const body = '{"model":"claude-opus-5-5","messages":[{"role":"user","content":"a lo'
+  store.take(record('api_request_body', { body, query_source: 'sdk', request_body_id: 'b1' }))
+  const kept = JSON.parse(files[`${SESSION}/000000.json`]!) as TraceRecord
+  expect(kept).toMatchObject({ seq: 0, source: 'sdk', unreadable: body.length, added: [] })
+  expect(summarize(kept).added).toEqual(['body too large to record'])
+})
+
+test('a prompt or tool list deleted from the folder is written again when next sent', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore(
+    (name: string, text: string) => {
+      files[name] = text
+    },
+    () => 0,
+    (name: string) => name in files,
+  )
+  store.take(record('api_request_body', { body: requestBody([]), query_source: 'sdk' }))
+  for (const name of Object.keys(files)) delete files[name]
+  store.take(record('api_request_body', { body: requestBody([]), query_source: 'sdk' }))
+
+  expect(Object.keys(files).filter(name => /\/(system|tools)-/.test(name))).toHaveLength(2)
+})
+
+test('the receiver and the plugin agree on the receiver’s health text', () => {
+  expect(RECEIVER_HEALTH).toBe(HEALTH)
+  expect(HEALTH.startsWith(RECEIVER_NAME)).toBe(true)
+})
+
 test('a restarted store goes on numbering where the session left off', () => {
   const files: Record<string, string> = {}
   const store = new TraceStore(
@@ -126,25 +208,31 @@ test('an OTLP/JSON payload reads as each record’s attributes', () => {
   ])
 })
 
-test('tracing’s switch adds its env values and takes back only its own', () => {
+test('tracing’s switch adds its env values, and off gives back the person’s own', () => {
   const text =
     '{\n    "env": {\n        "MINE": "1",\n        "OTEL_LOGS_EXPORTER": "console"\n    }\n}\n'
   const on = editTraceEnv(text, true)
-  const settings = JSON.parse(on) as { env: Record<string, string> }
+  const settings = JSON.parse(on.text) as { env: Record<string, string> }
   expect(isTraceOn(settings)).toBe(true)
   expect(settings.env.MINE).toBe('1')
   // The file's own indentation stays.
-  expect(on).toMatch(/^\{\n {4}"env"/)
+  expect(on.text).toMatch(/^\{\n {4}"env"/)
+  // What it replaced is kept, to give back.
+  expect(on.before).toEqual({ OTEL_LOGS_EXPORTER: 'console' })
 
-  const off = JSON.parse(editTraceEnv(on, false)) as { env: Record<string, string> }
-  expect(isTraceOn(off)).toBe(false)
-  expect(off.env).toEqual({ MINE: '1' })
-  // A value set by hand that is not tracing's stays when tracing is turned off.
-  const own = editTraceEnv(
-    JSON.stringify({ env: { ...TRACE_ENV, OTEL_LOGS_EXPORTER: 'console' } }),
+  const off = editTraceEnv(on.text, false, on.before)
+  const offSettings = JSON.parse(off.text) as { env: Record<string, string> }
+  expect(isTraceOn(offSettings)).toBe(false)
+  expect(offSettings.env).toEqual({ MINE: '1', OTEL_LOGS_EXPORTER: 'console' })
+  expect(off.before).toEqual({})
+
+  // A value the person changed while tracing was on is theirs, and stays.
+  const changed = editTraceEnv(
+    JSON.stringify({ env: { ...TRACE_ENV, OTEL_LOGS_EXPORTER: 'none' } }),
     false,
+    { OTEL_LOGS_EXPORTER: 'console' },
   )
-  expect(JSON.parse(own).env).toEqual({ OTEL_LOGS_EXPORTER: 'console' })
+  expect(JSON.parse(changed.text).env).toEqual({ OTEL_LOGS_EXPORTER: 'none' })
 })
 
 test('the sent prompt reads as the engine’s sections, and what was added around them', () => {
@@ -233,39 +321,61 @@ function tracedEngine(
     system: 'Linux',
     /** Programs that are not installed: running one rejects. */
     absent: [] as string[],
+    /** Whether the Explorer script says it could not show the folder. */
+    explorerFails: false,
+    /** The session's id: a `/clear` goes on under a new one. */
+    session: SESSION,
+    /** Each session's trace folder, its files by name. */
+    folders: { [SESSION]: files } as Record<string, Record<string, string>>,
+    /** Sizes the folder's listing gives instead of a file's own. */
+    sizes: {} as Record<string, number>,
+    /** What the receiver's health answers, and how often it was asked to leave. */
+    health: RECEIVER_HEALTH,
+    quits: 0,
+    clock: mock.clock(on, { now: 1_000 }),
   }
-  mock.clock(on, { now: 1_000 })
   mock.store(on)
   mock.env(on, { HOME: '/home/me', OTEL_LOG_RAW_API_BODIES: '1', ...env })
-  const traceFile = (path: string) => /[\\/]traces[\\/]session-1[\\/]([^\\/]+)$/.exec(path)?.[1]
+  const traceFile = (path: string) => /[\\/]traces[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(path)
   const isToken = (path: string) => /[\\/]traces[\\/]\.view-token$/.test(path)
   on('fs.exists', async (_$, e) => ({ value: !settings.missing.some(one => one.test(e.path)) }))
   on('fs.read', async (_$, e) => {
     if (isToken(e.path)) return { value: '0123456789abcdef0123456789abcdef' }
-    const name = traceFile(e.path)
+    const found = traceFile(e.path)
+    if (!found) return { value: settings.text }
+    const text = settings.folders[found[1]!]?.[found[2]!]
+    if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
 
-    return { value: name !== undefined ? (files[name] ?? '') : settings.text }
+    return { value: text }
   })
-  on('fs.list', async () => ({
-    value: Object.keys(files).map(name => ({
-      name,
-      kind: 'file' as const,
-      size: files[name]!.length,
-      mtimeMs: 1,
-      isLink: false,
-    })),
-  }))
+  on('fs.list', async (_$, e) => {
+    const folder =
+      settings.folders[/[\\/]traces[\\/]([^\\/]+)$/.exec(e.path ?? '')?.[1] ?? ''] ?? {}
+
+    return {
+      value: Object.keys(folder).map(name => ({
+        name,
+        kind: 'file' as const,
+        size: settings.sizes[name] ?? folder[name]!.length,
+        // A file grows only by being written again, which changes its time.
+        mtimeMs: settings.sizes[name] ?? 1,
+        isLink: false,
+      })),
+    }
+  })
   on('fs.write', async (_$, e) => {
     if (e.path.endsWith('settings.json')) settings.text = e.text
     settings.written.push(e.path)
 
     return { value: undefined }
   })
-  on('session.id', async () => ({ value: 'session-1' }))
+  on('session.id', async () => ({ value: settings.session }))
   on('session.turns', async () => ({ value: turns }))
-  on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 8' },
-  }))
+  on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/quit')) settings.quits += 1
+
+    return { value: { status: 200, ok: true, headers: {}, text: settings.health } }
+  })
   on('session.model', async () => ({ value: 'Opus 5.5' }))
   on('session.cwd', async () => ({ value: '/repo' }))
   on('session.usage', async () => ({
@@ -280,12 +390,20 @@ function tracedEngine(
     if (settings.absent.includes(program)) throw new Error(`spawn ${program} ENOENT`)
     const stdout: Record<string, string> = {
       uname: `${settings.system}\n`,
+      ...(settings.explorerFails && {
+        'powershell.exe': 'FOLDER-NOT-SHOWN: Explorer did not open C:\\x\\traces.\r\n',
+      }),
       wslpath: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude\\desktop-statusline\\traces\n',
     }
 
     return {
       value: {
-        exitCode: program === 'xdg-open' || program === 'git' ? 1 : 0,
+        exitCode:
+          program === 'xdg-open' ||
+          program === 'git' ||
+          (program === 'powershell.exe' && settings.explorerFails)
+            ? 1
+            : 0,
         stdout: stdout[program] ?? '',
         stderr: program === 'xdg-open' ? 'no method available for opening' : '',
         isStdoutTruncated: false,
@@ -295,6 +413,7 @@ function tracedEngine(
   })
   on('config.list', async () => ({ value: [] }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
 
   return settings
 }
@@ -477,6 +596,16 @@ test('the traces folder opens in the system’s file manager', async ($, on) => 
   expect(folder).not.toContain('/')
   expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
 
+  // A folder that does not show says why, in words: the script's own line.
+  settings.explorerFails = true
+  await pane.press({ key: 'trace-folder' })
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: 'Could not open the traces folder: Explorer did not open C:\\x\\traces.',
+    }),
+  ).toBeDefined()
+
   await pane.unmount()
 })
 
@@ -486,7 +615,10 @@ test('a script is encoded as PowerShell takes it, UTF-16LE in base64', () => {
   expect(encodedCommand('ab')).toBe('YQBiAA==')
   // The script reads the folder from its variable, never from its own text.
   expect(SHOW_FOLDER_SCRIPT).toContain(`$env:${FOLDER_VARIABLE}`)
-  expect(SHOW_FOLDER_SCRIPT).toContain('start explorer.exe')
+  // Explorer starts through the shell, the folder its one argument: no command
+  // line (cmd's `&`, `%VAR%`) ever parses the path.
+  expect(SHOW_FOLDER_SCRIPT).toContain("ProcessStartInfo 'explorer.exe'")
+  expect(SHOW_FOLDER_SCRIPT).not.toContain('cmd.exe')
 })
 
 test('the traces folder opens in Finder on macOS and through xdg-open elsewhere', async ($, on) => {
@@ -517,7 +649,7 @@ test('the traces folder opens in Finder on macOS and through xdg-open elsewhere'
   expect(
     await pane.find({
       type: 'Text',
-      text: 'Could not open the traces folder: xdg-open is not installed.',
+      text: /^Could not open the traces folder: xdg-open could not be run \(.+\)\. Is it installed\?$/,
     }),
   ).toBeDefined()
 
@@ -558,6 +690,169 @@ test('under WSL the traces folder opens in Windows Explorer, as Windows reaches 
     ['/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe', ...script],
   ])
   expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+const BAND = {
+  plugin: 'desktop-statusline',
+  component: 'AbovePrompt',
+  props: {
+    hasSurvey: false,
+    isWorking: false,
+    maxRows: 6,
+    bodyColumns: 120,
+    scroll: { offset: 0, bodyRows: 6 },
+    view: {},
+  },
+} as const
+
+/** One request as the receiver keeps it, saying `text`. */
+function kept(seq: number, text: string): string {
+  return JSON.stringify({
+    seq,
+    at: '2026-10-19T12:00:05Z',
+    source: 'sdk',
+    model: 'claude-opus-5-5',
+    promptId: 'p1',
+    system: 'a',
+    tools: 'b',
+    toolCount: 1,
+    messageCount: 1,
+    from: 0,
+    added: [{ role: 'user', content: text }],
+    usage: null,
+    response: null,
+  } satisfies TraceRecord)
+}
+
+/** Opens the pane from the band, as a person does, which reads the trace afresh. */
+async function reopen($: Parameters<TestBody>[0], settings: ReturnType<typeof tracedEngine>) {
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const pressed = band.press({ key: 'open-context' })
+  for (let step = 0; step < 10; step += 1) await settings.clock.advance(100)
+  await pressed
+  await band.unmount()
+}
+
+/** The Trace tab's rows, by label. */
+async function traceRows(pane: {
+  findAll: (query: { type: 'Client' }) => Promise<{ props: Record<string, unknown> }[]>
+}) {
+  return (await pane.findAll({ type: 'Client' }))
+    .filter(one => String(one.props.key).startsWith('disclose-trace-'))
+    .map(one => (one.props.props as { label: string }).label)
+}
+
+test('after a /clear the Trace tab lists the new session’s requests alone', async ($, on) => {
+  const settings = tracedEngine(on, {
+    'system-a.json': '[]',
+    '000000.json': kept(0, 'one'),
+    '000001.json': kept(1, 'two'),
+  })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await traceRows(pane)).toEqual(['#2', '#1'])
+
+  // A /clear goes on in the same process, under a new session id.
+  settings.session = 'session-2'
+  settings.folders['session-2'] = { 'system-a.json': '[]', '000000.json': kept(0, 'fresh') }
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await traceRows(pane)).toEqual(['#1'])
+  expect(await pane.find({ type: 'Text', text: '+ "fresh"' })).toBeUndefined()
+  const row = await pane.find({ type: 'Client', key: 'disclose-trace-0' })
+  expect((row?.props.props as { lines: string[] }).lines[0]).toBe('+ "fresh"')
+
+  await pane.unmount()
+})
+
+test('a request deleted from the folder leaves the list, and one too large to read is listed', async ($, on) => {
+  const files = {
+    'system-a.json': '[]',
+    '000000.json': kept(0, 'one'),
+    '000001.json': kept(1, 'two'),
+  }
+  const settings = tracedEngine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  delete (files as Record<string, string>)['000000.json']
+  settings.sizes['000001.json'] = 5 * 1024 * 1024
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await traceRows(pane)).toEqual(['#2 unknown'])
+  const row = await pane.find({ type: 'Client', key: 'disclose-trace-1' })
+  expect((row?.props.props as { lines: string[] }).lines[0]).toBe(
+    '+ too large to read here: open it in your browser',
+  )
+
+  await pane.unmount()
+})
+
+test('a newer receiver is left to serve, and a port another server holds says so', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.health = 'desktop-statusline trace receiver 999'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(settings.quits).toBe(0)
+  expect(
+    await pane.find({ type: 'Text', text: /^Tracing is on\. Each request appears here/ }),
+  ).toBeDefined()
+
+  settings.health = 'Welcome to nginx!'
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(settings.quits).toBe(0)
+  expect(await pane.find({ type: 'Text', text: /no receiver answers on port 43180/ })).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('telemetry sent to an endpoint set elsewhere is said, not shown as recorded', async ($, on) => {
+  tracedEngine(on, {}, 0, { OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: 'https://collector.example/v1/logs' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(
+    await pane.find({ type: 'Text', text: /sends its telemetry to an endpoint set elsewhere/ }),
+  ).toBeDefined()
+  expect((await pane.find({ type: 'Button', key: 'tracing' }))?.props).toMatchObject({
+    label: 'Turn off tracing',
+  })
+
+  await pane.unmount()
+})
+
+test('turning tracing off gives back the telemetry values it replaced', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'console', MINE: '1' } })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  await pane.press({ key: 'tracing' })
+  expect(JSON.parse(settings.text).env.OTEL_LOGS_EXPORTER).toBe('otlp')
+  await pane.press({ key: 'tracing' })
+  expect(JSON.parse(settings.text).env).toEqual({ OTEL_LOGS_EXPORTER: 'console', MINE: '1' })
+
+  await pane.unmount()
+})
+
+test('under WSL the traces are kept in the Linux home, not the Windows profile', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { USERPROFILE: '/mnt/c/Users/me' })
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(
+    await pane.find({ type: 'Text', text: '/home/me/.claude/desktop-statusline/traces' }),
+  ).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '/home/me/.claude/settings.json' })).toBeDefined()
 
   await pane.unmount()
 })
@@ -655,6 +950,39 @@ test('a request is rebuilt whole from the requests of its kind before it', () =>
   ])
   expect(fullMessages(VIEW_RECORDS, 1)).toEqual([{ role: 'user', content: 'title' }])
   expect(fullMessages(VIEW_RECORDS, 9)).toBeNull()
+})
+
+test('a request page draws whatever shape a record holds, escaped, without throwing', () => {
+  const odd = {
+    seq: 0,
+    at: '',
+    source: 'sdk',
+    model: 'm',
+    promptId: null,
+    system: 'a',
+    tools: 'b',
+    toolCount: 0,
+    messageCount: 4,
+    from: 0,
+    added: [
+      { role: 'user', content: { a: '<i>1</i>' } },
+      { role: 'user', content: [null, 7, { type: 'text', text: 42 }] },
+      null,
+      { role: 'assistant', content: [{ type: 'tool_use', name: { x: 1 }, input: null }] },
+    ],
+    usage: null,
+    response: { content: { not: 'a list' }, stop_reason: null },
+  }
+  const html = requestPage({
+    session: 's',
+    records: [odd as unknown as TraceRecord],
+    seq: 0,
+    system: { not: 'a list' } as unknown as { type: string; text: string }[],
+    tools: [null, 'x'] as unknown as { name?: string }[],
+    link: () => '#',
+  })!
+  expect(html).toContain('&lt;i&gt;1&lt;/i&gt;')
+  expect(html).not.toContain('<i>1</i>')
 })
 
 test('the browser pages show every message, escaped, and link to each other', () => {
@@ -766,6 +1094,11 @@ test('the reader draws only the rows near the window, and empty space for the re
   expect(await pane.find({ type: 'Client', key: 'disclose-trace-0' })).toBeDefined()
 
   await pane.unmount()
+})
+
+test('a match after a character whose lower case is longer keeps its place', () => {
+  // 'İ' lowers to two characters; the match after it is at its own index.
+  expect(findMatches(['İstanbul Tea'], 'tea')).toEqual([{ row: 0, start: 9, end: 12 }])
 })
 
 test('a search finds every match in a row, ignoring case', () => {

@@ -15,6 +15,10 @@ import { promptRecord, requestPage, sessionPage } from './view.mjs'
 
 /** The most one OTLP request may carry; a request body is a conversation. */
 const MAX_POST_BYTES = 64 * 1024 * 1024
+// A trace holds the whole conversation: on a system with other users, only
+// the person reads it (Windows keeps a profile's folders to its owner already).
+const PRIVATE_FOLDER = 0o700
+const PRIVATE_FILE = 0o600
 
 const [root, portText] = process.argv.slice(2)
 const port = Number(portText)
@@ -23,13 +27,32 @@ if (!root || !Number.isInteger(port)) {
   process.exit(2)
 }
 // Every trace is kept until the person deletes it: the receiver deletes nothing.
-fs.mkdirSync(root, { recursive: true })
+fs.mkdirSync(root, { recursive: true, mode: PRIVATE_FOLDER })
+// A folder made before, by an earlier receiver or the plugin, closed too: with
+// it closed, nothing under it can be reached by another user.
+try {
+  fs.chmodSync(root, PRIVATE_FOLDER)
+} catch {
+  // Not the owner's to change, or a system without modes: left as it is.
+}
+
+// One page or record the receiver cannot handle is dropped, not the receiver
+// every session's trace goes to.
+process.on('uncaughtException', error => {
+  process.stderr.write(`trace receiver: ${error?.stack ?? error}\n`)
+})
+
+/** Whether this receiver holds the port, and so owns the token file. */
+let isListening = false
 
 const store = new TraceStore(
   (name, text) => {
     const file = path.join(root, name)
-    fs.mkdirSync(path.dirname(file), { recursive: true })
-    fs.writeFileSync(file, text)
+    fs.mkdirSync(path.dirname(file), { recursive: true, mode: PRIVATE_FOLDER })
+    fs.writeFileSync(file, text, { mode: PRIVATE_FILE })
+    // The person may have deleted the folder, token and all: the pane's links
+    // need it back.
+    if (isListening && !fs.existsSync(tokenFile)) writeToken()
   },
   folder => {
     try {
@@ -44,6 +67,7 @@ const store = new TraceStore(
       return 0
     }
   },
+  name => fs.existsSync(path.join(root, name)),
 )
 
 /**
@@ -63,6 +87,11 @@ const token = (() => {
   return randomBytes(16).toString('hex')
 })()
 const link = (session, seq) => `/view/${session}${seq === undefined ? '' : `/${seq}`}?t=${token}`
+
+function writeToken() {
+  fs.mkdirSync(root, { recursive: true, mode: PRIVATE_FOLDER })
+  fs.writeFileSync(tokenFile, token, { mode: PRIVATE_FILE })
+}
 
 function readJson(file) {
   try {
@@ -84,8 +113,19 @@ function sessionRecords(session) {
     .filter(Boolean)
 }
 
-/** A page of the trace: the session's list, or one request whole. */
+/** A page of the trace, or a plain 500 when a record holds what it cannot draw. */
 function view(url, response) {
+  try {
+    page(url, response)
+  } catch (error) {
+    process.stderr.write(`trace receiver: ${error?.stack ?? error}\n`)
+    if (!response.headersSent) response.writeHead(500)
+    response.end()
+  }
+}
+
+/** A page of the trace: the session's list, or one request whole. */
+function page(url, response) {
   const match = /^\/view\/([^/]+)(?:\/(\d+))?$/.exec(url.pathname)
   const session = sessionFolder(match?.[1])
   const records = session ? sessionRecords(session) : null
@@ -124,8 +164,12 @@ function view(url, response) {
   }
   response.writeHead(200, {
     'content-type': 'text/html; charset=utf-8',
-    'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'`,
+    'content-security-policy': `default-src 'none'; style-src 'unsafe-inline'; script-src 'nonce-${nonce}'; frame-ancestors 'none'; base-uri 'none'; form-action 'none'`,
     'x-content-type-options': 'nosniff',
+    // The token is in the address, and the page holds the whole conversation:
+    // neither is handed to another site, nor kept by the browser.
+    'referrer-policy': 'no-referrer',
+    'cache-control': 'no-store',
   })
   response.end(html)
 }
@@ -173,14 +217,19 @@ function handle(request, response) {
     if (size <= MAX_POST_BYTES) chunks.push(chunk)
   })
   request.on('end', () => {
-    if (size <= MAX_POST_BYTES) {
-      try {
-        for (const record of logRecords(JSON.parse(Buffer.concat(chunks).toString('utf8')))) {
-          store.take(record)
-        }
-      } catch {
-        // Not OTLP/JSON, or not ours: answered as heard, and dropped.
+    if (size > MAX_POST_BYTES) {
+      process.stderr.write(`trace receiver: dropped a ${size}-byte export, over the limit\n`)
+      response.writeHead(413)
+      response.end()
+      return
+    }
+    try {
+      for (const record of logRecords(JSON.parse(Buffer.concat(chunks).toString('utf8')))) {
+        store.take(record)
       }
+    } catch (error) {
+      // Not OTLP/JSON, or not ours: answered as heard, and dropped.
+      process.stderr.write(`trace receiver: an export could not be read: ${error}\n`)
     }
     response.writeHead(200, { 'content-type': 'application/json' })
     response.end('{}')
@@ -195,7 +244,8 @@ server.on('error', error => {
 })
 // The token is written once the port is this receiver's, never over a running one's.
 server.on('listening', () => {
-  fs.writeFileSync(tokenFile, token)
+  isListening = true
+  writeToken()
   // A browser may reach `localhost` over IPv6 first: the pages answer there too.
   const v6 = http.createServer(handle)
   v6.on('error', () => undefined)

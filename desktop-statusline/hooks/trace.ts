@@ -6,12 +6,13 @@ import {
   SettingsShapeError,
   writeSettings,
 } from './tools'
+import { fullMessages, isMain, promptRecord as sharedPromptRecord } from '../trace/store.mjs'
 
 /** The loopback port the trace receiver listens on, and Claude Code exports to. */
 export const TRACE_PORT = 43180
 
 /** What the receiver's `GET /health` answers (trace/store.mjs keeps the same text). */
-export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 8'
+export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 9'
 /** What every version of the receiver's health answer opens with. */
 export const RECEIVER_NAME = 'desktop-statusline trace receiver'
 
@@ -53,21 +54,36 @@ export function isTraceOn(settings: unknown): boolean {
  * everything else kept. Off takes out only what still holds tracing's value,
  * so a value the person set by hand stays.
  */
-export function editTraceEnv(text: string, isOn: boolean): string {
+export function editTraceEnv(
+  text: string,
+  isOn: boolean,
+  before: Record<string, string> = {},
+): { text: string; before: Record<string, string> } {
   const settings = parseSettings(text)
   const env = settings.env ?? {}
   if (!isPlainObject(env)) {
     throw new SettingsShapeError('env in settings.json is not an object, so it was left as is.')
   }
   const next: Record<string, unknown> = { ...env }
+  // On, what the person had set under one of tracing's names is kept, to give
+  // back; off, a value tracing set goes, or the person's own comes back. One
+  // the person changed since is theirs, and stays.
+  const replaced: Record<string, string> = {}
   for (const [key, value] of Object.entries(TRACE_ENV)) {
-    if (isOn) next[key] = value
-    else if (next[key] === value) delete next[key]
+    if (isOn) {
+      const had = next[key]
+      if (typeof had === 'string' && had !== value) replaced[key] = had
+      next[key] = value
+    } else if (next[key] === value) {
+      if (before[key] !== undefined) next[key] = before[key]
+      else delete next[key]
+    }
   }
-  if (JSON.stringify(next) === JSON.stringify(env)) return text
+  const kept = isOn ? { ...before, ...replaced } : {}
+  if (JSON.stringify(next) === JSON.stringify(env)) return { text, before: kept }
   settings.env = next
 
-  return writeSettings(text, settings)
+  return { text: writeSettings(text, settings), before: kept }
 }
 
 /** A request the receiver kept: what trace/store.mjs writes for each. */
@@ -77,14 +93,19 @@ export type TraceRecord = {
   source: string
   model: string
   promptId: string | null
-  system: string
-  tools: string
+  /** The hashes its system prompt and tool list are kept under; null when it could not be read. */
+  system: string | null
+  tools: string | null
   toolCount: number
   messageCount: number
   from: number
   /** Goes on from the request before, adding to its messages (trace/store.mjs). */
   continues?: boolean
   added: ApiMessage[]
+  /** A body that could not be read (cut short, too large to export whole): its length. */
+  unreadable?: number
+  /** A request whose file is too large to read in the pane: listed, and opened in the browser. */
+  tooLarge?: boolean
   usage: TraceItem['usage']
   response: { content?: ApiBlock[]; stop_reason?: string | null } | null
 }
@@ -105,41 +126,15 @@ type SystemBlock = { type: string; text: string }
 
 /** The main loop's requests, by the engine's name for where a request came from. */
 export function isMainSource(source: string): boolean {
-  return source === 'sdk' || source.startsWith('repl_main_thread')
+  return isMain(source)
 }
 
 /**
- * Whether a request goes on from the one before, adding to its messages: newer
- * Claude Code sends the system prompt and the tools once, then the billing
- * header, no tools and the new messages. The receiver marks such a request;
- * one it kept before it knew to is a main request with no tools whose
- * messages start afresh. (trace/view.mjs reads them the same way.)
- */
-export function goesOn(record: TraceRecord, hasBefore: boolean): boolean {
-  return (
-    record.continues === true ||
-    (hasBefore &&
-      record.continues === undefined &&
-      isMainSource(record.source) &&
-      record.toolCount === 0 &&
-      record.from === 0)
-  )
-}
-
-/**
- * The request whose system prompt and tools a request was sent with: itself,
- * or for one that goes on from the one before, the last of its kind that
- * carried them.
+ * The request whose system prompt and tools a request was sent with
+ * (trace/store.mjs, which the receiver's pages read them by too).
  */
 export function promptRecord(records: readonly TraceRecord[], seq: number): TraceRecord | null {
-  const target = records.find(one => one.seq === seq)
-  if (!target) return null
-  if (target.toolCount > 0) return target
-  const before = records
-    .filter(one => one.source === target.source && one.seq <= seq && one.toolCount > 0)
-    .sort((a, b) => b.seq - a.seq)
-
-  return before[0] ?? target
+  return sharedPromptRecord(records, seq)
 }
 
 /** Where a request came from, in a word. */
@@ -199,7 +194,12 @@ function blockLabel(block: ApiBlock): string {
 
 /** What a request added and what came back, as the Trace tab lists it. */
 export function summarize(record: TraceRecord): TraceItem {
-  const added = record.added.flatMap(message => blocksOf(message).map(blockLabel))
+  const added =
+    record.unreadable !== undefined
+      ? ['body too large to record']
+      : record.tooLarge
+        ? ['too large to read here: open it in your browser']
+        : record.added.flatMap(message => blocksOf(message).map(blockLabel))
   const answer = record.response?.content ?? []
   const said = answer.find(one => one.type === 'text' && (one.text ?? '').trim() !== '')
   const calls = answer.filter(one => one.type === 'tool_use').map(one => String(one.name))
@@ -266,12 +266,24 @@ export type RowMatch = { row: number; start: number; end: number }
 export const MAX_MATCHES = 5_000
 
 /** Where `query` appears in `rows`, ignoring case; within a row only, as rows are drawn. */
+/**
+ * Text in lower case, one character for one: a character whose lower case is
+ * longer (`İ`) stays as it is, so a match's place is the same in the row.
+ */
+function foldCase(text: string): string {
+  return text.replace(/[\s\S]/g, one => {
+    const lower = one.toLowerCase()
+
+    return lower.length === one.length ? lower : one
+  })
+}
+
 export function findMatches(rows: readonly string[], query: string): RowMatch[] {
-  const needle = query.toLowerCase()
+  const needle = foldCase(query)
   if (needle.trim() === '') return []
   const found: RowMatch[] = []
   for (let row = 0; row < rows.length && found.length < MAX_MATCHES; row += 1) {
-    const haystack = rows[row]!.toLowerCase()
+    const haystack = foldCase(rows[row]!)
     for (
       let at = haystack.indexOf(needle);
       at !== -1;
@@ -347,14 +359,7 @@ export function wholeRequestText(
 ): string | null {
   const record = records.find(one => one.seq === seq)
   if (!record) return null
-  let messages: ApiMessage[] = []
-  for (const one of [...records].sort((a, b) => a.seq - b.seq)) {
-    if (one.source !== record.source) continue
-    messages = goesOn(one, messages.length > 0)
-      ? [...messages, ...one.added]
-      : [...messages.slice(0, one.from), ...one.added]
-    if (one.seq === seq) break
-  }
+  const messages: ApiMessage[] = fullMessages(records, seq) ?? []
   // What this request added comes last, however it was sent.
   const firstNew = Math.max(0, messages.length - record.added.length)
   const lines: string[] = []

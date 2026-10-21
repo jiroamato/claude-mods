@@ -1,6 +1,6 @@
 // The trace receiver's pages: a session's requests, and each request whole,
-// as the model received it, for a browser on this machine. Plain JavaScript
-// with no imports, like store.mjs, so Node runs it and the tests load it.
+// as the model received it, for a browser on this machine. Plain JavaScript,
+// importing only store.mjs, so Node runs it and the tests load it.
 //
 // The pages draw like the plugin's pane in the desktop app: a warm neutral
 // surface, bordered cards of rows with hairline dividers, semibold headings
@@ -9,6 +9,10 @@
 // which expands and collapses sections and copies blocks, runs only with the
 // nonce the receiver gives each response, and the pages work without it.
 
+import { fullMessages, goesOn, isMain, promptRecord } from './store.mjs'
+
+export { fullMessages, goesOn, promptRecord }
+
 /** Text safe inside HTML. */
 export function escapeHtml(text) {
   return String(text)
@@ -16,61 +20,6 @@ export function escapeHtml(text) {
     .replace(/</g, '&lt;')
     .replace(/>/g, '&gt;')
     .replace(/"/g, '&quot;')
-}
-
-/**
- * The messages a request sent, whole: each request keeps only what followed
- * the previous one of its kind, so they are rebuilt from the first.
- */
-export function fullMessages(records, seq) {
-  const target = records.find(one => one.seq === seq)
-  if (!target) return null
-  let messages = []
-  for (const record of [...records].sort((a, b) => a.seq - b.seq)) {
-    if (record.source !== target.source) continue
-    messages = goesOn(record, messages.length > 0)
-      ? [...messages, ...record.added]
-      : [...messages.slice(0, record.from), ...record.added]
-    if (record.seq === seq) break
-  }
-
-  return messages
-}
-
-/** The main loop's requests, by the engine's name for where a request came from. */
-function isMain(source) {
-  return source === 'sdk' || String(source).startsWith('repl_main_thread')
-}
-
-/**
- * Whether a request goes on from the one before, adding to its messages: the
- * receiver marks it so; one it kept before it knew to is a main request with
- * no tools whose messages start afresh.
- */
-export function goesOn(record, hasBefore) {
-  return (
-    record.continues === true ||
-    (hasBefore &&
-      record.continues === undefined &&
-      isMain(record.source) &&
-      record.toolCount === 0 &&
-      record.from === 0)
-  )
-}
-
-/**
- * The request whose system prompt and tools a request was sent with: itself,
- * or for one that goes on from the one before, the last of its kind that
- * carried them.
- */
-export function promptRecord(records, seq) {
-  const target = records.find(one => one.seq === seq)
-  if (!target) return null
-  const before = records
-    .filter(one => one.source === target.source && one.seq <= seq && one.toolCount > 0)
-    .sort((a, b) => b.seq - a.seq)
-
-  return target.toolCount > 0 ? target : (before[0] ?? target)
 }
 
 /** Characters per token, as the pane assumes (hooks/tools.ts, CHARS_PER_TOKEN). */
@@ -162,8 +111,28 @@ function pill(label, tone, title) {
 
 const ROLE_TONE = { user: 'blue', assistant: 'orange', system: 'amber' }
 
+/**
+ * A message's content as blocks, whatever shape a record holds: a string is
+ * one text block, and anything that is not a block is shown as its JSON.
+ */
 function blocksOf(content) {
-  return typeof content === 'string' ? [{ type: 'text', text: content }] : (content ?? [])
+  if (typeof content === 'string') return [{ type: 'text', text: content }]
+  if (content === null || content === undefined) return []
+
+  return (Array.isArray(content) ? content : [content]).map(one =>
+    one !== null && typeof one === 'object' && !Array.isArray(one)
+      ? one
+      : { type: 'value', value: one },
+  )
+}
+
+/** A field as text, whatever it holds. */
+function textOf(value) {
+  return typeof value === 'string'
+    ? value
+    : value === undefined || value === null
+      ? ''
+      : JSON.stringify(value)
 }
 
 function contentText(content) {
@@ -193,16 +162,16 @@ function textNote(text) {
 function blockLabel(one) {
   switch (one.type) {
     case 'text':
-      return textNote(one.text ?? '') ?? `“${oneLine(one.text ?? '', 80)}”`
+      return textNote(textOf(one.text)) ?? `“${oneLine(textOf(one.text), 80)}”`
     case 'tool_use':
-      return `→ ${one.name}`
+      return `→ ${textOf(one.name)}`
     case 'tool_result':
       return one.is_error ? 'tool result, an error' : 'tool result'
     case 'thinking':
     case 'redacted_thinking':
       return 'thinking'
     default:
-      return String(one.type)
+      return textOf(one.type) || 'value'
   }
 }
 
@@ -210,9 +179,9 @@ function blockLabel(one) {
 function blockChars(one) {
   switch (one.type) {
     case 'text':
-      return (one.text ?? '').length
+      return textOf(one.text).length
     case 'thinking':
-      return (one.thinking ?? '').length
+      return textOf(one.thinking).length
     case 'tool_use':
       return JSON.stringify(one.input ?? {}).length
     case 'tool_result':
@@ -253,13 +222,13 @@ function block(one) {
     `<div class="block${cls ? ` ${cls}` : ''}">${head}<div class="body">${body}</div><button class="copy js-only" type="button">Copy</button></div>`
   switch (one.type) {
     case 'text': {
-      const text = one.text ?? ''
+      const text = textOf(one.text)
       const note = textNote(text)
 
       return wrap(note ? 'quiet' : '', note ? kind(note, 'grey') : '', pre(text))
     }
     case 'thinking':
-      return wrap('quiet', kind('thinking', 'grey'), pre(one.thinking ?? ''))
+      return wrap('quiet', kind('thinking', 'grey'), pre(textOf(one.thinking)))
     case 'redacted_thinking':
       return wrap(
         'quiet',
@@ -267,7 +236,7 @@ function block(one) {
         '<div class="empty">kept by the API</div>',
       )
     case 'tool_use':
-      return wrap('', kind('tool call', 'amber', one.name), fields(one.input))
+      return wrap('', kind('tool call', 'amber', textOf(one.name)), fields(one.input))
     case 'tool_result':
       return wrap(
         one.is_error ? 'error' : '',
@@ -278,7 +247,7 @@ function block(one) {
         pre(contentText(one.content)),
       )
     default:
-      return wrap('', kind(String(one.type), 'grey'), pre(JSON.stringify(one, null, 2)))
+      return wrap('', kind(textOf(one.type) || 'value', 'grey'), pre(JSON.stringify(one, null, 2)))
   }
 }
 
@@ -473,7 +442,9 @@ function page(title, body, nonce) {
 export function requestPage({ session, records, seq, system, tools, link, nonce }) {
   const record = records.find(one => one.seq === seq)
   if (!record) return null
-  const messages = fullMessages(records, seq) ?? []
+  const messages = (fullMessages(records, seq) ?? []).filter(
+    one => one !== null && typeof one === 'object',
+  )
   // What this request added comes last, however it was sent.
   const firstNew = Math.max(0, messages.length - record.added.length)
   const newCount = messages.length - firstNew
@@ -485,27 +456,27 @@ export function requestPage({ session, records, seq, system, tools, link, nonce 
       ? `<a class="${cls}" href="${link(session, to)}" title="${title}"><span class="chev"></span></a>`
       : `<span class="${cls}"><span class="chev"></span></span>`
 
-  const systemBlocks = system ?? []
-  const systemChars = systemBlocks.reduce((sum, one) => sum + (one.text ?? '').length, 0)
+  const systemBlocks = blocksOf(Array.isArray(system) ? system : [])
+  const systemChars = systemBlocks.reduce((sum, one) => sum + textOf(one.text).length, 0)
   const systemRows = systemBlocks
     .map((one, index) =>
       row({
         label: `Block ${index + 1}`,
         tag: one.cache_control ? '<span class="tag">cached</span>' : '',
-        preview: escapeHtml(oneLine(one.text ?? '', 120)),
-        figure: `${short((one.text ?? '').length)} chars`,
-        body: pre(one.text ?? ''),
+        preview: escapeHtml(oneLine(textOf(one.text), 120)),
+        figure: `${short(textOf(one.text).length)} chars`,
+        body: pre(textOf(one.text)),
       }),
     )
     .join('')
 
-  const toolList = tools ?? []
+  const toolList = blocksOf(Array.isArray(tools) ? tools : [])
   const toolChars = toolList.reduce((sum, one) => sum + JSON.stringify(one).length, 0)
   const toolRows = toolList
     .map(one =>
       row({
-        label: `<code>${escapeHtml(one.name ?? 'tool')}</code>`,
-        preview: escapeHtml(oneLine(one.description ?? '', 120)),
+        label: `<code>${escapeHtml(textOf(one.name) || 'tool')}</code>`,
+        preview: escapeHtml(oneLine(textOf(one.description), 120)),
         figure: `${short(JSON.stringify(one).length)} chars`,
         body: pre(JSON.stringify(one, null, 2)),
       }),
