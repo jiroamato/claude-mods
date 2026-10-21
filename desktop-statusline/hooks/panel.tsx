@@ -534,7 +534,7 @@ export type ReaderRow = {
 /** The reader's top, in rows: its line back, its search, and a row of space under them. */
 export const READER_TOP_ROWS = 4
 
-/** The key of the row the reader scrolls to: the one holding the current match. */
+/** The key of the row holding the current match, which the reader scrolls to. */
 export const READER_HIT_KEY = 'reader-hit'
 
 // A match, and the current one, as the desktop marks found text.
@@ -623,10 +623,13 @@ function Reader(props: {
         <Client key={READER_KEY} module="./reader.tsx" props={bar} width="100%" height={1} />
         <Box height={2} flexShrink={0} flexDirection="row" alignItems="center" columnGap={1}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
+            {/* No `value`: the field keeps what is typed. Drawn with one, each
+                keystroke's redraw sets the field back to the state's text, and
+                a key pressed meanwhile is lost. The field is fresh at each
+                opening, as the reader is drawn anew, and the state starts empty. */}
             <Input
               key="reader-search"
               placeholder="Search this request"
-              value={search.query}
               submitLabel="next"
               onInput={value => props.onSearch(value)}
               onSubmit={() => props.onStep(1)}

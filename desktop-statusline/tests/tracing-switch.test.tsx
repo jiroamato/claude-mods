@@ -3,6 +3,7 @@ import type { On } from 'claude-code'
 
 import {
   RECEIVER_HEALTH,
+  currentTrace,
   differingNames,
   editTraceEnv,
   isTraceOn,
@@ -214,4 +215,33 @@ test('a session traced from its start whose folder was deleted does not say it s
   expect((await pane.find({ key: 'tracing' }))?.props).toMatchObject({ label: 'Turn off tracing' })
 
   await pane.unmount()
+})
+
+test('a trace state an earlier version kept is read in this version’s shape', () => {
+  // What a version before `replaced` and `differing` wrote, still in the state after a reload.
+  const kept = {
+    status: 'on',
+    items: [{ seq: 0 }],
+    prompt: null,
+    view: { session: 's', token: 't' },
+  }
+  expect(currentTrace(kept)).toEqual({
+    status: 'on',
+    items: [{ seq: 0 }],
+    prompt: null,
+    view: { session: 's', token: 't' },
+    replaced: [],
+    differing: [],
+  })
+  expect(currentTrace(null)).toMatchObject({
+    status: 'off',
+    items: [],
+    replaced: [],
+    differing: [],
+  })
+  expect(currentTrace({ status: 'nonsense', items: 'x', view: {} })).toMatchObject({
+    status: 'off',
+    items: [],
+    view: null,
+  })
 })

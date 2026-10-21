@@ -1,4 +1,4 @@
-import type { PromptSection, TraceItem } from '../types'
+import type { PromptSection, TraceItem, TraceState, TraceStatus } from '../types'
 import {
   CHARS_PER_TOKEN,
   isPlainObject,
@@ -142,6 +142,41 @@ export function replacedNames(before: unknown): string[] {
       ([key, value]) => before[key] !== null && before[key] !== undefined && before[key] !== value,
     )
     .map(([key]) => key)
+}
+
+/** The trace state's statuses, as this version names them. */
+const TRACE_STATUSES: readonly TraceStatus[] = [
+  'off',
+  'next-session',
+  'emptied',
+  'no-node',
+  'unreachable',
+  'elsewhere',
+  'on',
+]
+
+/**
+ * The trace state as this version shapes it, whatever is kept: a reload keeps
+ * what an earlier version of the plugin wrote, which may lack a field this
+ * one reads (`replaced`, `differing`), until the next refresh writes it anew.
+ * Each field is taken where it has this version's shape, else its default.
+ */
+export function currentTrace(value: unknown): TraceState {
+  const kept = isPlainObject(value) ? value : {}
+  const list = (field: unknown): unknown[] => (Array.isArray(field) ? field : [])
+  const status = TRACE_STATUSES.find(one => one === kept.status) ?? 'off'
+  const view = kept.view
+  const isView =
+    isPlainObject(view) && typeof view.session === 'string' && typeof view.token === 'string'
+
+  return {
+    status,
+    items: list(kept.items) as TraceState['items'],
+    prompt: Array.isArray(kept.prompt) ? (kept.prompt as TraceState['prompt']) : null,
+    view: isView ? (view as TraceState['view']) : null,
+    replaced: list(kept.replaced).filter(one => typeof one === 'string') as string[],
+    differing: list(kept.differing).filter(one => typeof one === 'string') as string[],
+  }
 }
 
 /** A request the receiver kept: what trace/store.mjs writes for each. */
