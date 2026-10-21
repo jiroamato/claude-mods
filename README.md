@@ -46,7 +46,9 @@ cannot show, in four tabs, each with its size as `/context` counts it:
   (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR`), so new sessions in every
   project start without it. **Put back** undoes both. A tool the session started
   without comes back in the next session. Deleting the name from `permissions.deny`
-  by hand works too.
+  by hand works too. Best done at the start of a session: the tools lead what the
+  prompt cache keeps, so changing them later sends the next request uncached, at
+  full price.
 - **Prompt**: the system prompt, section by section, with each section's approximate
   size. Open a section to read its text. With tracing on, it shows the prompt exactly
   as the last request sent it, in two groups: Claude Code's own sections, and what was

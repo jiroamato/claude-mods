@@ -715,6 +715,14 @@ function ToolsTab(props: ContextPaneProps) {
           'it) and adds it to `permissions.deny` in your user settings, so new sessions in every ' +
           'project start without it. Put back undoes both.',
       })}
+      {Intro({
+        ui: props.ui,
+        // The tools are the start of what the prompt cache keeps, so a change
+        // to them leaves nothing of it to read.
+        text:
+          'Best done at the start of a session: a change to the tools later clears the prompt ' +
+          'cache, so the next request sends the whole conversation again uncached and costs more.',
+      })}
       {Groups({
         ui: props.ui,
         children: groups.map(group =>
