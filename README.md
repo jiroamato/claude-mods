@@ -85,12 +85,14 @@ the ones it set and nothing else:
 Only the log events are exported, to a small receiver on this machine that the
 plugin starts with [Node.js](https://nodejs.org) (which has to be on your `PATH`).
 One receiver serves every session. It keeps each session's requests in a folder of
-its own under `~/.claude/desktop-statusline/traces/` for 14 days, always there
-whatever `$CLAUDE_CONFIG_DIR` says, and serves the browser pages on `localhost`
-only, behind a token it writes beside them. The first session after you install
-the plugin makes the folder, tracing on or off, with a `README.txt` saying what it
-holds. Delete that folder to remove every trace; the Trace tab shows its full
-path, and the next session makes it again, empty.
+its own under `~/.claude/desktop-statusline/traces/`, always there whatever
+`$CLAUDE_CONFIG_DIR` says, and serves the browser pages on `localhost` only,
+behind a token it writes beside them. The first session after you install the
+plugin makes the folder, tracing on or off, with a `README.txt` saying what it
+holds. Nothing in it is ever deleted for you: delete the folder to remove every
+trace, and the next session makes it again, empty. The Trace tab shows its full
+path, and **Open traces folder** opens it in Explorer, Finder or your desktop's
+file manager.
 
 A trace holds the whole conversation, file contents and command output included.
 It never leaves your machine, but anyone who can read your files can read it.

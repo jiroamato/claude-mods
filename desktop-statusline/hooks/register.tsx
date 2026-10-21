@@ -388,8 +388,8 @@ const TRACES_README =
   'Traces of desktop-statusline, a plugin for Claude Code.\n' +
   '\n' +
   'With tracing on (the Trace tab of its Context details pane), every request a\n' +
-  'Claude Code session sends to the model is kept here, a folder per session, for\n' +
-  '14 days. They hold the whole conversation, file contents and command output\n' +
+  'Claude Code session sends to the model is kept here, a folder per session, until\n' +
+  'you delete it. They hold the whole conversation, file contents and command output\n' +
   'included, and never leave this machine.\n' +
   '\n' +
   'Delete this folder to remove every trace. The next session makes it again, empty.\n'
@@ -403,6 +403,33 @@ const TRACES_README =
 async function ensureTraceFolder($: EngineInterface): Promise<void> {
   const root = await traceRoot($)
   if (!(await $.fs.exists(root))) await $.fs.write(`${root}/README.txt`, TRACES_README)
+}
+
+/**
+ * Opens the traces folder in the system's file manager: Explorer on Windows,
+ * Finder on macOS, the desktop's own through `xdg-open` elsewhere. The folder
+ * is made first, so there is always one to open.
+ */
+async function showTraceFolder($: EngineInterface): Promise<void> {
+  try {
+    await ensureTraceFolder($)
+    const folder = await traceRoot($)
+    if ((await $.env.get('OS')) === 'Windows_NT') {
+      // Explorer exits with 1 whether or not it opened the folder, so its code is not read.
+      await $.process.run(['explorer.exe', folder.replace(/\//g, '\\')])
+    } else {
+      const system = await $.process.run(['uname', '-s'])
+      const opener = system.stdout.trim() === 'Darwin' ? 'open' : 'xdg-open'
+      const shown = await $.process.run([opener, folder])
+      if (shown.exitCode !== 0) {
+        throw new Error(shown.stderr.trim() || `${opener} exited with ${shown.exitCode}`)
+      }
+    }
+    await update($, traceError, () => null)
+  } catch (error) {
+    const reason = error instanceof Error ? error.message : String(error)
+    await update($, traceError, () => `Could not open the traces folder: ${reason}`)
+  }
 }
 
 /** The files tracing touches, as the Trace tab names them; null where no home folder is set. */
@@ -949,6 +976,7 @@ export const register: Register = on => {
       traceError: tracingError,
       traceText: openSeq === undefined ? null : traceRequestText(Number(openSeq)),
       onTracing: isOn => void setTracing($, isOn),
+      onShowTraces: () => void showTraceFolder($),
       onToggle: (name, shouldRemove) =>
         void setRemoved($, name, shouldRemove).catch(error =>
           update($, toolError, () => String(error)),

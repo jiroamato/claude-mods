@@ -13,8 +13,6 @@ import path from 'node:path'
 import { HEALTH, logRecords, sessionFolder, TraceStore } from './store.mjs'
 import { promptRecord, requestPage, sessionPage } from './view.mjs'
 
-/** A session left this long untouched is deleted at start. */
-const KEEP_DAYS = 14
 /** The most one OTLP request may carry; a request body is a conversation. */
 const MAX_POST_BYTES = 64 * 1024 * 1024
 
@@ -24,16 +22,8 @@ if (!root || !Number.isInteger(port)) {
   process.stderr.write('usage: node receiver.mjs <root> <port>\n')
   process.exit(2)
 }
+// Every trace is kept until the person deletes it: the receiver deletes nothing.
 fs.mkdirSync(root, { recursive: true })
-
-// Sessions nobody has written to in a while go.
-const cutoff = Date.now() - KEEP_DAYS * 24 * 60 * 60 * 1000
-for (const entry of fs.readdirSync(root, { withFileTypes: true })) {
-  const folder = path.join(root, entry.name)
-  if (entry.isDirectory() && fs.statSync(folder).mtimeMs < cutoff) {
-    fs.rmSync(folder, { recursive: true, force: true })
-  }
-}
 
 const store = new TraceStore(
   (name, text) => {

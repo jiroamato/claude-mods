@@ -500,6 +500,8 @@ export type ContextPaneProps = {
   onToggle: (name: string, isRemoved: boolean) => void
   onExpand: (key: string) => void
   onTracing: (isOn: boolean) => void
+  /** Opens the traces folder in the system's file manager. */
+  onShowTraces: () => void
   /** The page of the open request or section's text. */
   page: number
   onPage: (page: number) => void
@@ -941,17 +943,16 @@ function tracingNotes(places: TracePlaces | null): string[] {
       'applies to every Claude Code session you start after it, in the terminal and in the ' +
       'desktop app. Turning it off takes them back out, and nothing else.',
     `The requests go only to a receiver on this machine, which keeps them in ${traces}, a ` +
-      'folder per session, for 14 days. They hold the whole conversation, file contents and ' +
-      'command output included. Delete the folder to remove them.',
+      'folder per session, until you delete them. They hold the whole conversation, file ' +
+      'contents and command output included. Delete the folder to remove them.',
   ]
 }
 
 /** Where traces are kept, said under the list: the one folder, to find or delete. */
 function keptNote(places: TracePlaces | null): string {
   return places
-    ? `Kept in \`${shownPath(places.traces)}\` for 14 days, a folder per session. Delete the ` +
-        'folder to remove them.'
-    : 'Kept in your home folder for 14 days.'
+    ? `Kept in \`${shownPath(places.traces)}\` until you delete them, one folder per session.`
+    : 'Kept in your home folder until you delete them.'
 }
 
 const TRACE_NOTE: Record<Exclude<TraceState['status'], 'on' | 'off'>, string> = {
@@ -989,7 +990,16 @@ function TraceTab(props: ContextPaneProps) {
   const items = [...traced.items].reverse()
   const cost = traced.items.reduce((sum, one) => sum + (one.usage?.costUsd ?? 0), 0)
   const switchButton = (
-    <Box flexDirection="row">
+    <Box flexDirection="row" columnGap={1}>
+      {/* Where the traces are, in Explorer, Finder or the desktop's file manager. */}
+      {props.places && (
+        <Button
+          key="trace-folder"
+          label="Open traces folder"
+          variant="secondary"
+          onPress={() => props.onShowTraces()}
+        />
+      )}
       <Button
         key="tracing"
         label={traced.status === 'off' ? 'Turn on tracing' : 'Turn off tracing'}

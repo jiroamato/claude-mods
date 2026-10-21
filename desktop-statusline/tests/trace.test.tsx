@@ -225,6 +225,9 @@ function tracedEngine(
     written: [] as string[],
     /** Paths `fs.exists` denies, as the engine resolves them; every other one exists. */
     missing: [] as RegExp[],
+    /** Every command run, and what `uname -s` answers. */
+    ran: [] as string[][],
+    system: 'Linux',
   }
   mock.clock(on, { now: 1_000 })
   mock.store(on)
@@ -256,7 +259,7 @@ function tracedEngine(
   on('session.id', async () => ({ value: 'session-1' }))
   on('session.turns', async () => ({ value: turns }))
   on('http.fetch', async () => ({
-    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 7' },
+    value: { status: 200, ok: true, headers: {}, text: 'desktop-statusline trace receiver 8' },
   }))
   on('session.model', async () => ({ value: 'Opus 5.5' }))
   on('session.cwd', async () => ({ value: '/repo' }))
@@ -265,15 +268,19 @@ function tracedEngine(
   }))
   on('command.list', async () => ({ value: [] }))
   on('prompt.compose', async () => ({ sections: [] }))
-  on('process.run', async () => ({
-    value: {
-      exitCode: 1,
-      stdout: '',
-      stderr: '',
-      isStdoutTruncated: false,
-      isStderrTruncated: false,
-    },
-  }))
+  on('process.run', async (_$, e) => {
+    settings.ran.push([...e.argv])
+
+    return {
+      value: {
+        exitCode: e.argv[0] === 'uname' ? 0 : 1,
+        stdout: e.argv[0] === 'uname' ? `${settings.system}\n` : '',
+        stderr: e.argv[0] === 'xdg-open' ? 'no method available for opening' : '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
   on('config.list', async () => ({ value: [] }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
 
@@ -381,7 +388,10 @@ test('the Trace tab says what turning tracing on changes, and where the traces a
   // On, the list says where its traces are kept.
   await pane.press({ key: 'tracing' })
   expect(
-    await pane.find({ type: 'Text', text: /^Kept in .* for 14 days, a folder per session\./ }),
+    await pane.find({
+      type: 'Text',
+      text: /^Kept in .* until you delete them, one folder per session\.$/,
+    }),
   ).toBeDefined()
 
   await pane.unmount()
@@ -427,6 +437,47 @@ test('a session leaves a traces folder that is there as it is', async ($, on) =>
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
   expect(settings.written).toEqual([])
+
+  await pane.unmount()
+})
+
+test('the traces folder opens in the system’s file manager', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { OS: 'Windows_NT' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  const opened = () => settings.ran.filter(argv => argv[0] !== 'git')
+
+  // Windows: Explorer, with the path as Windows writes it, its exit code of 1 no failure.
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()).toEqual([['explorer.exe', expect.stringMatching(/\\traces$/)]])
+  expect(opened()[0]![1]).not.toContain('/')
+  expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+test('the traces folder opens in Finder on macOS and through xdg-open elsewhere', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  const opened = () => settings.ran.filter(argv => argv[0] !== 'git' && argv[0] !== 'uname')
+
+  settings.system = 'Darwin'
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()).toEqual([['open', expect.stringMatching(/traces$/)]])
+
+  // A file manager that fails says why.
+  settings.system = 'Linux'
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()[1]).toEqual(['xdg-open', expect.stringMatching(/traces$/)])
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: 'Could not open the traces folder: no method available for opening',
+    }),
+  ).toBeDefined()
 
   await pane.unmount()
 })
