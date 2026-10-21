@@ -1,6 +1,7 @@
 import { expect, mock, test } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
+import { FOLDER_VARIABLE, SHOW_FOLDER_SCRIPT, encodedCommand } from '../hooks/folder'
 import { pageStarts } from '../hooks/panel'
 import {
   editTraceEnv,
@@ -227,6 +228,8 @@ function tracedEngine(
     missing: [] as RegExp[],
     /** Every command run, and what `uname -s` answers. */
     ran: [] as string[][],
+    /** The variables each command was given. */
+    env: [] as Record<string, string>[],
     system: 'Linux',
   }
   mock.clock(on, { now: 1_000 })
@@ -270,10 +273,11 @@ function tracedEngine(
   on('prompt.compose', async () => ({ sections: [] }))
   on('process.run', async (_$, e) => {
     settings.ran.push([...e.argv])
+    settings.env.push({ ...e.init?.env })
 
     return {
       value: {
-        exitCode: e.argv[0] === 'uname' ? 0 : 1,
+        exitCode: e.argv[0] === 'uname' || e.argv[0] === 'powershell.exe' ? 0 : 1,
         stdout: e.argv[0] === 'uname' ? `${settings.system}\n` : '',
         stderr: e.argv[0] === 'xdg-open' ? 'no method available for opening' : '',
         isStdoutTruncated: false,
@@ -448,13 +452,33 @@ test('the traces folder opens in the system’s file manager', async ($, on) => 
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   const opened = () => settings.ran.filter(argv => argv[0] !== 'git')
 
-  // Windows: Explorer, with the path as Windows writes it, its exit code of 1 no failure.
+  // Windows: the script that opens Explorer shown and in front, encoded as
+  // PowerShell takes it, the folder as Windows writes it beside it.
   await pane.press({ key: 'trace-folder' })
-  expect(opened()).toEqual([['explorer.exe', expect.stringMatching(/\\traces$/)]])
-  expect(opened()[0]![1]).not.toContain('/')
+  expect(opened()).toEqual([
+    [
+      'powershell.exe',
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      encodedCommand(SHOW_FOLDER_SCRIPT),
+    ],
+  ])
+  const folder = settings.env.at(-1)![FOLDER_VARIABLE]
+  expect(folder).toMatch(/\\traces$/)
+  expect(folder).not.toContain('/')
   expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
 
   await pane.unmount()
+})
+
+test('a script is encoded as PowerShell takes it, UTF-16LE in base64', () => {
+  expect(encodedCommand('dir')).toBe('ZABpAHIA')
+  expect(encodedCommand('é!')).toBe('6QAhAA==')
+  expect(encodedCommand('ab')).toBe('YQBiAA==')
+  // The script reads the folder from its variable, never from its own text.
+  expect(SHOW_FOLDER_SCRIPT).toContain(`$env:${FOLDER_VARIABLE}`)
+  expect(SHOW_FOLDER_SCRIPT).toContain('start explorer.exe')
 })
 
 test('the traces folder opens in Finder on macOS and through xdg-open elsewhere', async ($, on) => {

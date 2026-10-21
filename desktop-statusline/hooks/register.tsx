@@ -11,6 +11,7 @@ import type {
   TraceStatus,
 } from '../types'
 import { buildSnapshot, currentSnapshot } from './context'
+import { FOLDER_VARIABLE, SHOW_FOLDER_SCRIPT, encodedCommand } from './folder'
 import {
   ContextPane,
   DISCLOSURE_PREFIX,
@@ -415,8 +416,24 @@ async function showTraceFolder($: EngineInterface): Promise<void> {
     await ensureTraceFolder($)
     const folder = await traceRoot($)
     if ((await $.env.get('OS')) === 'Windows_NT') {
-      // Explorer exits with 1 whether or not it opened the folder, so its code is not read.
-      await $.process.run(['explorer.exe', folder.replace(/\//g, '\\')])
+      // Explorer, shown and in front (./folder.ts). An encoded command runs
+      // whatever the machine's script execution policy.
+      const shown = await $.process.run(
+        [
+          'powershell.exe',
+          '-NoProfile',
+          '-NonInteractive',
+          '-EncodedCommand',
+          encodedCommand(SHOW_FOLDER_SCRIPT),
+        ],
+        { env: { [FOLDER_VARIABLE]: folder.replace(/\//g, '\\') } },
+      )
+      if (shown.exitCode !== 0) {
+        throw new Error(
+          /Explorer did not open[^\r\n]*/.exec(shown.stderr)?.[0] ??
+            `PowerShell exited with ${shown.exitCode}`,
+        )
+      }
     } else {
       const system = await $.process.run(['uname', '-s'])
       const opener = system.stdout.trim() === 'Darwin' ? 'open' : 'xdg-open'
