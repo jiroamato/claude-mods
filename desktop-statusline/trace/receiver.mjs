@@ -102,7 +102,11 @@ function readJson(file) {
   }
 }
 
-/** A session's requests as the store wrote them, or null for a session it never saw. */
+/**
+ * A session's requests as the store wrote them, or null for a session it never
+ * saw. Each read whole: the heads beside large ones (`<seq>.head.json`) are
+ * for the pane, which cannot read those, and are left out.
+ */
 function sessionRecords(session) {
   const folder = path.join(root, session)
   if (!fs.existsSync(folder)) return null

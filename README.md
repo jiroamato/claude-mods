@@ -62,7 +62,9 @@ cannot show, in four tabs, each with its size as `/context` counts it:
   added to the conversation, what came back, and its tokens, cost and time. Open one
   for a preview, then **Expand**: its system prompt, every tool definition
   and every message, as the model received them, with a search that steps through
-  each match. Or open it whole in your browser.
+  each match. Or open it whole in your browser. A request too large to read in the
+  pane (over 4 MiB) is still listed with its figures and answer and opens in the
+  browser, and the requests after it show where its messages were.
 
 ##### Tracing
 

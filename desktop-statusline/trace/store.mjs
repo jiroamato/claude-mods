@@ -8,6 +8,7 @@
 //   <session>/system-<hash>.json   a system prompt, its blocks as sent
 //   <session>/tools-<hash>.json    a tool list, as sent
 //   <session>/<seq>.json           one request: what it added, and its answer
+//   <session>/<seq>.head.json      the same without its messages, for a large one
 //
 // A request body carries the whole conversation, so a request's file keeps
 // only the messages that follow the previous request of the same kind, or,
@@ -20,7 +21,7 @@
  * another server, and an older receiver from this one (hooks/trace.ts keeps
  * the same text). Bumped whenever what the receiver serves changes.
  */
-export const HEALTH = 'desktop-statusline trace receiver 10'
+export const HEALTH = 'desktop-statusline trace receiver 11'
 
 /** The events the receiver keeps; the others are left unread. */
 export const KEPT_EVENTS = new Set(['api_request_body', 'api_request', 'api_response_body'])
@@ -110,14 +111,82 @@ export function fullMessages(records, seq) {
       if (record.seq === seq) return []
       continue
     }
+    // A head (a request too large for the pane) stands in for its messages.
+    const added = record.isHead === true ? headMessages(record) : record.added
     messages = goesOn(record, messages.length > 0)
-      ? [...(chains.get(record.after) ?? messages), ...record.added]
-      : [...messages.slice(0, record.from), ...record.added]
+      ? [...(chains.get(record.after) ?? messages), ...added]
+      : [...messages.slice(0, record.from), ...added]
     if (named.has(record.seq)) chains.set(record.seq, messages)
     if (record.seq === seq) break
   }
 
   return messages
+}
+
+/**
+ * What a request's file holds past which a head of it is kept beside it
+ * (`<seq>.head.json`). The pane reads files with `$.fs.read`, which refuses
+ * one over 4 MiB: the head, with the request's messages left out, is what it
+ * reads instead. Below the limit by a margin, so the head is there before
+ * the file grows past it, as its usage and answer land.
+ */
+export const HEAD_AFTER_BYTES = 3 * 1024 * 1024
+
+/** The most of an answer a head keeps whole; one larger stands in as a note. */
+const MAX_HEAD_ANSWER_BYTES = 1024 * 1024
+
+/** What a placeholder message says, for a request too large to read where it is read. */
+export function tooLargeNote(seq) {
+  return `(Not shown: request #${seq + 1} is too large to read here. Open it in your browser.)`
+}
+
+/**
+ * The messages a head stands in for, one placeholder each, so every request
+ * after it keeps its place in the conversation. A request's messages are the
+ * conversation's from `from` to `messageCount`: every way the store keeps one
+ * (sent whole, going on from an earlier one, a body sent again) sets
+ * `messageCount` to `from` and the messages it added.
+ */
+export function headMessages(record) {
+  const count = Math.max(0, (record.messageCount ?? 0) - (record.from ?? 0))
+  const roles = Array.isArray(record.roles) ? record.roles : []
+
+  return Array.from({ length: count }, (_, index) => ({
+    role: typeof roles[index] === 'string' ? roles[index] : 'user',
+    content: tooLargeNote(record.seq),
+  }))
+}
+
+/** A request's file without its messages, and its answer whole when that is small. */
+export function headOf(record) {
+  const response =
+    record.response && utf8Length(JSON.stringify(record.response)) > MAX_HEAD_ANSWER_BYTES
+      ? {
+          id: record.response.id,
+          stop_reason: record.response.stop_reason ?? null,
+          content: [{ type: 'text', text: tooLargeNote(record.seq) }],
+        }
+      : record.response
+
+  return {
+    ...record,
+    added: [],
+    isHead: true,
+    roles: record.added.map(message => String(message?.role ?? 'user')),
+    response,
+  }
+}
+
+/** How many bytes a string takes as UTF-8, as the receiver writes it. */
+function utf8Length(text) {
+  let bytes = text.length
+  for (let index = 0; index < text.length; index += 1) {
+    const code = text.charCodeAt(index)
+    // Two bytes below U+0800, three above; a surrogate pair four, two each.
+    if (code >= 0x80) bytes += code < 0x800 || (code >= 0xd800 && code < 0xe000) ? 1 : 2
+  }
+
+  return bytes
 }
 
 /**
@@ -493,7 +562,17 @@ export class TraceStore {
     if (record.requestId) session.byRequestId.delete(record.requestId)
   }
 
+  /**
+   * Writes a request's file, and past `HEAD_AFTER_BYTES` its head first, so
+   * the head is there by the time the file is too large to read. A record
+   * only grows (its usage and answer land on it), so once one has a head,
+   * every later save writes it again: it stays in step, and is never removed.
+   */
   save(folder, record) {
-    this.write(`${folder}/${String(record.seq).padStart(6, '0')}.json`, JSON.stringify(record))
+    const name = `${folder}/${String(record.seq).padStart(6, '0')}`
+    const text = JSON.stringify(record)
+    if (text.length > HEAD_AFTER_BYTES / 3 && utf8Length(text) > HEAD_AFTER_BYTES)
+      this.write(`${name}.head.json`, JSON.stringify(headOf(record)))
+    this.write(`${name}.json`, text)
   }
 }

@@ -10,6 +10,7 @@ import {
   editTraceEnv,
   replacedNames,
   findMatches,
+  fromHead,
   isTraceOn,
   promptRecord as tracePromptRecord,
   readerRanges,
@@ -20,7 +21,7 @@ import {
 } from '../hooks/trace'
 import type { TraceRecord } from '../hooks/trace'
 // The receiver's own logic, as Node runs it.
-import { HEALTH, logRecords, TraceStore } from '../trace/store.mjs'
+import { HEAD_AFTER_BYTES, HEALTH, logRecords, TraceStore } from '../trace/store.mjs'
 import { fullMessages, promptRecord, requestPage, sessionPage } from '../trace/view.mjs'
 
 const SESSION = 'session-1'
@@ -1523,4 +1524,245 @@ test('a request that could not be read leaves the conversation as it was', () =>
   expect(fullMessages(records, 1)).toEqual([])
   expect(records[2]).toMatchObject({ from: 1 })
   expect(fullMessages(records, 2)).toEqual([user('one'), assistant('two'), user('three')])
+})
+
+/** Usage for the oldest request of the main loop still without it. */
+function usage(input: number, costUsd: number) {
+  return record('api_request', {
+    query_source: 'sdk',
+    input_tokens: input,
+    output_tokens: 30,
+    cost_usd: costUsd,
+    duration_ms: 2500,
+  })
+}
+
+/** Text that makes a request's file too large for the pane to read. */
+const huge = (size: number) => `BIG${'x'.repeat(size)}`
+
+test('the store keeps a head beside a large request, in step as its answer lands', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(usage(10, 0.01))
+  store.take(answer('b0', 'msg_0', 'hi'))
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('hi'), user(huge(HEAD_AFTER_BYTES))]),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+  )
+  expect(Object.keys(files).filter(name => name.endsWith('.head.json'))).toEqual([
+    `${SESSION}/000001.head.json`,
+  ])
+  const head = () => JSON.parse(files[`${SESSION}/000001.head.json`]!) as KeptRecord
+  expect(head()).toMatchObject({
+    seq: 1,
+    isHead: true,
+    added: [],
+    roles: ['assistant', 'user'],
+    from: 1,
+    messageCount: 3,
+    usage: null,
+    response: null,
+  })
+  store.take(usage(1200, 0.3))
+  store.take(answer('b1', 'msg_1', 'done'))
+  expect(head()).toMatchObject({
+    usage: { input: 1200, costUsd: 0.3 },
+    response: { id: 'msg_1', content: [{ type: 'text', text: 'done' }] },
+  })
+  // The head is the request without its messages.
+  const { added: _added, ...whole } = JSON.parse(files[`${SESSION}/000001.json`]!) as KeptRecord
+  const {
+    added: _none,
+    isHead: _isHead,
+    roles: _roles,
+    ...rest
+  } = head() as KeptRecord & {
+    isHead: boolean
+    roles: string[]
+  }
+  expect(rest).toEqual(whole)
+
+  // One just under the limit has none until its answer takes it past.
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user(huge(HEAD_AFTER_BYTES - 2_000))], 'msg_1'),
+      query_source: 'sdk',
+      request_body_id: 'b2',
+    }),
+  )
+  expect(files[`${SESSION}/000002.head.json`]).toBeUndefined()
+  store.take(answer('b2', 'msg_2', 'y'.repeat(3_000)))
+  expect(JSON.parse(files[`${SESSION}/000002.head.json`]!)).toMatchObject({
+    isHead: true,
+    continues: true,
+    after: 1,
+    response: { id: 'msg_2' },
+  })
+})
+
+/** A session's files as the store wrote them, by name within its folder. */
+function sessionFiles(files: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(files).map(([name, text]) => [name.slice(SESSION.length + 1), text]),
+  )
+}
+
+/** Three main requests, the second too large for the pane, each answered. */
+function largeSession() {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const big = user(huge(4.2 * 1024 * 1024))
+  const bodies = [
+    [user('hello')],
+    [user('hello'), assistant('hi'), big],
+    [user('hello'), assistant('hi'), big, assistant('done'), user('next')],
+  ]
+  const answers = ['hi', 'done', 'bye']
+  bodies.forEach((messages, index) => {
+    store.take(
+      record('api_request_body', {
+        body: requestBody(messages),
+        query_source: 'sdk',
+        request_body_id: `b${index}`,
+      }),
+    )
+    store.take(usage(1000 * (index + 1), 0.1 * (index + 1)))
+    store.take(answer(`b${index}`, `msg_${index}`, answers[index]))
+  })
+
+  return files
+}
+
+test('a request too large to read is listed from its head, and the ones after keep their place', async ($, on) => {
+  const folder = sessionFiles(largeSession())
+  expect(folder['000001.json']!.length).toBeGreaterThan(4 * 1024 * 1024)
+  expect(Object.keys(folder)).toContain('000001.head.json')
+  tracedEngine(on, folder)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  // Its own source, usage and answer; a head is not a request of its own.
+  expect(await traceRows(pane)).toEqual(['#3', '#2', '#1'])
+  const row = (await pane.find({ type: 'Client', key: 'disclose-trace-1' }))?.props.props
+  expect(row).toMatchObject({
+    figure: '2k in · 30 out · $0.20 · 2.5s',
+    lines: ['+ 2 messages too large to read here: open it in your browser', '→ "done"'],
+  })
+
+  // Expand on it says so, and still shows what it was sent with.
+  const drawnText = async () =>
+    (await pane.findAll({ type: 'Text' }))
+      .filter(one => one.props.mono === true)
+      .map(one => one.text)
+      .join('\n')
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
+  expect(String((await pane.find({ type: 'Code' }))?.props.source)).toMatch(
+    /^This request is too large to read here: open it in your browser to read it whole\.\n\n── Sent: 2 new messages \(3 in all\)/,
+  )
+  await pane.press({ key: 'read-1' })
+  expect(await drawnText()).toMatch(/^This request is too large to read here/)
+  expect(await drawnText()).toMatch(/── #3 user \(new\)\n\(Not shown: request #2 is too large/)
+  await pane.post({ back: true }, { in: 'reader' })
+
+  // The request after it: every message in its place, its own whole.
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-2' })
+  await pane.press({ key: 'read-2' })
+  // An empty row is drawn as a space.
+  const text = await drawnText()
+  expect(text).toMatch(/══ Messages: 5, the last 2 new in this request/)
+  expect(text).toMatch(/── #1 user\nhello\n \n── #2 assistant\n\(Not shown: request #2 is too/)
+  expect(text).toMatch(/── #3 user\n\(Not shown: request #2/)
+  expect(text).toMatch(/── #4 assistant \(new\)\ndone\n \n── #5 user \(new\)\nnext/)
+
+  await pane.unmount()
+})
+
+test('a request too large to read with no head, from an older receiver, is listed as before', async ($, on) => {
+  const folder = sessionFiles(largeSession())
+  delete folder['000001.head.json']
+  tracedEngine(on, folder)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  // Known by its number alone, it is not counted in the conversation.
+  expect(await traceRows(pane)).toEqual(['#3', '#1', '#2 unknown'])
+  const row = (await pane.find({ type: 'Client', key: 'disclose-trace-1' }))?.props.props
+  expect((row as { lines: string[] }).lines).toEqual([
+    '+ too large to read here: open it in your browser',
+  ])
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
+  expect(String((await pane.find({ type: 'Code' }))?.props.source)).toBe(
+    'This request is too large to read here: open it in your browser to read it whole.',
+  )
+
+  await pane.unmount()
+})
+
+test('a head stands in for its request’s messages, and the prompt is found through it', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(answer('b0', 'msg_0', 'hi'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user(huge(HEAD_AFTER_BYTES))], 'msg_0'),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+  )
+  store.take(answer('b1', 'msg_1', 'done'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user('more')], 'msg_1'),
+      query_source: 'sdk',
+    }),
+  )
+  const whole = keptRecords(files)
+  // As the pane reads them: the large one from its head.
+  const read = whole.map(one =>
+    one.seq === 1 ? fromHead(JSON.parse(files[`${SESSION}/000001.head.json`]!)) : one,
+  )
+  expect(read[1]).toMatchObject({ source: 'sdk', continues: true, after: 0, toolCount: 0 })
+  expect(promptRecord(read, 2)?.seq).toBe(0)
+  expect(tracePromptRecord(read, 2)?.seq).toBe(0)
+  const messages = fullMessages(read, 2)!
+  expect(messages).toHaveLength(whole[2]!.messageCount)
+  expect(messages).toHaveLength(fullMessages(whole, 2)!.length)
+  expect(messages.at(-1)).toEqual(user('more'))
+  expect(messages.filter(one => JSON.stringify(one).includes('Not shown'))).toHaveLength(1)
+})
+
+test('the browser pages read a large request whole, with no head', () => {
+  const records = keptRecords(largeSession())
+  expect(records.map(one => one.seq)).toEqual([0, 1, 2])
+  expect(records.some(one => (one as { isHead?: boolean }).isHead)).toBe(false)
+  const html = requestPage({
+    session: SESSION,
+    records,
+    seq: 2,
+    system: null,
+    tools: null,
+    link: () => '#',
+  })!
+  expect(html).toContain('BIGxxxx')
+  expect(html).not.toContain('Not shown')
+  expect(fullMessages(records, 2)).toHaveLength(5)
 })

@@ -38,6 +38,7 @@ import {
   RECEIVER_NAME,
   requestText,
   findMatches,
+  fromHead,
   promptRecord,
   readerRanges,
   replacedNames,
@@ -560,18 +561,23 @@ async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
 }
 
 /**
- * Requests read from this session's trace folder, by file name, with the time
- * each was last read. A `/clear` or a resume goes on in the same process under
- * a new session id, so the cache is the session's it was read for.
+ * Requests read from this session's trace folder, by file name, with what
+ * each was read at: its file's time, and its head's for one read from that.
+ * A `/clear` or a resume goes on in the same process under a new session id,
+ * so the cache is the session's it was read for.
  */
-const traceCache = new Map<string, { mtimeMs: number; item: TraceItem; record: TraceRecord }>()
+const traceCache = new Map<string, { stamp: string; item: TraceItem; record: TraceRecord }>()
 let traceSession: string | null = null
 const systemCache = new Map<string, { type: string; text: string }[]>()
 let traceQueue: Promise<unknown> = Promise.resolve()
-/** The largest file `$.fs.read` reads: a larger request is listed, but not read. */
+/**
+ * The largest file `$.fs.read` reads: a larger request is read from its head
+ * (`<seq>.head.json`, which the receiver writes for a large one), or listed by
+ * its number alone when it has none.
+ */
 const MAX_READ_BYTES = 4 * 1024 * 1024
 
-/** A request whose file is too large to read here, listed for the browser, where it opens. */
+/** A request too large to read here, with no head: listed for the browser, where it opens. */
 function unreadRecord(name: string, at: number): TraceRecord {
   return {
     seq: Number(name.slice(0, 6)),
@@ -675,23 +681,29 @@ function refreshTrace($: EngineInterface): Promise<void> {
       if (entries.length === 0 && turns > 0) {
         status = (await startedTraced) ? 'emptied' : 'next-session'
       }
-      const names = new Set(entries.map(entry => entry.name))
+      const byName = new Map(entries.map(entry => [entry.name, entry]))
       // A request the person deleted goes from the list too.
-      for (const name of traceCache.keys()) if (!names.has(name)) traceCache.delete(name)
+      for (const name of traceCache.keys()) if (!byName.has(name)) traceCache.delete(name)
+      // A request's file, not a head beside it: those are read in its place.
       for (const entry of entries) {
         if (!/^\d{6}\.json$/.test(entry.name)) continue
+        const isLarge = entry.size > MAX_READ_BYTES
+        const head = isLarge ? byName.get(entry.name.replace(/\.json$/, '.head.json')) : undefined
+        const stamp = `${entry.mtimeMs}:${head?.mtimeMs ?? ''}`
         const cached = traceCache.get(entry.name)
-        if (cached && cached.mtimeMs === entry.mtimeMs) continue
-        if (entry.size > MAX_READ_BYTES) {
-          const record = unreadRecord(entry.name, entry.mtimeMs)
-          traceCache.set(entry.name, { mtimeMs: entry.mtimeMs, item: summarize(record), record })
-          continue
-        }
+        if (cached && cached.stamp === stamp) continue
         try {
-          const record = JSON.parse(
-            String(await $.fs.read(`${folder}/${entry.name}`)),
-          ) as TraceRecord
-          traceCache.set(entry.name, { mtimeMs: entry.mtimeMs, item: summarize(record), record })
+          let record: TraceRecord
+          if (!isLarge) {
+            record = JSON.parse(String(await $.fs.read(`${folder}/${entry.name}`))) as TraceRecord
+          } else if (head && head.size <= MAX_READ_BYTES) {
+            record = fromHead(
+              JSON.parse(String(await $.fs.read(`${folder}/${head.name}`))) as TraceRecord,
+            )
+          } else {
+            record = unreadRecord(entry.name, entry.mtimeMs)
+          }
+          traceCache.set(entry.name, { stamp, item: summarize(record), record })
         } catch {
           // Being written: the next reading tries again.
         }
@@ -752,8 +764,13 @@ async function readerRows(
   const { session, folder } = await traceFolder($)
   const cached = [...traceCache.values()].find(one => one.item.seq === seq)
   if (!cached) return null
-  // Read again once its answer lands, which changes its file.
-  const key = `${session}:${seq}:${cached.mtimeMs}:${columns}`
+  // Read again once its answer lands, which changes its file, or one before
+  // it changes, which it is rebuilt from.
+  const stamps = [...traceCache.values()]
+    .filter(one => one.item.seq <= seq)
+    .map(one => `${one.item.seq}@${one.stamp}`)
+    .join(',')
+  const key = `${session}:${seq}:${stamps}:${columns}`
   if (readerCache?.key === key) return readerCache
   const readJson = async <T,>(name: string): Promise<T | null> => {
     try {

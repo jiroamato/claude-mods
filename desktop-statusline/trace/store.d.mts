@@ -15,10 +15,22 @@ export type ChainRecord = {
   after?: number | null
   toolCount: number
   from: number
+  /** The conversation's length with this request's messages. */
+  messageCount?: number
   added: readonly unknown[]
   /** For one that could not be read: how long its body was. */
   unreadable?: number
+  /** A head (`<seq>.head.json`): the request without its messages, which `added` leaves out. */
+  isHead?: boolean
+  /** For a head: the role of each message it added. */
+  roles?: readonly string[]
 }
+export declare const HEAD_AFTER_BYTES: number
+export declare function tooLargeNote(seq: number): string
+export declare function headMessages(record: ChainRecord): { role: string; content: string }[]
+export declare function headOf<R extends ChainRecord>(
+  record: R,
+): R & { isHead: true; roles: string[] }
 export declare function isMain(source: string): boolean
 export declare function sourceKind(source: string): string
 export declare function goesOn(record: ChainRecord, hasBefore: boolean): boolean

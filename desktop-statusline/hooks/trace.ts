@@ -6,13 +6,18 @@ import {
   SettingsShapeError,
   writeSettings,
 } from './tools'
-import { fullMessages, isMain, promptRecord as sharedPromptRecord } from '../trace/store.mjs'
+import {
+  fullMessages,
+  headMessages,
+  isMain,
+  promptRecord as sharedPromptRecord,
+} from '../trace/store.mjs'
 
 /** The loopback port the trace receiver listens on, and Claude Code exports to. */
 export const TRACE_PORT = 43180
 
 /** What the receiver's `GET /health` answers (trace/store.mjs keeps the same text). */
-export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 10'
+export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 11'
 /** What every version of the receiver's health answer opens with. */
 export const RECEIVER_NAME = 'desktop-statusline trace receiver'
 
@@ -159,6 +164,13 @@ export type TraceRecord = {
   unreadable?: number
   /** A request whose file is too large to read in the pane: listed, and opened in the browser. */
   tooLarge?: boolean
+  /**
+   * Read from its head (`<seq>.head.json`, trace/store.mjs): all but its
+   * messages, which stand in as placeholders. A request too large to read
+   * with no head (an older receiver's) is known by its number alone.
+   */
+  isHead?: boolean
+  roles?: string[]
   usage: TraceItem['usage']
   response: { content?: ApiBlock[]; stop_reason?: string | null } | null
 }
@@ -176,6 +188,15 @@ type ApiBlock = {
 type ApiMessage = { role: string; content: string | ApiBlock[] }
 
 type SystemBlock = { type: string; text: string }
+
+/**
+ * A request too large to read here, from its head: as it was kept, its
+ * messages placeholders. Marked too large, so it still says to open it in
+ * the browser.
+ */
+export function fromHead(head: TraceRecord): TraceRecord {
+  return { ...head, added: headMessages(head), tooLarge: true }
+}
 
 /** The main loop's requests, by the engine's name for where a request came from. */
 export function isMainSource(source: string): boolean {
@@ -251,7 +272,11 @@ export function summarize(record: TraceRecord): TraceItem {
     record.unreadable !== undefined
       ? ['body too large to record']
       : record.tooLarge
-        ? ['too large to read here: open it in your browser']
+        ? [
+            record.isHead
+              ? `${record.added.length} ${record.added.length === 1 ? 'message' : 'messages'} too large to read here: open it in your browser`
+              : 'too large to read here: open it in your browser',
+          ]
         : record.added.flatMap(message => blocksOf(message).map(blockLabel))
   const answer = record.response?.content ?? []
   const said = answer.find(one => one.type === 'text' && (one.text ?? '').trim() !== '')
@@ -378,15 +403,21 @@ export function readerRanges(
   return merged
 }
 
+/** What a request too large to read here says, in its preview and its reader. */
+const TOO_LARGE_TEXT =
+  'This request is too large to read here: open it in your browser to read it whole.'
+
 /** A request as text: what it added to the conversation, then the answer. */
 export function requestText(record: TraceRecord): string {
-  const lines: string[] = []
+  if (record.tooLarge && !record.isHead) return TOO_LARGE_TEXT
+  const lines: string[] = record.tooLarge ? [TOO_LARGE_TEXT, ''] : []
   const count = record.added.length
   lines.push(
     `── Sent: ${count} new ${count === 1 ? 'message' : 'messages'} (${record.messageCount} in all), ` +
       `${record.toolCount} tools, ${record.model}`,
   )
-  for (const message of record.added) {
+  // A head's messages are placeholders: the line above counts them.
+  for (const message of record.isHead ? [] : record.added) {
     lines.push('', `[${message.role}]`)
     for (const block of blocksOf(message)) lines.push(blockText(block))
   }
@@ -412,10 +443,14 @@ export function wholeRequestText(
 ): string | null {
   const record = records.find(one => one.seq === seq)
   if (!record) return null
+  // One with no head is known by its number alone.
+  if (record.tooLarge && !record.isHead) return TOO_LARGE_TEXT
   const messages: ApiMessage[] = fullMessages(records, seq) ?? []
   // What this request added comes last, however it was sent.
   const firstNew = Math.max(0, messages.length - record.added.length)
   const lines: string[] = []
+  // Its own messages stand in as placeholders; the rest is as it was sent.
+  if (record.tooLarge) lines.push(TOO_LARGE_TEXT, '')
   lines.push(`══ System prompt: ${(system ?? []).length} blocks`)
   ;(system ?? []).forEach((block, index) =>
     lines.push('', `── Block ${index + 1}`, block.text ?? ''),
