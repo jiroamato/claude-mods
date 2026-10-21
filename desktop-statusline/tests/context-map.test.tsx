@@ -752,7 +752,7 @@ test('each group of tools opens and closes on its own, and starts open', async (
   expect(
     await pane.find({
       type: 'Text',
-      text: /^Change tools at the start of a session\. Later, a change clears the prompt cache/,
+      text: /^Changing tools at the start of a session is recommended\. A mid-session change/,
     }),
   ).toBeDefined()
   // Set apart by an info icon.
