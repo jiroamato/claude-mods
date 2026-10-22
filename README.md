@@ -62,10 +62,11 @@ cannot show, in four tabs, each with its size as `/context` counts it:
   added to the conversation, what came back, and its tokens, cost and time. Open one
   for a preview, then **Expand**: its system prompt, every tool definition
   and every message, as the model received them, with a search that steps through
-  each match. It reads as a document: the wheel, the pane's scrollbar and the
-  scroll keys move through it, the search and the way back at its top (Home brings
-  them back), and the arrows beside the counter or Enter scroll each match into
-  the middle of the window. Or open the request whole in your browser. A request too large to read in the
+  each match. The search stays at the top; the text moves under it by its own
+  scrollbar (press or drag it), or by the keys once you click it (the arrows, Page
+  Up and Page Down, Home and End), and the arrows beside the counter or Enter bring
+  each match into view. The wheel does nothing there, by design: the desktop scrolls
+  a pane before a mod hears of it, so nothing in the pane ever moves but the text. Or open the request whole in your browser. A request too large to read in the
   pane (over 4 MiB) is still listed with its figures and answer and opens in the
   browser, and the requests after it show where its messages were.
 

@@ -410,34 +410,6 @@ export function findMatches(rows: readonly string[], query: string): RowMatch[] 
   return found
 }
 
-/**
- * The stretches of rows the reader draws: a screen above the window, the
- * window and a screen below, so a scroll either way lands on drawn text; and
- * the rows around the current match, so the pane can be scrolled to it.
- */
-export function readerRanges(
-  total: number,
-  firstInView: number,
-  bodyRows: number,
-  focus: number | null,
-): { first: number; last: number }[] {
-  const around = (row: number, before: number, after: number) => ({
-    first: Math.min(total, Math.max(0, row - before)),
-    last: Math.min(total, Math.max(0, row + after)),
-  })
-  const ranges = [around(firstInView, bodyRows, 2 * bodyRows)]
-  if (focus !== null) ranges.push(around(focus, bodyRows, bodyRows))
-  ranges.sort((a, b) => a.first - b.first)
-  const merged: { first: number; last: number }[] = []
-  for (const range of ranges) {
-    const last = merged.at(-1)
-    if (last && range.first <= last.last) last.last = Math.max(last.last, range.last)
-    else if (range.last > range.first) merged.push({ ...range })
-  }
-
-  return merged
-}
-
 /** What a request too large to read here says, in its preview and its reader. */
 const TOO_LARGE_TEXT =
   'This request is too large to read here: open it in your browser to read it whole.'
