@@ -1192,11 +1192,11 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   expect(await pane.find({ key: 'reader-search' })).toBeDefined()
   const atTop = await readerText(pane)
   expect(atTop[0]).toBe('══ System prompt: 1 blocks')
-  expect(atTop).toHaveLength(36)
+  expect(atTop).toHaveLength(35)
   const { total } = await readerPosition(pane)
   expect(total).toBeGreaterThan(20_000)
   expect(
-    await pane.find({ type: 'Text', text: `rows 1 to 36 of ${total.toLocaleString('en-US')}` }),
+    await pane.find({ type: 'Text', text: `rows 1 to 35 of ${total.toLocaleString('en-US')}` }),
   ).toBeDefined()
   // Nothing stands in for the rest: the tree is never taller than the window,
   // so the pane has nothing to scroll and nothing in it ever moves. The text
@@ -1204,16 +1204,17 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   const heights = (await pane.findAll({ type: 'Box' }))
     .map(one => one.props.height)
     .filter((height): height is number => typeof height === 'number')
-  expect(Math.max(...heights)).toBeLessThanOrEqual(36)
+  // The tallest is the frame round the text: its 35 rows and the border.
+  expect(Math.max(...heights)).toBe(37)
   const region = await pane.find({ type: 'Client', key: 'reader-text' })
-  expect(region?.props).toMatchObject({ height: 36 })
-  expect((region?.props.props as { rows: unknown[]; base: number }).rows).toHaveLength(72)
+  expect(region?.props).toMatchObject({ height: 35 })
+  expect((region?.props.props as { rows: unknown[]; base: number }).rows).toHaveLength(70)
   expect((region?.props.props as { base: number; total: number }).base).toBe(0)
   expect((region?.props.props as { total: number }).total).toBe(total)
 
   // A shorter window draws fewer rows, one at the least.
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 20 } })
-  expect(await readerText(pane)).toHaveLength(16)
+  expect(await readerText(pane)).toHaveLength(15)
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 3 } })
   expect(await readerText(pane)).toHaveLength(1)
 
@@ -1247,49 +1248,49 @@ test('the keys in the reader’s text and its page buttons move the rows, never 
   // Page Down and Page Up move by the rows in view; the arrows by one. The
   // text glides there: a frame in, it is part of the way, then it arrives.
   await pane.key({ key: 'pagedown', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 37, last: 72, total })
-  // Row 36 of the text is `line 21`: the request's heading lines come first.
+  expect(await readerPosition(pane)).toEqual({ first: 36, last: 70, total })
+  // Row 35 of the text is `line 20`: the request's heading lines come first.
   expect((await readerTextNow(pane))[0]).toBe(atTop[0])
   await pane.advance(16)
   const midway = (await readerTextNow(pane))[0]
   expect(midway).not.toBe(atTop[0])
-  expect(midway).not.toBe('line 21')
-  expect((await readerText(pane))[0]).toBe('line 21')
+  expect(midway).not.toBe('line 20')
+  expect((await readerText(pane))[0]).toBe('line 20')
   await pane.key({ key: 'up', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 36, last: 71, total })
+  expect(await readerPosition(pane)).toEqual({ first: 35, last: 69, total })
   await pane.key({ key: 'down', ...text })
   await pane.key({ key: 'down', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 38, last: 73, total })
+  expect(await readerPosition(pane)).toEqual({ first: 37, last: 71, total })
   await pane.key({ key: 'pageup', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 2, last: 37, total })
+  expect(await readerPosition(pane)).toEqual({ first: 2, last: 36, total })
   // End and Home go to the ends; a move past either stops at it.
   await pane.key({ key: 'end', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
-  expect(await readerText(pane)).toHaveLength(36)
+  expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
+  expect(await readerText(pane)).toHaveLength(35)
   await pane.key({ key: 'pagedown', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
+  expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
   await pane.key({ key: 'home', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
   expect(await readerText(pane)).toEqual(atTop)
   await pane.key({ key: 'up', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
   // A key the text does not know moves nothing.
   await pane.key({ key: 'x', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
 
   // The page buttons do the same for the pointer.
   await pane.press({ key: 'reader-page-down' })
-  expect(await readerPosition(pane)).toEqual({ first: 37, last: 72, total })
+  expect(await readerPosition(pane)).toEqual({ first: 36, last: 70, total })
   await pane.press({ key: 'reader-page-up' })
-  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
 
   // The reader's own scrollbar, the two columns at the text's right edge, 36
   // rows tall: a press puts the row under the pointer first, as a share of
   // the track; a drag follows it. A press on the text itself moves nothing.
-  await pane.resize({ columns: 68, rows: 36, ...text })
-  await pane.pointer({ type: 'down', x: 10, y: 35, button: 'left', ...text })
-  await pane.pointer({ type: 'up', x: 10, y: 35, button: 'left', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  await pane.resize({ columns: 68, rows: 35, ...text })
+  await pane.pointer({ type: 'down', x: 10, y: 34, button: 'left', ...text })
+  await pane.pointer({ type: 'up', x: 10, y: 34, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
   const thumb = async () =>
     (await pane.findAll({ type: 'Box', ...text })).find(
       one => one.props.backgroundColor === '#80808066' || one.props.backgroundColor === '#808080aa',
@@ -1301,27 +1302,27 @@ test('the keys in the reader’s text and its page buttons move the rows, never 
 
     return track?.children.length === 2 ? (spacer?.height ?? 0) : 0
   }
-  await pane.pointer({ type: 'down', x: 67, y: 35, button: 'left', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
+  await pane.pointer({ type: 'down', x: 67, y: 34, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
   // Held, the thumb and the rows follow the pointer at once, by the region's
   // own state: the thumb is lit and at the foot of the track.
   expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
-  expect(await thumbTop()).toBe(35)
+  expect(await thumbTop()).toBe(34)
   await pane.pointer({ type: 'move', x: 67, y: 0, button: 'left', ...text })
-  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
   expect(await thumbTop()).toBe(0)
   await pane.pointer({ type: 'move', x: 60, y: 7, button: 'left', ...text })
-  const fifth = Math.round((7 / 35) * (total - 36)) + 1
-  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 35, total })
+  const fifth = Math.round((7 / 34) * (total - 35)) + 1
+  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
   expect(await thumbTop()).toBe(7)
   await pane.pointer({ type: 'up', x: 60, y: 7, button: 'left', ...text })
   expect((await thumb())?.props.backgroundColor).toBe('#80808066')
   // A move with no button held moves nothing.
   await pane.pointer({ type: 'move', x: 67, y: 30, ...text })
-  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 35, total })
+  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
   // The thumb: as tall as the rows in view are of the request, one row at least.
   expect((await thumb())?.props.height).toBe(1)
-  // Let go, the rows asked for are the rows drawn: row 36 of the text is `line 21`.
+  // Let go, the rows asked for are the rows drawn: row 35 of the text is `line 20`.
   expect((await readerText(pane))[0]).toBe(`line ${fifth - 16}`)
 
   // None of it scrolled the pane: its tree fits its window.
@@ -1355,20 +1356,20 @@ test('searching the reader marks each match and brings it to the middle of the r
   const { total } = await readerPosition(pane)
 
   await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'change' })
-  // line 1999, 19990 to 19999: eleven, the first current, in the middle of the 36 rows.
+  // line 1999, 19990 to 19999: eleven, the first current, in the middle of the 35 rows.
   expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
   expect(await readerHit(pane)).toBe('line 1999')
-  expect((await readerText(pane)).indexOf('line 1999')).toBe(18)
+  expect((await readerText(pane)).indexOf('line 1999')).toBe(17)
   const first = (await readerPosition(pane)).first
-  expect(await readerPosition(pane)).toEqual({ first, last: first + 35, total })
+  expect(await readerPosition(pane)).toEqual({ first, last: first + 34, total })
 
   // Thousands of rows down.
   await pane.press({ key: 'reader-next' })
   expect(await pane.find({ type: 'Text', text: '2 of 11' })).toBeDefined()
   expect(await readerHit(pane)).toBe('line 19990')
   const shown = await readerText(pane)
-  expect(shown.indexOf('line 19990')).toBe(18)
-  expect(shown.slice(18, 28)).toEqual(
+  expect(shown.indexOf('line 19990')).toBe(17)
+  expect(shown.slice(17, 27)).toEqual(
     Array.from({ length: 10 }, (_, index) => `line ${19990 + index}`),
   )
   // Back round the start to the last.
@@ -1376,7 +1377,7 @@ test('searching the reader marks each match and brings it to the middle of the r
   await pane.press({ key: 'reader-previous' })
   expect(await pane.find({ type: 'Text', text: '11 of 11' })).toBeDefined()
   expect(await readerHit(pane)).toBe('line 19999')
-  expect((await readerText(pane)).indexOf('line 19999')).toBe(18)
+  expect((await readerText(pane)).indexOf('line 19999')).toBe(17)
   // Enter in the field steps on, round the end to the first.
   await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'submit' })
   expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()

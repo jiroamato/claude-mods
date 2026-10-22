@@ -19,6 +19,7 @@ import {
   PANE_ID,
   PANE_TITLE,
   READER_KEY,
+  READER_SIDE_COLUMNS,
   readerVisibleRows,
 } from './panel'
 import type { ReaderView } from './panel'
@@ -1226,7 +1227,11 @@ export const register: Register = on => {
     // person scrolled to, and hands its text a screen either side of them
     // to glide across (./text.tsx): the rest of the request is not drawn.
     const readerView = async (): Promise<ReaderView | null> => {
-      const laid = await readerRows($, readingSeq!, Math.max(20, e.props.bodyColumns - 2))
+      const laid = await readerRows(
+        $,
+        readingSeq!,
+        Math.max(20, e.props.bodyColumns - READER_SIDE_COLUMNS),
+      )
       if (!laid) return null
       readerBodyRows = e.props.scroll.bodyRows
       const visible = readerVisibleRows(e.props.scroll.bodyRows)

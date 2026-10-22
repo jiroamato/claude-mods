@@ -528,12 +528,20 @@ export type ReaderView = {
   search: { query: string; index: number; count: number }
 }
 
-/** The reader's top, in rows: its line back, its search, and a row of space under them. */
-export const READER_TOP_ROWS = 4
+/** The reader's top, in rows: its line back and its search. */
+export const READER_TOP_ROWS = 3
+/** The frame round the reader's text, in rows: its border's top and bottom. */
+export const READER_FRAME_ROWS = 2
+/**
+ * The columns the reader takes beside its text's rows: the pane's padding
+ * and the frame's border, a column each side, and the scrollbar with the
+ * gap before it (./text.tsx).
+ */
+export const READER_SIDE_COLUMNS = 7
 
-/** How many of the text's rows the reader shows under its top, in a window `bodyRows` high. */
+/** How many of the text's rows the reader shows in its frame, in a window `bodyRows` high. */
 export function readerVisibleRows(bodyRows: number): number {
-  return Math.max(1, bodyRows - READER_TOP_ROWS)
+  return Math.max(1, bodyRows - READER_TOP_ROWS - READER_FRAME_ROWS)
 }
 
 /** A count as the pane writes figures: `4,493`. */
@@ -575,7 +583,7 @@ function Reader(props: {
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box height={READER_TOP_ROWS - 1} flexShrink={0} flexDirection="column" overflow="hidden">
+      <Box height={READER_TOP_ROWS} flexShrink={0} flexDirection="column" overflow="hidden">
         <Client key={READER_KEY} module="./reader.tsx" props={bar} width="100%" height={1} />
         <Box height={2} flexShrink={0} flexDirection="row" alignItems="center" columnGap={1}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -625,16 +633,18 @@ function Reader(props: {
           />
         </Box>
       </Box>
-      <Box height={1} flexShrink={0} />
-      {/* The text with the reader's own scrollbar beside it, one region (./text.tsx):
-          the pane's scrollbar never shows here, as the reader fits its window. */}
-      <Client
-        key={READER_TEXT_KEY}
-        module="./text.tsx"
-        props={text}
-        width="100%"
-        height={text.page}
-      />
+      {/* The text with the reader's own scrollbar beside it, one region (./text.tsx),
+          framed as the element it is: the pane's scrollbar never shows here, as the
+          reader fits its window. */}
+      <Box borderStyle="round" height={text.page + READER_FRAME_ROWS} flexShrink={0}>
+        <Client
+          key={READER_TEXT_KEY}
+          module="./text.tsx"
+          props={text}
+          width="100%"
+          height={text.page}
+        />
+      </Box>
     </Box>
   )
 }
