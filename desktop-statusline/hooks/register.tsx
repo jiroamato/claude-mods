@@ -22,10 +22,8 @@ import {
   readerVisibleRows,
 } from './panel'
 import type { ReaderView } from './panel'
-import { READER_SCROLLBAR_KEY } from './scrollbar'
-import type { ScrollbarPick } from './scrollbar'
 import { READER_TEXT_KEY } from './text'
-import type { TextPick } from './text'
+import type { TextPick, TextProps } from './text'
 import type { DisclosurePick } from './disclosure'
 import type { ReaderBarPick } from './reader'
 import { TAB_PREFIX } from './tabs'
@@ -866,11 +864,53 @@ async function stepReader($: EngineInterface, by: number): Promise<void> {
 }
 
 /**
- * Moves the reader's rows: by `by` rows, to an end, or to a first row. What
- * its text posts for a key (./text.tsx), its scrollbar for a press or a drag
- * (./scrollbar.tsx), and its page buttons press.
+ * What the reader's text draws (./text.tsx) for the rows laid out, from the
+ * row first in view: the rows a screen either side of the view, for the
+ * glide to cross, each with its matches; where they start; the view's
+ * height; and the request's length, for the scrollbar.
  */
-async function scrollReader($: EngineInterface, pick: TextPick | ScrollbarPick): Promise<void> {
+function textProps(
+  laid: { rows: string[] },
+  offset: number,
+  visible: number,
+  searching: { query: string; index: number },
+): TextProps & { first: number } {
+  const total = laid.rows.length
+  const first = clampOffset(offset, total, visible)
+  const base = Math.max(0, first - visible)
+  const last = Math.min(total, first + 2 * visible)
+  const matches = readerMatches(laid as { key: string; rows: string[] }, searching.query)
+  const current =
+    matches.length > 0 ? matches[Math.min(searching.index, matches.length - 1)]! : null
+  // The matches by row, for the rows handed over.
+  const byRow = new Map<number, RowMatch[]>()
+  for (const match of matches) {
+    if (match.row < base || match.row >= last) continue
+    byRow.set(match.row, [...(byRow.get(match.row) ?? []), match])
+  }
+
+  return {
+    rows: laid.rows.slice(base, last).map((text, at) => ({
+      text,
+      hits: (byRow.get(base + at) ?? []).map(match => ({
+        start: match.start,
+        end: match.end,
+        isCurrent: match === current,
+      })),
+    })),
+    base,
+    first,
+    page: visible,
+    total,
+  }
+}
+
+/**
+ * Moves the reader's rows: by `by` rows, to an end, or to a first row. What
+ * its text posts for a key, or for a press or a drag on its scrollbar
+ * (./text.tsx), and its page buttons press.
+ */
+async function scrollReader($: EngineInterface, pick: TextPick): Promise<void> {
   const laid = readerCache
   if (!laid) return
   const visible = readerVisibleRows(readerBodyRows)
@@ -1112,20 +1152,28 @@ export const register: Register = on => {
       await update($, reader, () => null)
       readerCache = null
     }
-    // A key in the reader's text: a row or a page either way, or an end.
+    // The reader's text: a key (a row or a page either way, an end), or a
+    // press or a drag on its scrollbar (the row to put first in view). The
+    // text is answered its next props at once: the desktop paints nothing of
+    // the pane's tree while a pointer is held, so a drag reaches the text by
+    // this answer alone, and a key by it first.
     if (e.element === READER_TEXT_KEY) {
       const pick = e.data as Partial<TextPick> | null
       if (pick && 'to' in pick && (pick.to === 'start' || pick.to === 'end')) {
         await scrollReader($, { to: pick.to })
       } else if (pick && 'by' in pick && typeof pick.by === 'number') {
         await scrollReader($, { by: pick.by })
+      } else if (pick && 'first' in pick && typeof pick.first === 'number') {
+        await scrollReader($, { first: Math.round(pick.first) })
       }
-    }
-    // A press or a drag on the reader's scrollbar: the row to put first in view.
-    if (e.element === READER_SCROLLBAR_KEY) {
-      const first = (e.data as Partial<ScrollbarPick> | null)?.first
-      if (typeof first === 'number' && Number.isFinite(first)) {
-        await scrollReader($, { first: Math.round(first) })
+      const laid = readerCache
+      if (laid) {
+        const [offset, searching] = await Promise.all([
+          read($, readerOffset),
+          read($, readerSearch),
+        ])
+
+        return { props: textProps(laid, offset, readerVisibleRows(readerBodyRows), searching) }
       }
     }
 
@@ -1182,40 +1230,19 @@ export const register: Register = on => {
       if (!laid) return null
       readerBodyRows = e.props.scroll.bodyRows
       const visible = readerVisibleRows(e.props.scroll.bodyRows)
-      const total = laid.rows.length
-      const first = clampOffset(readingOffset, total, visible)
-      const base = Math.max(0, first - visible)
-      const last = Math.min(total, first + 2 * visible)
       const matches = readerMatches(laid, searching.query)
       const current =
         matches.length > 0 ? matches[Math.min(searching.index, matches.length - 1)]! : null
-      // The matches by row, for the rows handed over.
-      const byRow = new Map<number, RowMatch[]>()
-      for (const match of matches) {
-        if (match.row < base || match.row >= last) continue
-        byRow.set(match.row, [...(byRow.get(match.row) ?? []), match])
-      }
 
       return {
         title: laid.title,
         detail: laid.detail,
-        first,
-        visible,
-        base,
-        total,
+        text: textProps(laid, readingOffset, visible, searching),
         search: {
           query: searching.query,
           index: current ? matches.indexOf(current) : 0,
           count: matches.length,
         },
-        rows: laid.rows.slice(base, last).map((text, at) => ({
-          text,
-          hits: (byRow.get(base + at) ?? []).map(match => ({
-            start: match.start,
-            end: match.end,
-            isCurrent: match === current,
-          })),
-        })),
       }
     }
 

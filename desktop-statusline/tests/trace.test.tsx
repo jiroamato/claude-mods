@@ -1208,7 +1208,8 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   const region = await pane.find({ type: 'Client', key: 'reader-text' })
   expect(region?.props).toMatchObject({ height: 36 })
   expect((region?.props.props as { rows: unknown[]; base: number }).rows).toHaveLength(72)
-  expect((region?.props.props as { base: number }).base).toBe(0)
+  expect((region?.props.props as { base: number; total: number }).base).toBe(0)
+  expect((region?.props.props as { total: number }).total).toBe(total)
 
   // A shorter window draws fewer rows, one at the least.
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 20 } })
@@ -1282,28 +1283,46 @@ test('the keys in the reader’s text and its page buttons move the rows, never 
   await pane.press({ key: 'reader-page-up' })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
 
-  // The reader's own scrollbar, 36 rows tall beside the text: a press puts the
-  // row under the pointer first, as a share of the track; a drag follows it.
-  const bar = { in: 'reader-scrollbar' }
-  expect((await pane.drawn(bar)) as { props?: { height?: number } }).toMatchObject({
-    props: { height: 36 },
-  })
-  await pane.pointer({ type: 'down', x: 0, y: 35, button: 'left', ...bar })
-  expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
-  await pane.pointer({ type: 'move', x: 0, y: 0, button: 'left', ...bar })
+  // The reader's own scrollbar, the two columns at the text's right edge, 36
+  // rows tall: a press puts the row under the pointer first, as a share of
+  // the track; a drag follows it. A press on the text itself moves nothing.
+  await pane.resize({ columns: 68, rows: 36, ...text })
+  await pane.pointer({ type: 'down', x: 10, y: 35, button: 'left', ...text })
+  await pane.pointer({ type: 'up', x: 10, y: 35, button: 'left', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
-  await pane.pointer({ type: 'move', x: 0, y: 7, button: 'left', ...bar })
+  const thumb = async () =>
+    (await pane.findAll({ type: 'Box', ...text })).find(
+      one => one.props.backgroundColor === '#80808066' || one.props.backgroundColor === '#808080aa',
+    )
+  const thumbTop = async () => {
+    const boxes = await pane.findAll({ type: 'Box', ...text })
+    const track = boxes.find(one => one.props.backgroundColor === '#80808018')
+    const spacer = (track?.children[0] as { props?: { height?: number } } | undefined)?.props
+
+    return track?.children.length === 2 ? (spacer?.height ?? 0) : 0
+  }
+  await pane.pointer({ type: 'down', x: 67, y: 35, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
+  // Held, the thumb and the rows follow the pointer at once, by the region's
+  // own state: the thumb is lit and at the foot of the track.
+  expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
+  expect(await thumbTop()).toBe(35)
+  await pane.pointer({ type: 'move', x: 67, y: 0, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  expect(await thumbTop()).toBe(0)
+  await pane.pointer({ type: 'move', x: 60, y: 7, button: 'left', ...text })
   const fifth = Math.round((7 / 35) * (total - 36)) + 1
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 35, total })
-  await pane.pointer({ type: 'up', x: 0, y: 7, button: 'left', ...bar })
+  expect(await thumbTop()).toBe(7)
+  await pane.pointer({ type: 'up', x: 60, y: 7, button: 'left', ...text })
+  expect((await thumb())?.props.backgroundColor).toBe('#80808066')
   // A move with no button held moves nothing.
-  await pane.pointer({ type: 'move', x: 0, y: 30, ...bar })
+  await pane.pointer({ type: 'move', x: 67, y: 30, ...text })
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 35, total })
   // The thumb: as tall as the rows in view are of the request, one row at least.
-  const thumb = (await pane.findAll({ type: 'Box', ...bar })).find(
-    one => one.props.backgroundColor === '#80808066' || one.props.backgroundColor === '#808080aa',
-  )
-  expect(thumb?.props.height).toBe(1)
+  expect((await thumb())?.props.height).toBe(1)
+  // Let go, the rows asked for are the rows drawn: row 36 of the text is `line 21`.
+  expect((await readerText(pane))[0]).toBe(`line ${fifth - 16}`)
 
   // None of it scrolled the pane: its tree fits its window.
   expect(windowMoves).toBe(0)

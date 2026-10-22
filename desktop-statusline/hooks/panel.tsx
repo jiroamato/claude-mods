@@ -14,8 +14,6 @@ import { formatShare, formatTokens } from './context'
 import { DISCLOSURE_ROWS, disclosureRows } from './disclosure'
 import type { DisclosureProps } from './disclosure'
 import type { ReaderBarProps } from './reader'
-import { READER_SCROLLBAR_KEY, SCROLLBAR_COLUMNS } from './scrollbar'
-import type { ScrollbarProps } from './scrollbar'
 import { READER_TEXT_KEY } from './text'
 import type { TextProps } from './text'
 import { TAB_PREFIX } from './tabs'
@@ -520,27 +518,14 @@ export type ContextPaneProps = {
   onScroll: (by: number) => void
 }
 
-/** What the reader draws: the rows around the view, and where the view sits in the request. */
+/** What the reader draws: its text's props (./text.tsx), and the search. */
 export type ReaderView = {
   title: string
   detail: string
-  /** The row first in view, from 0. */
-  first: number
-  /** How many rows the view holds: as many as the pane's window holds under the reader's top. */
-  visible: number
-  /** The row of the text `rows[0]` is, from 0: a screen above the view where there is one. */
-  base: number
-  /** The rows handed to the text: a screen above the view, the view, a screen below, for the glide. */
-  rows: ReaderRow[]
-  total: number
+  /** The rows around the view, the row first in view, the view's height and the request's length. */
+  text: TextProps
   /** The search: what is looked for, how many matches, and the current one. */
   search: { query: string; index: number; count: number }
-}
-
-/** One drawn row: its text, the matches in it, and whether it holds the current one. */
-export type ReaderRow = {
-  text: string
-  hits: { start: number; end: number; isCurrent: boolean }[]
 }
 
 /** The reader's top, in rows: its line back, its search, and a row of space under them. */
@@ -561,7 +546,7 @@ function formatCount(value: number): string {
  * page buttons) stays, and under it the rows that fit the window, in a region
  * of their own (./text.tsx) that moves them by the keys once clicked and
  * glides to each new place, with a scrollbar of the reader's own beside them
- * (./scrollbar.tsx) to press or drag. The whole is never taller than the
+ * in that region, to press or drag. The whole is never taller than the
  * window, so the pane's own window has nothing to scroll and nothing in it
  * ever moves: the wheel does nothing here, by design. A drawing holds three
  * screens of text at most, for the glide to cross.
@@ -584,19 +569,9 @@ function Reader(props: {
         ? 'No match'
         : `${search.index + 1} of ${formatCount(search.count)}${search.count >= MAX_MATCHES ? '+' : ''}`
   // Where in the request the rows in view are, in figures beside the scrollbar's thumb.
-  const inView = Math.min(view.visible, view.total - view.first)
-  const position = `rows ${formatCount(view.first + 1)} to ${formatCount(view.first + inView)} of ${formatCount(view.total)}`
-  const text: TextProps = {
-    rows: view.rows,
-    base: view.base,
-    first: view.first,
-    page: view.visible,
-  }
-  const scrollbar: ScrollbarProps = {
-    first: view.first,
-    visible: view.visible,
-    total: view.total,
-  }
+  const text = view.text
+  const inView = Math.min(text.page, text.total - text.first)
+  const position = `rows ${formatCount(text.first + 1)} to ${formatCount(text.first + inView)} of ${formatCount(text.total)}`
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -640,37 +615,26 @@ function Reader(props: {
             key="reader-page-up"
             label="Page up"
             variant="secondary"
-            onPress={() => props.onPage(-view.visible)}
+            onPress={() => props.onPage(-text.page)}
           />
           <Button
             key="reader-page-down"
             label="Page down"
             variant="secondary"
-            onPress={() => props.onPage(view.visible)}
+            onPress={() => props.onPage(text.page)}
           />
         </Box>
       </Box>
       <Box height={1} flexShrink={0} />
-      {/* The text, and beside it the reader's own scrollbar (./scrollbar.tsx):
-          the pane's never shows here, as the reader fits its window. */}
-      <Box flexDirection="row" height={view.visible} flexShrink={0} columnGap={1}>
-        <Box flexGrow={1} flexShrink={1} minWidth={0}>
-          <Client
-            key={READER_TEXT_KEY}
-            module="./text.tsx"
-            props={text}
-            width="100%"
-            height={view.visible}
-          />
-        </Box>
-        <Client
-          key={READER_SCROLLBAR_KEY}
-          module="./scrollbar.tsx"
-          props={scrollbar}
-          width={SCROLLBAR_COLUMNS}
-          height={view.visible}
-        />
-      </Box>
+      {/* The text with the reader's own scrollbar beside it, one region (./text.tsx):
+          the pane's scrollbar never shows here, as the reader fits its window. */}
+      <Client
+        key={READER_TEXT_KEY}
+        module="./text.tsx"
+        props={text}
+        width="100%"
+        height={text.page}
+      />
     </Box>
   )
 }
