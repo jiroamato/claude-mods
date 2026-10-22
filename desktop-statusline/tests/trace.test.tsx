@@ -1134,17 +1134,28 @@ function longRequest(lines: number): Record<string, string> {
   }
 }
 
-type ReaderPane = Pick<Mounted<'desktop', 'Pane'>, 'find' | 'findAll'>
+type ReaderPane = Pick<Mounted<'desktop', 'Pane'>, 'find' | 'findAll' | 'advance'>
 
-/** The reader's text rows as its region draws them, top to bottom. */
+/** How long the text's glide takes at most, for a reading after a move: a second of frames. */
+const GLIDE_SETTLE_MS = 1000
+
+/** The reader's text rows as its region draws them, top to bottom, once its glide has settled. */
 async function readerText(pane: ReaderPane): Promise<string[]> {
+  await pane.advance(GLIDE_SETTLE_MS)
+
+  return readerTextNow(pane)
+}
+
+/** The reader's text rows as its region draws them this frame, mid-glide or not. */
+async function readerTextNow(pane: ReaderPane): Promise<string[]> {
   return (await pane.findAll({ type: 'Text', in: 'reader-text' }))
     .filter(one => one.props.mono === true)
     .map(one => one.text)
 }
 
-/** The row of the reader's text holding the current match, as its region draws it. */
+/** The row of the reader's text holding the current match, as its region draws it once settled. */
 async function readerHit(pane: ReaderPane): Promise<string | undefined> {
+  await pane.advance(GLIDE_SETTLE_MS)
   const rows = (await pane.findAll({ type: 'Text', in: 'reader-text' })).filter(
     one => one.props.mono === true,
   )
@@ -1188,14 +1199,16 @@ test('the reader keeps its top and draws only the rows that fit under it', async
     await pane.find({ type: 'Text', text: `rows 1 to 36 of ${total.toLocaleString('en-US')}` }),
   ).toBeDefined()
   // Nothing stands in for the rest: the tree is never taller than the window,
-  // so the pane has nothing to scroll and nothing in it ever moves.
+  // so the pane has nothing to scroll and nothing in it ever moves. The text
+  // is handed a screen either side of the view, to glide across.
   const heights = (await pane.findAll({ type: 'Box' }))
     .map(one => one.props.height)
     .filter((height): height is number => typeof height === 'number')
   expect(Math.max(...heights)).toBeLessThanOrEqual(36)
-  expect((await pane.find({ type: 'Client', key: 'reader-text' }))?.props).toMatchObject({
-    height: 36,
-  })
+  const region = await pane.find({ type: 'Client', key: 'reader-text' })
+  expect(region?.props).toMatchObject({ height: 36 })
+  expect((region?.props.props as { rows: unknown[]; base: number }).rows).toHaveLength(72)
+  expect((region?.props.props as { base: number }).base).toBe(0)
 
   // A shorter window draws fewer rows, one at the least.
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 20 } })
@@ -1230,9 +1243,17 @@ test('the keys in the reader’s text and its page buttons move the rows, never 
   const { total } = await readerPosition(pane)
   const text = { in: 'reader-text' }
 
-  // Page Down and Page Up move by the rows in view; the arrows by one.
+  // Page Down and Page Up move by the rows in view; the arrows by one. The
+  // text glides there: a frame in, it is part of the way, then it arrives.
   await pane.key({ key: 'pagedown', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 37, last: 72, total })
+  // Row 36 of the text is `line 21`: the request's heading lines come first.
+  expect((await readerTextNow(pane))[0]).toBe(atTop[0])
+  await pane.advance(16)
+  const midway = (await readerTextNow(pane))[0]
+  expect(midway).not.toBe(atTop[0])
+  expect(midway).not.toBe('line 21')
+  expect((await readerText(pane))[0]).toBe('line 21')
   await pane.key({ key: 'up', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 36, last: 71, total })
   await pane.key({ key: 'down', ...text })

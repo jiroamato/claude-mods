@@ -1175,21 +1175,24 @@ export const register: Register = on => {
     ])
     const openSeq = open.map(key => /^trace-(\d+)$/.exec(key)?.[1]).find(Boolean)
     // The reader draws the rows that fit under its top, from the first the
-    // person scrolled to: the rest of the request is not drawn at all.
+    // person scrolled to, and hands its text a screen either side of them
+    // to glide across (./text.tsx): the rest of the request is not drawn.
     const readerView = async (): Promise<ReaderView | null> => {
       const laid = await readerRows($, readingSeq!, Math.max(20, e.props.bodyColumns - 2))
       if (!laid) return null
       readerBodyRows = e.props.scroll.bodyRows
       const visible = readerVisibleRows(e.props.scroll.bodyRows)
-      const first = clampOffset(readingOffset, laid.rows.length, visible)
-      const last = Math.min(laid.rows.length, first + visible)
+      const total = laid.rows.length
+      const first = clampOffset(readingOffset, total, visible)
+      const base = Math.max(0, first - visible)
+      const last = Math.min(total, first + 2 * visible)
       const matches = readerMatches(laid, searching.query)
       const current =
         matches.length > 0 ? matches[Math.min(searching.index, matches.length - 1)]! : null
-      // The matches by row, for the rows drawn.
+      // The matches by row, for the rows handed over.
       const byRow = new Map<number, RowMatch[]>()
       for (const match of matches) {
-        if (match.row < first || match.row >= last) continue
+        if (match.row < base || match.row >= last) continue
         byRow.set(match.row, [...(byRow.get(match.row) ?? []), match])
       }
 
@@ -1197,15 +1200,17 @@ export const register: Register = on => {
         title: laid.title,
         detail: laid.detail,
         first,
-        total: laid.rows.length,
+        visible,
+        base,
+        total,
         search: {
           query: searching.query,
           index: current ? matches.indexOf(current) : 0,
           count: matches.length,
         },
-        rows: laid.rows.slice(first, last).map((text, at) => ({
+        rows: laid.rows.slice(base, last).map((text, at) => ({
           text,
-          hits: (byRow.get(first + at) ?? []).map(match => ({
+          hits: (byRow.get(base + at) ?? []).map(match => ({
             start: match.start,
             end: match.end,
             isCurrent: match === current,
