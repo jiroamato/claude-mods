@@ -523,6 +523,8 @@ export type ReaderView = {
   /** The rows in view, as many as the pane's window holds under the reader's top. */
   rows: ReaderRow[]
   total: number
+  /** Whether the space under the rows is drawn: not until the window is parked, so the tree's end is the park. */
+  isParked: boolean
   /** The search: what is looked for, how many matches, and the current one. */
   search: { query: string; index: number; count: number }
 }
@@ -590,8 +592,17 @@ function formatCount(value: number): string {
 /**
  * A request whole, read in the pane: its top (the way back, the search) stays,
  * and under it the rows that fit the window, which the hooks module moves as
- * the person scrolls. The whole is no taller than the window, so the pane's
- * own window never moves, and a drawing holds no more than a screen of text.
+ * the person scrolls; the hook keeps the pane's own window where it is. A
+ * drawing holds no more than a screen of text.
+ *
+ * Above the top and under the rows, empty space two screens high: the engine
+ * raises no scroll for a tree that fits its window, and clamps a move to the
+ * tree before any hook hears of it, so the window is parked below the space
+ * above (`readerPark`), with room to be asked to move either way, and the
+ * hooks module sets it back there at each move. The space under the rows is
+ * drawn once the window is parked: until then the tree ends at the park, so
+ * a scroll to its end parks the window. Home and End then move by the park's
+ * own height, which tells them from a page.
  */
 function Reader(props: {
   ui: Ui
@@ -612,9 +623,16 @@ function Reader(props: {
   // With no scrollbar of its own, the reader says where in the request it is.
   const position = `rows ${formatCount(view.first + 1)} to ${formatCount(view.first + view.rows.length)} of ${formatCount(view.total)}`
 
+  const screen = view.rows.length + READER_TOP_ROWS
+
   return (
     <Box flexDirection="column" paddingX={1}>
+      <Box height={readerPark(screen)} flexShrink={0} />
       <Box height={READER_TOP_ROWS - 1} flexShrink={0} flexDirection="column" overflow="hidden">
+        {/* The desktop scrolls to a Button alone: one of no size marks the top, for the window to settle on. */}
+        <Box position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
+          <Button key={READER_PARK_KEY} plain label="" onPress={() => undefined} />
+        </Box>
         <Client key={READER_KEY} module="./reader.tsx" props={bar} width="100%" height={1} />
         <Box height={2} flexShrink={0} flexDirection="row" alignItems="center" columnGap={1}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -665,8 +683,21 @@ function Reader(props: {
           )
         })}
       </Box>
+      {view.isParked && <Box height={readerPark(screen)} flexShrink={0} />}
     </Box>
   )
+}
+
+/** The key of the mark at the reader's top, which the window settles on once parked. */
+export const READER_PARK_KEY = 'reader-park'
+
+/**
+ * Where the pane's window parks while the reader is open, in rows from the
+ * tree's top, and how much empty space the reader draws above its top and
+ * under its rows: two screens, from a screen `screen` rows high.
+ */
+export function readerPark(screen: number): number {
+  return 2 * screen
 }
 
 /** The key of the reader's top line, which the hooks module hears it post under. */

@@ -19,6 +19,8 @@ import {
   PANE_ID,
   PANE_TITLE,
   READER_KEY,
+  READER_PARK_KEY,
+  readerPark,
   readerVisibleRows,
 } from './panel'
 import type { ReaderView } from './panel'
@@ -824,9 +826,6 @@ function readerMatches(laid: { key: string; rows: string[] }, query: string): Ro
 /** How many rows the window showed at the reader's last drawing; a guess until it is drawn. */
 let readerBodyRows = 40
 
-/** Rows a wheel tick moves the reader: the person's tick is a row, too slow over a long request. */
-const WHEEL_ROWS = 3
-
 /** The reader's first row in view, kept so the rows in view are all text. */
 function clampOffset(offset: number, total: number, visible: number): number {
   return Math.max(0, Math.min(offset, total - visible))
@@ -864,14 +863,49 @@ async function stepReader($: EngineInterface, by: number): Promise<void> {
   await revealHit($)
 }
 
-/** Opens a request whole in the pane's reader, at its top. */
+/** How long a redraw takes to draw the reader, before the window is parked. */
+const PARK_SETTLE_MS = 150
+/** How many times the window is asked to settle on the reader's top, while it is not drawn yet. */
+const PARK_TRIES = 10
+
+/**
+ * Whether the pane's window is parked for the reader (./panel.tsx): until it
+ * is, the reader draws no space under its rows, so the tree ends at the park.
+ */
+let isReaderParked = false
+
+/**
+ * Opens a request whole in the pane's reader, and parks the pane's window
+ * (./panel.tsx): the reader's tree ends at the park until the window is
+ * there, so a scroll to its end parks it. The engine's end keeps up with a
+ * tree that grows until something else moves the window: a scroll to the
+ * reader's top, where the window is, does, before the space under the rows
+ * is drawn.
+ */
 async function openReader($: EngineInterface, seq: number): Promise<void> {
   // Laid out afresh for this request: until it is, the pane scrolls as it does for the tabs.
   readerCache = null
+  isReaderParked = false
   await update($, readerSearch, () => ({ query: '', index: 0 }))
   await update($, readerOffset, () => 0)
   await update($, reader, () => seq)
-  await $.ui.scroll({ in: PANE_ID, to: 'start' }).catch(() => undefined)
+  try {
+    await $.clock.sleep(PARK_SETTLE_MS)
+    await $.ui.scroll({ in: PANE_ID, to: 'end' })
+    for (let tried = 0; tried < PARK_TRIES; tried += 1) {
+      await $.clock.sleep(PARK_SETTLE_MS)
+      const settled = await $.ui.scroll({
+        in: PANE_ID,
+        to: { key: READER_PARK_KEY },
+        block: 'start',
+      })
+      if (settled.deny === undefined || !/drawn/.test(settled.deny)) break
+    }
+    isReaderParked = true
+    $.ui.invalidate('ui.render')
+  } catch {
+    // The pane closed, or the plugin unloaded, meanwhile: there is nothing to park.
+  }
 }
 
 /** One recorded request as text, for the Trace tab's open row; null when it is not read. */
@@ -1056,10 +1090,18 @@ export const register: Register = on => {
     if (e.origin.kind === 'person' && laid && (await read($, reader)) !== null) {
       readerBodyRows = e.bodyRows
       const visible = readerVisibleRows(e.bodyRows)
-      const by = e.pointer ? e.by * WHEEL_ROWS : e.by
-      await update($, readerOffset, now => clampOffset(now + by, laid.rows.length, visible))
+      const total = laid.rows.length
+      const park = readerPark(e.bodyRows)
+      // A move the size of the park is Home or End, as the engine clamps them.
+      const isWhole = Math.abs(e.by) >= park
+      await update($, readerOffset, now =>
+        clampOffset(isWhole ? (e.by < 0 ? 0 : total) : now + e.by, total, visible),
+      )
 
-      return {}
+      // The window goes back to where it parks (./panel.tsx), so the engine
+      // has room either way for the next move, which it clamps to the tree
+      // before any hook hears of it.
+      return next({ ...e, offset: park })
     }
     const lastOffset = Math.max(0, e.contentRows - e.bodyRows)
     const isRedrawJump =
@@ -1090,6 +1132,10 @@ export const register: Register = on => {
     }
     if (e.element === READER_KEY && (e.data as Partial<ReaderBarPick> | null)?.back) {
       await update($, reader, () => null)
+      // The window was parked for the reader (./panel.tsx): once the tabs are
+      // drawn again, it goes back to their top.
+      await $.clock.sleep(PANE_SETTLE_MS).catch(() => undefined)
+      await $.ui.scroll({ in: PANE_ID, to: 'start' }).catch(() => undefined)
     }
 
     return next(e)
@@ -1161,6 +1207,7 @@ export const register: Register = on => {
         detail: laid.detail,
         first,
         total: laid.rows.length,
+        isParked: isReaderParked,
         search: {
           query: searching.query,
           index: current ? matches.indexOf(current) : 0,

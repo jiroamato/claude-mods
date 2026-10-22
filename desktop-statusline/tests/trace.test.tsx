@@ -1157,7 +1157,7 @@ const READER_WINDOW = {
   component: 'Pane',
   requestId: 'context-map',
   bodyRows: 40,
-  contentRows: 40,
+  contentRows: 200,
   origin: { kind: 'person' },
 } as const
 
@@ -1180,11 +1180,14 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   expect(
     await pane.find({ type: 'Text', text: `rows 1 to 36 of ${total.toLocaleString('en-US')}` }),
   ).toBeDefined()
-  // Nothing stands in for the rest: no Box is taller than the window.
+  // Nothing stands in for the rest but two screens of space above the top
+  // (and, once the window is parked there, under the rows): the desktop
+  // raises no scroll for a tree that fits, nor for a move past an edge.
   const heights = (await pane.findAll({ type: 'Box' }))
     .map(one => one.props.height)
     .filter((height): height is number => typeof height === 'number')
-  expect(Math.max(...heights)).toBeLessThanOrEqual(40)
+  expect(Math.max(...heights)).toBe(80)
+  expect(await pane.find({ type: 'Button', key: 'reader-park' })).toBeDefined()
 
   // A shorter window draws fewer rows, one at the least.
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 20 } })
@@ -1200,12 +1203,12 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   await pane.unmount()
 })
 
-test('scrolling the reader moves its rows, and the pane’s window stays', async ($, on) => {
+test('scrolling the reader moves its rows, and the pane’s window stays parked', async ($, on) => {
   tracedEngine(on, longRequest(20_000))
-  // Counts the moves that reach the pane's window.
-  let windowMoves = 0
-  on('ui.scroll', async () => {
-    windowMoves += 1
+  // Where each move leaves the pane's window, as the hook below the plugin's hears it.
+  const windowOffsets: number[] = []
+  on('ui.scroll', async ($, e) => {
+    windowOffsets.push(e.offset)
 
     return {}
   })
@@ -1214,34 +1217,39 @@ test('scrolling the reader moves its rows, and the pane’s window stays', async
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   await pane.press({ key: 'read-0' })
-  // Opening the reader put the window at its top, a move of the plugin's own.
-  windowMoves = 0
+  windowOffsets.length = 0
   const atTop = await readerText(pane)
   const { total } = await readerPosition(pane)
 
   // A page key: the rows move by the window's height.
-  expect(await $.ui.scroll({ ...READER_WINDOW, by: 40, offset: 0 })).toEqual({})
+  expect(await $.ui.scroll({ ...READER_WINDOW, by: 40, offset: 120 })).toEqual({})
   expect(await readerPosition(pane)).toEqual({ first: 41, last: 76, total })
-  // An arrow: a row back.
-  await $.ui.scroll({ ...READER_WINDOW, by: -1, offset: 0 })
+  // An arrow: a row back. A wheel tick arrives the same way, a few rows at a time.
+  await $.ui.scroll({ ...READER_WINDOW, by: -1, offset: 79 })
   expect(await readerPosition(pane)).toEqual({ first: 40, last: 75, total })
-  // A wheel tick: three rows.
-  await $.ui.scroll({ ...READER_WINDOW, by: 1, offset: 0, pointer: { column: 5, row: 10 } })
-  expect(await readerPosition(pane)).toEqual({ first: 43, last: 78, total })
-  // A move past either end stops at it.
-  await $.ui.scroll({ ...READER_WINDOW, by: 2 * total, offset: 0 })
+  await $.ui.scroll({ ...READER_WINDOW, by: 5, offset: 85 })
+  expect(await readerPosition(pane)).toEqual({ first: 45, last: 80, total })
+  // End and Home: the engine clamps them to the park's height, two screens.
+  await $.ui.scroll({ ...READER_WINDOW, by: 80, offset: 160 })
   expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
   expect(await readerText(pane)).toHaveLength(36)
-  await $.ui.scroll({ ...READER_WINDOW, by: -2 * total, offset: 0 })
+  await $.ui.scroll({ ...READER_WINDOW, by: -80, offset: 0 })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
   expect(await readerText(pane)).toEqual(atTop)
-  // None of it moved the window.
-  expect(windowMoves).toBe(0)
+  // A move past the top stops at it.
+  await $.ui.scroll({ ...READER_WINDOW, by: -40, offset: 40 })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  // And past the end: the last match brings the end into view, and a page more stays there.
+  await pane.input({ key: 'reader-search', text: `line ${19_999}`, kind: 'change' })
+  await $.ui.scroll({ ...READER_WINDOW, by: 40, offset: 120 })
+  expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
+  // Every move left the window where it parks: two screens down.
+  expect(windowOffsets).toEqual(Array.from({ length: 7 }, () => 80))
 
-  // Back on the tabs, the window scrolls again.
+  // Back on the tabs, the window scrolls as asked again.
   await pane.post({ back: true }, { in: 'reader' })
   await $.ui.scroll({ ...READER_WINDOW, contentRows: 80, by: 3, offset: 3 })
-  expect(windowMoves).toBe(1)
+  expect(windowOffsets.at(-1)).toBe(3)
 
   await pane.unmount()
 })
