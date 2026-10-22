@@ -1226,7 +1226,7 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   await pane.unmount()
 })
 
-test('the keys in the reader’s text and its page buttons move the rows, never the pane', async ($, on) => {
+test('the keys in the reader’s text and its scrollbar move the rows, never the pane', async ($, on) => {
   tracedEngine(on, longRequest(20_000))
   // Whether any move reaches the pane's window: none should, with the reader open.
   let windowMoves = 0
@@ -1278,12 +1278,6 @@ test('the keys in the reader’s text and its page buttons move the rows, never 
   await pane.key({ key: 'x', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
 
-  // The page buttons do the same for the pointer.
-  await pane.press({ key: 'reader-page-down' })
-  expect(await readerPosition(pane)).toEqual({ first: 36, last: 70, total })
-  await pane.press({ key: 'reader-page-up' })
-  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
-
   // The reader's own scrollbar, the two columns at the text's right edge, 36
   // rows tall: a press puts the row under the pointer first, as a share of
   // the track; a drag follows it. A press on the text itself moves nothing.
@@ -1307,7 +1301,7 @@ test('the keys in the reader’s text and its page buttons move the rows, never 
   // Held, the thumb and the rows follow the pointer at once, by the region's
   // own state: the thumb is lit and at the foot of the track.
   expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
-  expect(await thumbTop()).toBe(34)
+  expect(await thumbTop()).toBe(33)
   await pane.pointer({ type: 'move', x: 67, y: 0, button: 'left', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
   expect(await thumbTop()).toBe(0)
@@ -1320,8 +1314,8 @@ test('the keys in the reader’s text and its page buttons move the rows, never 
   // A move with no button held moves nothing.
   await pane.pointer({ type: 'move', x: 67, y: 30, ...text })
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
-  // The thumb: as tall as the rows in view are of the request, one row at least.
-  expect((await thumb())?.props.height).toBe(1)
+  // The thumb: as tall as the rows in view are of the request, two rows at least.
+  expect((await thumb())?.props.height).toBe(2)
   // Let go, the rows asked for are the rows drawn: row 35 of the text is `line 20`.
   expect((await readerText(pane))[0]).toBe(`line ${fifth - 16}`)
 

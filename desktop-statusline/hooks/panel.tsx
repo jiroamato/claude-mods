@@ -514,8 +514,6 @@ export type ContextPaneProps = {
   onRead: (seq: number) => void
   onSearch: (query: string) => void
   onStep: (by: number) => void
-  /** Moves the reader's rows by `by`, as its page buttons do. */
-  onScroll: (by: number) => void
 }
 
 /** What the reader draws: its text's props (./text.tsx), and the search. */
@@ -550,8 +548,8 @@ function formatCount(value: number): string {
 }
 
 /**
- * A request whole, read in the pane: its top (the way back, the search, the
- * page buttons) stays, and under it the rows that fit the window, in a region
+ * A request whole, read in the pane: its top (the way back, the search)
+ * stays, and under it the rows that fit the window, in a region
  * of their own (./text.tsx) that moves them by the keys once clicked and
  * glides to each new place, with a scrollbar of the reader's own beside them
  * in that region, to press or drag. The whole is never taller than the
@@ -564,7 +562,6 @@ function Reader(props: {
   view: ReaderView
   onSearch: (query: string) => void
   onStep: (by: number) => void
-  onPage: (by: number) => void
 }) {
   const { Box, Button, Client, Input, Text } = props.ui
   const view = props.view
@@ -618,19 +615,6 @@ function Reader(props: {
           {search.count > 0 && (
             <Button key="reader-next" label="↓" onPress={() => props.onStep(1)} />
           )}
-          {/* A page either way, for the pointer; the keys do the same once the text is clicked. */}
-          <Button
-            key="reader-page-up"
-            label="Page up"
-            variant="secondary"
-            onPress={() => props.onPage(-text.page)}
-          />
-          <Button
-            key="reader-page-down"
-            label="Page down"
-            variant="secondary"
-            onPress={() => props.onPage(text.page)}
-          />
         </Box>
       </Box>
       {/* The text with the reader's own scrollbar beside it, one region (./text.tsx),
@@ -1206,7 +1190,6 @@ export function ContextPane(props: ContextPaneProps) {
       view: props.reader,
       onSearch: props.onSearch,
       onStep: props.onStep,
-      onPage: props.onScroll,
     })
   }
   const content = {

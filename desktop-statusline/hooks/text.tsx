@@ -35,6 +35,8 @@ export const READER_TEXT_KEY = 'reader-text'
 
 /** How wide the scrollbar's track is, in cells: thin, and wide enough to take a press. */
 export const SCROLLBAR_COLUMNS = 2
+/** How tall the thumb is at least, in rows: enough to read as one on a long request. */
+const THUMB_MIN_ROWS = 2
 
 // A match, and the current one, as the desktop marks found text.
 const HIT = '#c9850059'
@@ -177,12 +179,13 @@ export default function ReaderText(props: TextProps, surface: ClientSurface<Stat
   const rows = props.rows.slice(shown - props.base, shown - props.base + props.page)
 
   // The scrollbar: the thumb as tall as the rows in view are of the request,
-  // one row at least, from where the first row in view is in it: the row the
-  // pane asked for, or, while the thumb is held, the row the pointer is on.
+  // two rows at least so it reads as one, from where the first row in view is
+  // in it: the row the pane asked for, or, while the thumb is held, the row
+  // the pointer is on.
   const trackRows = Math.max(1, props.page)
-  const thumbRows = Math.max(
-    1,
-    Math.min(trackRows, Math.round((props.page / Math.max(1, props.total)) * trackRows)),
+  const thumbRows = Math.min(
+    trackRows,
+    Math.max(THUMB_MIN_ROWS, Math.round((props.page / Math.max(1, props.total)) * trackRows)),
   )
   const last = Math.max(0, props.total - props.page)
   const at = state.isDragging ? wanted : props.first

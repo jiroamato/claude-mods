@@ -909,7 +909,7 @@ function textProps(
 /**
  * Moves the reader's rows: by `by` rows, to an end, or to a first row. What
  * its text posts for a key, or for a press or a drag on its scrollbar
- * (./text.tsx), and its page buttons press.
+ * (./text.tsx).
  */
 async function scrollReader($: EngineInterface, pick: TextPick): Promise<void> {
   const laid = readerCache
@@ -1276,7 +1276,6 @@ export const register: Register = on => {
       onRead: seq => void openReader($, seq),
       onSearch: query => void searchReader($, query),
       onStep: by => void stepReader($, by),
-      onScroll: by => void scrollReader($, { by }),
       onPage: next => void update($, page, () => next),
     })
   })

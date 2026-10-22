@@ -63,10 +63,10 @@ cannot show, in four tabs, each with its size as `/context` counts it:
   for a preview, then **Expand**: its system prompt, every tool definition
   and every message, as the model received them, with a search that steps through
   each match. The search stays at the top; the text moves under it by its own
-  scrollbar (press or drag it), by the page buttons, or by the keys once you click
-  it (the arrows, Page Up and Page Down, Home and End), and the arrows beside the
-  counter or Enter bring each match into view. The wheel does nothing there, by
-  design: nothing in the pane ever moves but the text. Or open the request whole in your browser. A request too large to read in the
+  scrollbar (press or drag it), or by the keys once you click it (the arrows, Page
+  Up and Page Down, Home and End), and the arrows beside the counter or Enter bring
+  each match into view. The wheel does nothing there, by design: the desktop scrolls
+  a pane before a mod hears of it, so nothing in the pane ever moves but the text. Or open the request whole in your browser. A request too large to read in the
   pane (over 4 MiB) is still listed with its figures and answer and opens in the
   browser, and the requests after it show where its messages were.
 
