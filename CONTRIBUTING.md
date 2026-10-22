@@ -26,15 +26,15 @@ Thanks for wanting to contribute.
    repository's default branch, so name the base: `gh pr create --base dev`.
 
 CI checks formatting, validates the marketplace, then validates and tests each plugin and
-installs `desktop-statusline` with `npx`, on Ubuntu, macOS and Windows. Pull requests are squash-merged with the PR title as the commit
-title, so the title is what lands on `dev`, and for `feat` and `fix` it becomes the line in
-the release notes once `dev` is promoted to `main`.
+installs `desktop-statusline` with `npx`, on Ubuntu, macOS and Windows. Pull requests are
+squash-merged with the PR title as the commit title, so the title is what lands on `dev`, and
+for `feat` and `fix` it becomes the line in the release notes once `dev` is promoted to `main`.
 
 ## Repo conventions
 
 - Each plugin lives in its own self-contained folder with its manifest, hooks module, state
   contract, tests, README and screenshots (`<plugin>/docs/`). A new plugin also gets an entry
-  in `.claude-plugin/marketplace.json` and a row in the root README's Plugins table.
+  in `.claude-plugin/marketplace.json` and a section in the root README's Plugins list.
 - Function hooks are an early-access API. Write against the Claude Code version named in the
   latest release notes, and say in the PR if your change needs a newer one.
 - Add or update tests under `<plugin>/tests/` for the behaviour you change.

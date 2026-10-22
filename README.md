@@ -18,9 +18,11 @@ plugins built on function hooks.
 
 Each plugin has a README of its own, with what it does and how to install it.
 
-| Plugin                                             | What it does                                                                                                                                                                                                                                       |
-| -------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
-| [desktop-statusline](desktop-statusline/README.md) | Status bar above the prompt in the Claude desktop app: model, effort, folder, git branch, context meter, cost and elapsed time. Its ⓘ opens a pane to remove built-in tools, read the system prompt as sent, and trace every request to the model. |
+### [desktop-statusline](desktop-statusline/README.md)
+
+A status bar above the prompt in the Claude desktop app: model, effort, folder, git
+branch, context meter, cost and elapsed time. Its ⓘ opens a pane to remove built-in
+tools, read the system prompt as sent, and trace every request to the model.
 
 ![The desktop-statusline band above the prompt box: Opus 5.5, high effort, claude-mods | feat/desktop-statusline-context-breakdown with a dot for uncommitted changes, a context meter at 7%, $0.02, 22m 8s and an info button, with hairlines between each figure](desktop-statusline/docs/desktop-statusline-above-prompt.png)
 
