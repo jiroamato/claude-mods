@@ -165,8 +165,18 @@ Manage marketplaces**, and new versions published here arrive through a sync.
 <details>
 <summary>Prefer the terminal?</summary>
 
-The terminal and the desktop app share one plugin configuration, so these two
-commands give the same result:
+The terminal and the desktop app share one plugin configuration, so installing
+from a terminal gives the same result. With Node.js, one command adds this
+marketplace and installs the plugin for you:
+
+```bash
+npx @jiroamato/desktop-statusline
+```
+
+Running it again is safe: it keeps what is already there, and turns the plugin
+back on if you disabled it. It needs the `claude` command on your `PATH`.
+
+Or run the two `claude` commands it runs:
 
 ```bash
 claude plugin marketplace add jiroamato/claude-mods
@@ -206,6 +216,9 @@ desktop-statusline/
   trace/*.d.mts                their types, for the hooks and the tests
   types/index.d.ts             its state contract
   tests/                       run with `claude plugin test`
+  package.json                 the npm package, @jiroamato/desktop-statusline
+  install.mjs                  its installer, what `npx` runs
+  pack-docs.mjs                adds this README to the package while npm packs it
 ```
 
 Validate, test and type-check a plugin by passing its folder:

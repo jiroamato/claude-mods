@@ -12,6 +12,7 @@ on:
       - .claude-plugin/marketplace.json
       - '*/CHANGELOG.md'
       - '*/.claude-plugin/plugin.json'
+      - '*/package.json'
 
 permissions:
   contents: read

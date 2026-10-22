@@ -45,11 +45,15 @@ nothing releases by itself:
    `chore(main): release <version>`. `docs`, `chore`, `ci`, `style` and `test` commits,
    and commits outside a plugin folder, release nothing.
 2. That PR bumps the version in `<plugin>/.claude-plugin/plugin.json`, the plugin's entry in
-   `.claude-plugin/marketplace.json` and `.release-please-manifest.json`, and writes `<plugin>/CHANGELOG.md`.
+   `.claude-plugin/marketplace.json`, `.release-please-manifest.json` and, for
+   `desktop-statusline`, `desktop-statusline/package.json`, and writes `<plugin>/CHANGELOG.md`.
    It shows no CI checks: GitHub runs no workflow for a PR the workflow token opened.
 3. Merging it is the go decision: `.github/workflows/release-please.yml` tags the commit and publishes
    the GitHub release with the changelog's notes. Installed copies update on the next marketplace sync,
-   which compares the `version` field.
+   which compares the `version` field. For `desktop-statusline` it then re-runs `ci.yml` on that
+   commit and publishes the npm package `@jiroamato/desktop-statusline`, whose only code is the
+   `npx` installer (`install.mjs`), through npm trusted publishing: no npm token exists (see
+   `RELEASING.md`).
 4. Merge `main` back into `dev` (a PR from `main`, merged with a merge commit) so `dev` carries the new
    versions and changelog.
 

@@ -1,0 +1,38 @@
+{
+  "name": "@jiroamato/desktop-statusline",
+  "version": "0.1.0",
+  "description": "Installs desktop-statusline, a Claude Code plugin: a status bar above the prompt in the Claude desktop app with model, effort, folder, git branch, context meter, cost and elapsed time",
+  "keywords": [
+    "claude",
+    "claude-code",
+    "claude-code-plugin",
+    "status-line",
+    "status-bar",
+    "desktop"
+  ],
+  "homepage": "https://github.com/jiroamato/claude-mods#readme",
+  "bugs": "https://github.com/jiroamato/claude-mods/issues",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/jiroamato/claude-mods.git",
+    "directory": "desktop-statusline"
+  },
+  "license": "MIT",
+  "author": "Jiro Amato <amato.miguel@gmail.com>",
+  "bin": {
+    "desktop-statusline": "install.mjs"
+  },
+  "files": [
+    "install.mjs"
+  ],
+  "scripts": {
+    "prepack": "node pack-docs.mjs",
+    "postpack": "node pack-docs.mjs remove"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "publishConfig": {
+    "access": "public"
+  }
+}

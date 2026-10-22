@@ -4,18 +4,50 @@ on:
   push:
     branches: [main]
 
-permissions:
-  contents: write
-  pull-requests: write
-
 jobs:
   release-please:
     runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      pull-requests: write
+    outputs:
+      statusline: ${{ steps.release.outputs['desktop-statusline--release_created'] }}
     steps:
       # Opens or updates one release PR per plugin with changes since its last
       # release. Merging that PR tags the plugin and publishes its GitHub release.
       # Work collects on dev; only main, which dev is promoted to, is released.
       - uses: googleapis/release-please-action@v5
+        id: release
         with:
           token: ${{ secrets.GITHUB_TOKEN }}
           target-branch: main
+
+  # When this push merged desktop-statusline's release PR, it is the tagged commit:
+  # check it as CI does, then publish its npx installer to npm.
+  check:
+    needs: release-please
+    if: ${{ needs.release-please.outputs.statusline == 'true' }}
+    permissions:
+      contents: read
+    uses: ./.github/workflows/ci.yml
+
+  npm:
+    needs: [release-please, check]
+    if: ${{ needs.release-please.outputs.statusline == 'true' }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      # npm trusted publishing: npm takes this workflow's OIDC token in place of
+      # a stored npm token, and publishes only for the publisher configured on the
+      # package (this repository and release-please.yml). See RELEASING.md.
+      id-token: write
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v7
+        with:
+          # Trusted publishing needs npm 11.5.1 or later, which Node 24 ships.
+          node-version: 24
+          registry-url: https://registry.npmjs.org
+      - name: Publish @jiroamato/desktop-statusline
+        working-directory: desktop-statusline
+        run: npm publish --provenance

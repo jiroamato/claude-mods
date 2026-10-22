@@ -1,3 +1,9 @@
 # Written by the Claude Code engine each time it loads a mod: this build's
 # API typings for the editor. Regenerated on load, never committed.
 **/.claude-plugin/types/
+# Copied in from the repository root only while npm packs the installer
+# (desktop-statusline/pack-docs.mjs), which deletes them again.
+desktop-statusline/README.md
+desktop-statusline/LICENSE
+# What `npm pack` writes.
+*.tgz
