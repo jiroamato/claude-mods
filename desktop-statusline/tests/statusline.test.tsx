@@ -80,13 +80,14 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   // Meter │ cost │ elapsed │ ⓘ, no effort known yet so none on the left.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
   expect(dividers).toHaveLength(4)
-  // The pane's button ends the band: a glyph alone, dim until pointed at.
-  const children = (await ui.findAll({ type: 'Button' })).map(one => one.props.key)
-  expect(children).toEqual(['open-context', 'open-details'])
+  // The pane's button ends the band: a glyph alone, dim until pointed at, a
+  // figure space either side for the pill the desktop draws around it.
+  const buttons = (await ui.findAll({ type: 'Button' })).map(one => one.props.key)
+  expect(buttons).toEqual(['open-context', 'open-details'])
   expect((await ui.find({ key: 'open-details' }))?.props).toMatchObject({
     plain: true,
     dimColor: true,
-    label: 'ⓘ',
+    label: ' ⓘ ',
   })
 
   await ui.unmount()

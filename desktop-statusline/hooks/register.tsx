@@ -156,8 +156,9 @@ const GIT_REFRESH_EVERY_TICKS = 15
 // other figures' and the spare width falls against the band's edge.
 const ELAPSED_COLUMNS = 7
 
-// The band's own way into the pane: a circled i, as the Tools tab marks its tip.
-const INFO_GLYPH = 'ⓘ'
+// The band's own way into the pane: a circled i, as the Tools tab marks its
+// tip, a figure space either side so the desktop's pill around it has room.
+const INFO_GLYPH = ' ⓘ '
 // How long the pane takes to redraw after a change, before scrolling it.
 const PANE_SETTLE_MS = 300
 
@@ -1413,7 +1414,8 @@ export const register: Register = on => {
           </Box>
 
           {/* The pane's own button, at the end: a Button holds text alone, so
-              the glyph stands in for the icon the Tools tab's tip draws. */}
+              the glyph stands in for the icon the Tools tab's tip draws. The
+              desktop draws a label over a child, so the glyph is the label. */}
           {divider()}
           <Button
             key="open-details"
