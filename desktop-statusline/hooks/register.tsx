@@ -1151,22 +1151,6 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // The desktop sometimes moves the pane's window straight to its last row as
-  // it redraws (after a press, or a wheel tick), reported as the person's own
-  // scroll. No key or wheel moves it that way (End moves by every row, a page
-  // key by a page), so such a move is refused and the window stays put.
-  on('ui.scroll', { requestId: PANE_ID }, async ($, e, next) => {
-    const lastOffset = Math.max(0, e.contentRows - e.bodyRows)
-    const isRedrawJump =
-      e.origin.kind === 'person' &&
-      !e.pointer &&
-      Math.abs(e.by) > e.bodyRows &&
-      Math.abs(e.by) !== e.contentRows &&
-      e.offset === lastOffset
-
-    return isRedrawJump ? {} : next(e)
-  }).catch(($, e, next) => next(e))
-
   // A tab picked in the pane's strip, posted by its region.
   on('ui.message', { requestId: PANE_ID }, async ($, e, next) => {
     const isTab = (value: unknown): value is PaneTab => PANE_TABS.includes(value as PaneTab)

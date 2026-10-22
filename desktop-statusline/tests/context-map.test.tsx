@@ -601,7 +601,7 @@ test('removing a tool denies it in the settings and moves it out of the window a
   await pane.unmount()
 })
 
-test('the pane refuses the jump to its last row the desktop reports as a scroll', async ($, on) => {
+test('every move of the person’s goes through, one that lands on the last row too', async ($, on) => {
   engine(on, { text: '{}' })
   let moved = 0
   on('ui.scroll', async () => {
@@ -619,14 +619,18 @@ test('the pane refuses the jump to its last row the desktop reports as a scroll'
   } as const
   const person = { kind: 'person' } as const
 
-  // The desktop's jump: straight to the last row, by neither a page nor every row.
+  // The desktop sends a wheel fling, a drag of the scrollbar's thumb, and End
+  // each as one move by the distance left, clamped, with no pointer: from the
+  // top of a tree taller than two windows, every one of them lands on the last
+  // row by more than a page. A guard that refused that shape as a jump of the
+  // desktop's own kept the pane from its end.
   await $.ui.scroll({ ...window, origin: person, by: 290, offset: 300 })
-  expect(moved).toBe(0)
-  // A wheel tick, a page key and End all go through.
+  expect(moved).toBe(1)
+  // A wheel tick, a page key, and End by every row as the typings describe it.
   await $.ui.scroll({ ...window, origin: person, by: 3, offset: 13 })
   await $.ui.scroll({ ...window, origin: person, by: 40, offset: 53 })
   await $.ui.scroll({ ...window, origin: person, by: 340, offset: 300 })
-  expect(moved).toBe(3)
+  expect(moved).toBe(4)
 
   await pane.unmount()
 })
