@@ -959,6 +959,7 @@ async function openPane($: EngineInterface): Promise<void> {
   try {
     await update($, tab, () => 'tools')
     await update($, reader, () => null)
+    readerCache = null
     // Focused, so the first click in the pane presses its button: an
     // unfocused pane spends that click on taking the focus.
     await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
@@ -1086,15 +1087,21 @@ export const register: Register = on => {
   // scroll. No key or wheel moves it that way (End moves by every row, a page
   // key by a page), so such a move is refused and the window stays put.
   on('ui.scroll', { requestId: PANE_ID }, async ($, e, next) => {
+    // The reader is open while it has a request laid out: the cache is cleared
+    // as it closes, so nothing is awaited before the move is answered.
     const laid = readerCache
-    if (e.origin.kind === 'person' && laid && (await read($, reader)) !== null) {
+    if (e.origin.kind === 'person' && laid) {
       readerBodyRows = e.bodyRows
       const visible = readerVisibleRows(e.bodyRows)
       const total = laid.rows.length
       const park = readerPark(e.bodyRows)
       // A move the size of the park is Home or End, as the engine clamps them.
       const isWhole = Math.abs(e.by) >= park
-      await update($, readerOffset, now =>
+      // The desktop moves its window before the engine hears of it, and sets
+      // it where the hook answers: answered at once, the move shows for a few
+      // milliseconds at most. The rows then move, by the redraw the state's
+      // change asks for, not awaited here.
+      void update($, readerOffset, now =>
         clampOffset(isWhole ? (e.by < 0 ? 0 : total) : now + e.by, total, visible),
       )
 
@@ -1132,6 +1139,7 @@ export const register: Register = on => {
     }
     if (e.element === READER_KEY && (e.data as Partial<ReaderBarPick> | null)?.back) {
       await update($, reader, () => null)
+      readerCache = null
       // The window was parked for the reader (./panel.tsx): once the tabs are
       // drawn again, it goes back to their top.
       await $.clock.sleep(PANE_SETTLE_MS).catch(() => undefined)
