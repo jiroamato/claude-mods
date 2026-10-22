@@ -42,11 +42,12 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   )
   expect(String(meter?.props.source)).toMatch(/stroke="#8a8a8a"/)
   // The percentage is text; the button over it and the meter is figure spaces,
-  // as wide as the two, so the desktop's pill spans both.
+  // as wide as the two and a space of air at each end, so the desktop's pill
+  // spans both without touching them.
   expect((await ui.find({ type: 'Text', text: '33%' }))?.props).toMatchObject({ tabular: true })
   expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({
     plain: true,
-    label: '\u2007'.repeat(12),
+    label: '\u2007'.repeat(14),
   })
 
   expect(await ui.find({ type: 'Text', text: /\$1\.23/ })).toBeDefined()
@@ -200,7 +201,7 @@ test('shows a placeholder bar and no cost before the first response', async ($, 
   expect(String(meter?.props.source)).toMatch(/width="0" height="8" fill="#c19c00"/)
   expect(await ui.find({ type: 'Text', text: '--%' })).toBeDefined()
   expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({
-    label: '\u2007'.repeat(12),
+    label: '\u2007'.repeat(14),
   })
   expect(await ui.find({ type: 'Text', text: /\$/ })).toBeUndefined()
   await ui.advance(0)

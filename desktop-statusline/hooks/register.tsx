@@ -159,6 +159,9 @@ const ELAPSED_COLUMNS = 7
 // The meter and the gap to its percentage, in figure spaces: the width of the
 // button laid over them, less the percentage's own characters.
 const METER_FIGURES = 9
+// A figure space of air at each end of that button, so the pill the desktop
+// draws under the pointer does not touch what it holds.
+const METER_AIR = 1
 
 // The band's own way into the pane: a circled i, as the Tools tab marks its
 // tip, a figure space either side so the desktop's pill around it has room.
@@ -1407,11 +1410,11 @@ export const register: Register = on => {
             <Text color="text" tabular>
               {percentText}
             </Text>
-            <Box position="absolute" top={0} left={0}>
+            <Box position="absolute" top={0} left={-METER_AIR}>
               <Button
                 key="open-context"
                 plain
-                label={'\u2007'.repeat(METER_FIGURES + percentText.length)}
+                label={'\u2007'.repeat(METER_AIR + METER_FIGURES + percentText.length + METER_AIR)}
                 onPress={() => attempt(openPane($))}
               />
             </Box>
