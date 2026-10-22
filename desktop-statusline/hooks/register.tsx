@@ -156,13 +156,6 @@ const GIT_REFRESH_EVERY_TICKS = 15
 // other figures' and the spare width falls against the band's edge.
 const ELAPSED_COLUMNS = 7
 
-// The meter and the gap to its percentage, in figure spaces: the width of the
-// button laid over them, less the percentage's own characters.
-const METER_FIGURES = 9
-// A figure space of air at each end of that button, so the pill the desktop
-// draws under the pointer does not touch what it holds.
-const METER_AIR = 1
-
 // The band's own way into the pane: a circled i, as the Tools tab marks its
 // tip, a figure space either side so the desktop's pill around it has room.
 const INFO_GLYPH = ' ⓘ '
@@ -1347,7 +1340,6 @@ export const register: Register = on => {
 
     const folder = basename(cwd)
     const percent = usage.context.percent
-    const percentText = percent === undefined ? '--%' : `${percent}%`
     const usd = usage.cost?.usd
     const elapsed = now - usage.startedAt
 
@@ -1396,10 +1388,8 @@ export const register: Register = on => {
 
         {/* Live figures: context, cost, elapsed, a hairline between each. */}
         <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={0}>
-          {/* The meter and its percentage open the Context details pane, as
-              one control: a Button holds text alone, so one of figure spaces
-              lies over both, and the desktop's pill under the pointer, which
-              lets them show through, spans the two. */}
+          {/* The meter and its percentage: figures, as the cost and the time
+              are; the band's button at its end opens the pane. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
             <Svg
               source={meterSvg(percent)}
@@ -1408,16 +1398,8 @@ export const register: Register = on => {
               height={METER_HEIGHT}
             />
             <Text color="text" tabular>
-              {percentText}
+              {percent === undefined ? '--%' : `${percent}%`}
             </Text>
-            <Box position="absolute" top={0} left={-METER_AIR}>
-              <Button
-                key="open-context"
-                plain
-                label={'\u2007'.repeat(METER_AIR + METER_FIGURES + percentText.length + METER_AIR)}
-                onPress={() => attempt(openPane($))}
-              />
-            </Box>
           </Box>
 
           {usd !== undefined && divider()}

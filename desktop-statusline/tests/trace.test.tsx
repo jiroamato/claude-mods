@@ -797,7 +797,7 @@ function kept(seq: number, text: string): string {
 /** Opens the pane from the band, as a person does, which reads the trace afresh. */
 async function reopen($: Parameters<TestBody>[0], settings: ReturnType<typeof tracedEngine>) {
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  const pressed = band.press({ key: 'open-context' })
+  const pressed = band.press({ key: 'open-details' })
   for (let step = 0; step < 10; step += 1) await settings.clock.advance(100)
   await pressed
   await band.unmount()

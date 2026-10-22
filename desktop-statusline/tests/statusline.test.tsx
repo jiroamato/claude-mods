@@ -41,14 +41,8 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
     /<rect x="1" y="1" width="20" height="8" fill="#c19c00"/,
   )
   expect(String(meter?.props.source)).toMatch(/stroke="#8a8a8a"/)
-  // The percentage is text; the button over it and the meter is figure spaces,
-  // as wide as the two and a space of air at each end, so the desktop's pill
-  // spans both without touching them.
+  // The percentage is a figure, not a control, with digits of one width.
   expect((await ui.find({ type: 'Text', text: '33%' }))?.props).toMatchObject({ tabular: true })
-  expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({
-    plain: true,
-    label: '\u2007'.repeat(14),
-  })
 
   expect(await ui.find({ type: 'Text', text: /\$1\.23/ })).toBeDefined()
   // The timer is a region of its own (hooks/elapsed.tsx), in a slot as wide
@@ -87,10 +81,11 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   // Meter │ cost │ elapsed │ ⓘ, no effort known yet so none on the left.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
   expect(dividers).toHaveLength(4)
-  // The pane's button ends the band: a glyph alone, dim until pointed at, a
-  // figure space either side for the pill the desktop draws around it.
+  // The pane's button ends the band, the band's one: a glyph alone, dim until
+  // pointed at, a figure space either side for the pill the desktop draws
+  // around it.
   const buttons = (await ui.findAll({ type: 'Button' })).map(one => one.props.key)
-  expect(buttons).toEqual(['open-context', 'open-details'])
+  expect(buttons).toEqual(['open-details'])
   expect((await ui.find({ key: 'open-details' }))?.props).toMatchObject({
     plain: true,
     dimColor: true,
@@ -200,9 +195,6 @@ test('shows a placeholder bar and no cost before the first response', async ($, 
   expect(meter?.props).toMatchObject({ alt: 'context: no reading yet' })
   expect(String(meter?.props.source)).toMatch(/width="0" height="8" fill="#c19c00"/)
   expect(await ui.find({ type: 'Text', text: '--%' })).toBeDefined()
-  expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({
-    label: '\u2007'.repeat(14),
-  })
   expect(await ui.find({ type: 'Text', text: /\$/ })).toBeUndefined()
   await ui.advance(0)
   expect(await ui.find({ type: 'Text', text: '5s', in: 'elapsed' })).toBeDefined()

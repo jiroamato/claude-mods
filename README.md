@@ -35,9 +35,9 @@ the figures a terminal status line shows, its text in the app's own theme colour
 #### Context details
 
 The desktop app's own Context card lists what fills the context window. Click the ⓘ
-at the band's right end, or the meter and its percentage, to open the **Context
-details** pane for what that card cannot show, in four tabs, each with its size as
-`/context` counts it. A pane already open is left as you have it:
+at the band's right end to open the **Context details** pane for what that card
+cannot show, in four tabs, each with its size as `/context` counts it. A pane
+already open is left as you have it:
 
 - **Tools**: every built-in tool with a one-line summary and its approximate size,
   grouped as in the context, deferred (loaded on demand), put back for the next

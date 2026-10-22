@@ -367,7 +367,7 @@ async function openTab(
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: `tab-${id}` })
 }
 
-test('the meter has no hover card; the meter and the ⓘ open the pane on its Tools tab', async ($, on) => {
+test('the meter has no hover card; the ⓘ opens the pane on its Tools tab', async ($, on) => {
   const settings: SettingsFile = { text: '{}' }
   const clock = engine(on, settings)
   let opened: unknown
@@ -378,22 +378,19 @@ test('the meter has no hover card; the meter and the ⓘ open the pane on its To
   })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
 
-  // The desktop's own Context card lists the rows; the band adds no card over
-  // the meter: the one Box placed over it holds the button that opens the pane.
+  // The desktop's own Context card lists the rows; the band adds nothing over
+  // the meter, and the meter is no control.
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const boxes = await band.findAll({ type: 'Box' })
-  const placed = boxes.filter(one => one.props.position === 'absolute')
-  expect(placed).toHaveLength(1)
-  expect((placed[0]?.children[0] as { props?: unknown } | undefined)?.props).toMatchObject({
-    key: 'open-context',
-  })
+  expect(boxes.filter(one => one.props.position === 'absolute')).toEqual([])
   expect(boxes.filter(one => one.props.hover !== undefined)).toEqual([])
+  expect(await band.find({ key: 'open-context' })).toBeUndefined()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await openTab(pane, 'skills')
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
-  // The band's ⓘ, at its end, opens the pane (the meter does too).
+  // The band's ⓘ, at its end, opens the pane.
   const pressed = band.press({ key: 'open-details' })
   // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
@@ -406,7 +403,7 @@ test('the meter has no hover card; the meter and the ⓘ open the pane on its To
   // Open already, with another tab picked, a press leaves it as it is.
   settings.isPaneShown = true
   await openTab(pane, 'skills')
-  const again = band.press({ key: 'open-context' })
+  const again = band.press({ key: 'open-details' })
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await again
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
@@ -769,7 +766,7 @@ test('a deny added by hand is picked up when the pane opens', async ($, on) => {
 
   settings.text = '{"permissions": {"deny": ["Grep"]}}'
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
-  const pressed = band.press({ key: 'open-context' })
+  const pressed = band.press({ key: 'open-details' })
   // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed
