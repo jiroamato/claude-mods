@@ -1,32 +1,16 @@
 import type {
   CommandInfo,
+  ContextSkill,
+  PromptComposeSection,
   SessionContextBreakdown,
-  SessionMessage,
-  ToolUseSummary,
 } from 'claude-code'
 
-import type { BlockKind, ContextBlock, ContextSnapshot } from '../types'
+import type { ContextRow, ContextSnapshot, PromptSection, RowKind, SkillOrigin } from '../types'
 import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
-/** How many tool results the map names on their own, the rest folded into the conversation. */
-const RESULTS_SHOWN = 6
-/** A tool result smaller than this stays in the conversation's tile. */
-const RESULT_MIN_TOKENS = 1000
 const SKILL_LINE_MAX = 110
 
-// /context's rows by the label it prints. The breakdown marks only whether a
-// row is used, free or reserve, so the kind of content comes from the label;
-// a row this does not know is drawn as system content.
-const KIND_BY_CATEGORY: Record<string, BlockKind> = {
-  'System prompt': 'system',
-  'System tools': 'tools',
-  'MCP tools': 'mcp',
-  'MCP server instructions': 'mcp',
-  'Custom agents': 'agents',
-  'Memory files': 'memory',
-  Skills: 'skills',
-  Messages: 'conversation',
-}
+const KIND_ORDER: Record<RowKind, number> = { used: 0, buffer: 1, free: 2, deferred: 3 }
 
 // Where a skill comes from, in words, by the engine's name for the source.
 const SKILL_SOURCE: Record<string, string> = {
@@ -38,24 +22,57 @@ const SKILL_SOURCE: Record<string, string> = {
   syncedSkills: 'claude.ai',
 }
 
-function basename(path: string): string {
-  const index = Math.max(path.lastIndexOf('/'), path.lastIndexOf('\\'))
-
-  return index === -1 ? path : path.slice(index + 1)
+// The engine's section ids, in words, for the ones that open with no heading.
+const SECTION_TITLE: Record<string, string> = {
+  intro: 'Introduction',
+  lean_body: 'Core instructions',
+  bare: 'Bare prompt',
+  system: 'System',
+  doing_tasks: 'Doing tasks',
+  actions: 'Actions',
+  tools: 'Using tools',
+  tone: 'Tone and style',
+  communication: 'Communication',
+  pronouns: 'Pronouns',
+  action_caution: 'Caution with actions',
+  memory: 'Memory',
+  total_tokens: 'Token budget',
 }
 
-/** `Bash: npm test`, `Read: register.tsx`: what a tool call was, in a few words. */
-export function describeCall(use: Pick<ToolUseSummary, 'tool' | 'input'>): string {
-  const input = use.input
-  const pick = (key: string): string | undefined =>
-    typeof input[key] === 'string' && input[key] !== '' ? (input[key] as string) : undefined
-  const path = pick('file_path') ?? pick('notebook_path') ?? pick('path')
-  let detail = path ? basename(path) : (pick('command') ?? pick('pattern') ?? pick('url'))
-  detail ??= pick('description') ?? pick('prompt') ?? pick('query')
-  if (!detail) return use.tool
-  const line = detail.split('\n')[0]!.trim()
+/**
+ * Who put a skill in the session: Anthropic for the skills Claude Code
+ * bundles (`built-in`, and the default plugins it ships, `cc-plugin-*`) and
+ * the ones the desktop app adds (`anthropic-skills:*`); the organization for
+ * managed settings; else the person, by their settings, a plugin or a server.
+ */
+export function skillOrigin(
+  skill: Pick<ContextSkill, 'name' | 'source' | 'pluginName'>,
+): SkillOrigin {
+  const plugin = skill.pluginName ?? ''
+  if (
+    skill.source === 'built-in' ||
+    skill.name.startsWith('anthropic-skills:') ||
+    plugin === 'anthropic-skills' ||
+    plugin.startsWith('cc-plugin-')
+  ) {
+    return 'anthropic'
+  }
 
-  return `${use.tool}: ${line.length > 40 ? `${line.slice(0, 39)}…` : line}`
+  return skill.source === 'policySettings' ? 'organization' : 'yours'
+}
+
+/** `21k`, `18.2k`, `894.5k`, `1M`: a token count as /context prints it. */
+export function formatTokens(tokens: number): string {
+  const round = (value: number) => value.toFixed(1).replace(/\.0$/, '')
+  if (tokens >= 999_950) return `${round(tokens / 1_000_000)}M`
+  if (tokens >= 1000) return `${round(tokens / 1000)}k`
+
+  return String(Math.round(tokens))
+}
+
+/** `2.1%`: a row's share of the window, one decimal, as /context prints it. */
+export function formatShare(tokens: number, window: number): string {
+  return `${window > 0 ? ((tokens / window) * 100).toFixed(1) : '0.0'}%`
 }
 
 function estimate(text: string): number {
@@ -63,49 +80,49 @@ function estimate(text: string): number {
 }
 
 /**
- * The context window as the map draws it: /context's used rows, with the
- * messages split into their largest tool results and the conversation around
- * them. Result sizes are estimated from their text and scaled so the pieces
- * add up to the messages row.
+ * /context's rows in the order its card lists them: what is in the window
+ * largest first, then the reserve, the free space and what loads on demand.
  */
+export function contextRows(breakdown: SessionContextBreakdown): ContextRow[] {
+  return breakdown.categories
+    .filter(row => row.tokens > 0)
+    .map(row => ({ name: row.name, tokens: row.tokens, kind: row.kind }))
+    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.tokens - a.tokens)
+}
+
+/** A section's title: its own heading, else its id in words. */
+export function sectionTitle(section: Pick<PromptComposeSection, 'id' | 'text'>): string {
+  const heading = /^\s*#{1,3}\s+(.+)$/m.exec(section.text.trimStart().split('\n')[0] ?? '')?.[1]
+  if (heading) return heading.trim()
+  const known = SECTION_TITLE[section.id]
+  if (known) return known
+  const words = section.id
+    .replace(/^[^:]+:/, '')
+    .replace(/[_-]+/g, ' ')
+    .trim()
+
+  return words === '' ? section.id : words[0]!.toUpperCase() + words.slice(1)
+}
+
+/** The system prompt's sections, each with a title and its estimated tokens. */
+export function promptSections(sections: readonly PromptComposeSection[]): PromptSection[] {
+  return sections
+    .filter(one => one.text.trim() !== '')
+    .map(one => ({
+      id: one.id,
+      title: sectionTitle(one),
+      tokens: Math.round(estimate(one.text)),
+      text: one.text.replace(/^\n+/, '').replace(/\s+$/, ''),
+    }))
+}
+
+/** The context window as the card and the pane draw it: /context's rows and what is in each. */
 export function buildSnapshot(
   breakdown: SessionContextBreakdown,
-  messages: readonly SessionMessage[],
   commands: readonly CommandInfo[],
+  sections: readonly PromptComposeSection[],
 ): ContextSnapshot {
-  const blocks: ContextBlock[] = []
-  for (const row of breakdown.categories) {
-    if (row.kind !== 'used' || row.tokens <= 0) continue
-    const kind = KIND_BY_CATEGORY[row.name] ?? 'system'
-    if (kind !== 'conversation') {
-      blocks.push({ label: row.name, kind, tokens: row.tokens })
-      continue
-    }
-
-    const results: ContextBlock[] = []
-    let estimated = 0
-    for (const message of messages) {
-      estimated += estimate(message.text)
-      for (const use of message.toolUses) {
-        estimated += estimate(JSON.stringify(use.input))
-        const size = estimate(use.text ?? '')
-        estimated += size
-        results.push({ label: describeCall(use), kind: 'result', tokens: size })
-      }
-    }
-    const scale = estimated > 0 ? row.tokens / estimated : 0
-    const shown = results
-      .map(one => ({ ...one, tokens: Math.round(one.tokens * scale) }))
-      .filter(one => one.tokens >= RESULT_MIN_TOKENS)
-      .sort((a, b) => b.tokens - a.tokens)
-      .slice(0, RESULTS_SHOWN)
-    const rest = row.tokens - shown.reduce((sum, one) => sum + one.tokens, 0)
-    blocks.push(...shown, {
-      label: 'Conversation',
-      kind: 'conversation',
-      tokens: Math.max(0, rest),
-    })
-  }
+  const rows = contextRows(breakdown)
 
   const descriptions = new Map(commands.map(one => [one.name, one.description]))
   const skills = (breakdown.skills?.skillFrontmatter ?? [])
@@ -114,6 +131,7 @@ export function buildSnapshot(
       tokens: one.tokens,
       source: one.pluginName ?? SKILL_SOURCE[String(one.source)] ?? String(one.source),
       description: firstSentence(descriptions.get(one.name) ?? '', SKILL_LINE_MAX),
+      origin: skillOrigin(one),
     }))
     .sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name))
 
@@ -121,7 +139,18 @@ export function buildSnapshot(
     used: breakdown.totalTokens,
     window: breakdown.rawMaxTokens,
     percent: breakdown.percentage,
-    blocks: blocks.sort((a, b) => b.tokens - a.tokens),
+    rows,
     skills,
+    prompt: promptSections(sections),
   }
+}
+
+/**
+ * The breakdown kept in the state, or null while none stands in this version's
+ * shape: a reload keeps what an earlier version of the plugin wrote.
+ */
+export function currentSnapshot(value: unknown): ContextSnapshot | null {
+  const rows = (value as { rows?: unknown } | null)?.rows
+
+  return Array.isArray(rows) ? (value as ContextSnapshot) : null
 }
