@@ -10,14 +10,17 @@ PR. Merging ordinary PRs never releases.
 
 ## Steady state
 
-1. Conventional commits land on `dev` through squash-merged PRs.
+1. Conventional commits land on `dev` through squash-merged PRs (see
+   [CONTRIBUTING.md](CONTRIBUTING.md)).
 2. The maintainer promotes `dev` with a PR from `dev` into `main`, merged with a merge commit so
    every commit reaches `main` on its own and gets its own changelog line.
 3. For each plugin with `feat` or `fix` commits touching its folder since its last release,
    release-please opens or updates a release PR, `chore(main): release <version>`. It
    bumps the version in the plugin's `.claude-plugin/plugin.json`, in its entry in
-   `.claude-plugin/marketplace.json` and in `.release-please-manifest.json`, and adds the
-   release to the plugin's `CHANGELOG.md`.
+   `.claude-plugin/marketplace.json`, in `.release-please-manifest.json` and, for
+   `desktop-statusline`, in its `package.json`, and adds the release to the plugin's
+   `CHANGELOG.md`. The release PR shows no CI checks (see
+   [One-time repository setup](#one-time-repository-setup)).
 4. The maintainer reviews and merges the release PR. That is the go decision.
 5. `.github/workflows/release-please.yml` tags the merge commit and publishes the GitHub
    release with the same notes as the changelog. For `desktop-statusline` it then runs the
@@ -27,6 +30,13 @@ PR. Merging ordinary PRs never releases.
 
 Installed copies update on the next marketplace sync: the desktop app and `claude plugin`
 compare the `version` in `plugin.json` with what is installed.
+
+## Stacked pull requests
+
+Merge a stack bottom-up. Merge the base PR into `dev`; then, for the next PR, rebase its
+branch onto `dev` from its own first commit (`git rebase --onto origin/dev <old-base>`),
+force-push it with `--force-with-lease`, retarget the PR to `dev`, wait for CI to pass, and
+merge it. Repeat up the stack.
 
 ## npm
 
@@ -61,10 +71,15 @@ fails to authenticate: finish the setup, then re-run the failed jobs.
 ## Versions
 
 While a plugin is below 1.0.0, a `feat` bumps the patch version and a breaking change bumps
-the minor. `docs`, `chore`, `ci`, `style` and `test` commits release nothing on their own.
+the minor. `docs`, `chore`, `ci`, `style` and `test` commits, and commits outside a plugin
+folder, release nothing on their own.
 
 Do not hand-edit the `version` fields, `CHANGELOG.md` or `.release-please-manifest.json`; the
-Guard generated files check rejects PRs that do.
+Guard generated files check rejects PRs that edit a changelog or the manifest.
+
+release-please rewrites the JSON files it bumps with `JSON.stringify`, so `.prettierrc` formats
+`.claude-plugin/*.json` and `.release-please-manifest.json` with the `json-stringify` parser
+(Prettier already uses it for `package.json`), and its output passes the format check.
 
 ## Adding a plugin
 
