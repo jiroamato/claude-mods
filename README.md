@@ -16,8 +16,6 @@ plugins built on function hooks.
 
 ## Plugins
 
-Each plugin has a README of its own, with what it does and how to install it.
-
 ### [desktop-statusline](desktop-statusline/README.md)
 
 A status bar above the prompt in the Claude desktop app: model, effort, folder, git
