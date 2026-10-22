@@ -33,13 +33,16 @@ export type TextPick = { by: number } | { to: 'start' | 'end' } | { first: numbe
 /** The key of the reader's text, which the hooks module hears it post under. */
 export const READER_TEXT_KEY = 'reader-text'
 
-/** How wide the scrollbar's track is, in cells: thin, and wide enough to take a press. */
+/** The columns at the text's right edge a press on reaches the track: wide enough to hit. */
 export const SCROLLBAR_COLUMNS = 2
+/**
+ * How wide the track and its thumb are drawn, in cells, at the right of those
+ * columns: a native scrollbar's width. Square-ended: the desktop draws a Box
+ * with a rounded border two cells wide at the least, whatever its height.
+ */
+const SCROLLBAR_DRAWN_COLUMNS = 1
 /** How tall the thumb is at least, in rows: enough to read as one on a long request. */
 const THUMB_MIN_ROWS = 2
-
-// A border no one sees: only a Box with a border has rounded corners.
-const CLEAR = '#00000000'
 
 // A match, and the current one, as the desktop marks found text.
 const HIT = '#c9850059'
@@ -228,28 +231,25 @@ export default function ReaderText(props: TextProps, surface: ClientSurface<Stat
           )
         })}
       </Box>
-      {/* The track and its thumb, each a pill: a border no one sees rounds the
-          corners. The thumb is laid over the track from the region's own corner,
-          not inside it: the desktop sets a bordered Box's children in from its
-          edges, and a thumb set in would run past the track's end. */}
-      <Box
-        width={SCROLLBAR_COLUMNS}
-        height={trackRows}
-        flexShrink={0}
-        borderStyle="round"
-        borderColor={CLEAR}
-        backgroundColor={TRACK}
-      />
-      <Box
-        position="absolute"
-        top={thumbTop}
-        right={0}
-        width={SCROLLBAR_COLUMNS}
-        height={thumbRows}
-        borderStyle="round"
-        borderColor={CLEAR}
-        backgroundColor={state.hover || state.isDragging ? THUMB_LIT : THUMB}
-      />
+      {/* The columns that take a press, and at their right the track, with the
+          thumb in it under the rows above it. */}
+      <Box width={SCROLLBAR_COLUMNS} height={trackRows} flexShrink={0} alignItems="flex-end">
+        <Box
+          width={SCROLLBAR_DRAWN_COLUMNS}
+          height={trackRows}
+          flexShrink={0}
+          flexDirection="column"
+          backgroundColor={TRACK}
+        >
+          <Box height={thumbTop} flexShrink={0} />
+          <Box
+            width={SCROLLBAR_DRAWN_COLUMNS}
+            height={thumbRows}
+            flexShrink={0}
+            backgroundColor={state.hover || state.isDragging ? THUMB_LIT : THUMB}
+          />
+        </Box>
+      </Box>
     </Box>
   )
 }

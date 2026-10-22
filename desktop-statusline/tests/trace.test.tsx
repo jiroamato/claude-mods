@@ -1289,7 +1289,14 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
     (await pane.findAll({ type: 'Box', ...text })).find(
       one => one.props.backgroundColor === '#80808066' || one.props.backgroundColor === '#808080aa',
     )
-  const thumbTop = async () => (await thumb())?.props.top
+  // The thumb's row in the track: the rows of the track above it.
+  const thumbTop = async () => {
+    const track = (await pane.findAll({ type: 'Box', ...text })).find(
+      one => one.props.backgroundColor === '#80808018',
+    )
+
+    return (track?.children[0] as { props: { height: number } } | undefined)?.props.height
+  }
   await pane.pointer({ type: 'down', x: 67, y: 34, button: 'left', ...text })
   expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
   // Held, the thumb and the rows follow the pointer at once, by the region's
