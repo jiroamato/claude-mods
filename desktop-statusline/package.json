@@ -27,7 +27,7 @@
   ],
   "scripts": {
     "prepack": "node pack-docs.mjs",
-    "postpack": "node pack-docs.mjs remove"
+    "postpack": "node pack-docs.mjs restore"
   },
   "engines": {
     "node": ">=18"

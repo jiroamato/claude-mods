@@ -33,8 +33,8 @@ the release notes once `dev` is promoted to `main`.
 ## Repo conventions
 
 - Each plugin lives in its own self-contained folder with its manifest, hooks module, state
-  contract and tests. A new plugin also gets an entry in `.claude-plugin/marketplace.json` and
-  a section in the README.
+  contract, tests, README and screenshots (`<plugin>/docs/`). A new plugin also gets an entry
+  in `.claude-plugin/marketplace.json` and a row in the root README's Plugins table.
 - Function hooks are an early-access API. Write against the Claude Code version named in the
   latest release notes, and say in the PR if your change needs a newer one.
 - Add or update tests under `<plugin>/tests/` for the behaviour you change.

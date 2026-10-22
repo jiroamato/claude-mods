@@ -11,7 +11,8 @@ import { spawnSync } from 'node:child_process'
 const MARKETPLACE = 'claude-mods'
 const REPO = 'jiroamato/claude-mods'
 const PLUGIN = `desktop-statusline@${MARKETPLACE}`
-const README = 'https://github.com/jiroamato/claude-mods#install-in-the-claude-desktop-app'
+const README =
+  'https://github.com/jiroamato/claude-mods/tree/main/desktop-statusline#in-the-claude-desktop-app'
 
 /**
  * Runs `claude <args>`. The args are fixed words, so one command line through

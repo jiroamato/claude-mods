@@ -44,8 +44,8 @@ merge it. Repeat up the stack.
 code is an installer: `npx @jiroamato/desktop-statusline` adds this marketplace and installs
 the plugin through the `claude` CLI. The plugin itself still reaches people through the
 marketplace. The package's `version` is the plugin's, bumped by release-please in the same
-release PR (the package's release type is `node`), and its npm page shows this repository's
-README, which `pack-docs.mjs` adds while npm packs it.
+release PR (the package's release type is `node`), and its npm page shows the plugin's own
+README, its relative links made absolute by `pack-docs.mjs` while npm packs it.
 
 Publishing uses npm [trusted publishing](https://docs.npmjs.com/trusted-publishers): the
 `npm` job in `release-please.yml` has `id-token: write`, npm takes the workflow's OIDC token

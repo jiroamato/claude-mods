@@ -16,7 +16,9 @@ Read the matching file before you act:
 
 ## Orientation
 
-- `README.md` documents each plugin's user-facing behaviour and the develop loop.
+- The root `README.md` is the marketplace's front page (its plugins, installing, the develop loop);
+  `<plugin>/README.md` documents that plugin's behaviour, install and files, with its screenshots in
+  `<plugin>/docs/`.
 - A plugin's hooks module is `<plugin>/hooks/register.tsx`, its state contract `<plugin>/types/index.d.ts`,
   its tests `<plugin>/tests/`. The engine's API typings land in `<plugin>/.claude-plugin/types/` when a
   session loads the plugin; grep them for any `$` call or event before using it. They are generated,
