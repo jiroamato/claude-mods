@@ -5,7 +5,8 @@ Thanks for wanting to contribute.
 ## Workflow
 
 1. Fork the repo and create a branch from `dev` named `type/short-name` (`feat/context-map`,
-   `fix/meter-width`).
+   `fix/meter-width`), the type one of `feat`, `fix`, `refactor`, `perf`, `docs`, `test`,
+   `chore`, `ci`, `build`, `style` or `revert`.
 2. Make your changes, then run the same checks CI runs until they are all green:
 
    ```bash
@@ -21,18 +22,19 @@ Thanks for wanting to contribute.
    `desktop-statusline` that means the Claude desktop app, in light and dark themes.
 4. Open a pull request against `dev` with a [Conventional Commits](https://www.conventionalcommits.org)
    title, `type(scope): summary`. When the change is inside a plugin, the scope is its folder
-   name (`fix(desktop-statusline): keep the timer from shifting the meter`).
+   name (`fix(desktop-statusline): keep the timer from shifting the meter`). `main` is the
+   repository's default branch, so name the base: `gh pr create --base dev`.
 
-CI checks formatting, validates the marketplace, then validates and tests each plugin on
-Ubuntu, macOS and Windows. Pull requests are squash-merged with the PR title as the commit
-title, so the title is what lands on `dev`, and for `feat` and `fix` it becomes the line in
-the release notes once `dev` is promoted to `main`.
+CI checks formatting, validates the marketplace, then validates and tests each plugin and
+installs `desktop-statusline` with `npx`, on Ubuntu, macOS and Windows. Pull requests are
+squash-merged with the PR title as the commit title, so the title is what lands on `dev`, and
+for `feat` and `fix` it becomes the line in the release notes once `dev` is promoted to `main`.
 
 ## Repo conventions
 
 - Each plugin lives in its own self-contained folder with its manifest, hooks module, state
-  contract and tests. A new plugin also gets an entry in `.claude-plugin/marketplace.json` and
-  a section in the README.
+  contract, tests, README and screenshots (`<plugin>/docs/`). A new plugin also gets an entry
+  in `.claude-plugin/marketplace.json` and a section in the root README's Plugins list.
 - Function hooks are an early-access API. Write against the Claude Code version named in the
   latest release notes, and say in the PR if your change needs a newer one.
 - Add or update tests under `<plugin>/tests/` for the behaviour you change.

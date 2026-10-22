@@ -21,7 +21,7 @@ import type { TabProps } from './tabs'
 import type { ToolRow } from './tools'
 import { MAX_MATCHES, isMainSource, sourceLabel, viewLink } from './trace'
 
-/** The pane the percentage opens. */
+/** The pane the band's ⓘ opens. */
 export const PANE_ID = 'context-map'
 export const PANE_TITLE = 'Context details'
 

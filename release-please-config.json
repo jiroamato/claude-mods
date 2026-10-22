@@ -4,7 +4,7 @@
   "bump-patch-for-minor-pre-major": true,
   "packages": {
     "desktop-statusline": {
-      "release-type": "simple",
+      "release-type": "node",
       "package-name": "desktop-statusline",
       "include-component-in-tag": false,
       "initial-version": "0.1.0",
