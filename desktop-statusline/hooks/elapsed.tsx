@@ -30,7 +30,11 @@ export default function Elapsed(props: ElapsedProps, surface: ClientSurface<Stat
   if (!base || base.ms !== props.ms) bases.set(surface, { ms: props.ms, ticks })
   const since = bases.get(surface)!
 
+  // Digits of one width: centred in its slot, the reading would otherwise
+  // shift by a hair as each second's digits change.
   return (
-    <Text color="secondaryText">{formatDuration(props.ms + (ticks - since.ticks) * 1000)}</Text>
+    <Text color="secondaryText" tabular>
+      {formatDuration(props.ms + (ticks - since.ticks) * 1000)}
+    </Text>
   )
 }

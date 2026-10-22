@@ -48,9 +48,12 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   // as its widest reading, and counts the seconds itself: the band is not
   // drawn again for them.
   await ui.advance(0)
-  expect(await ui.find({ type: 'Text', text: '1m 0s', in: 'elapsed' })).toBeDefined()
+  // Centred in its slot, with digits of one width, so nothing beside it moves.
+  expect((await ui.find({ type: 'Text', text: '1m 0s', in: 'elapsed' }))?.props).toMatchObject({
+    tabular: true,
+  })
   const slot = (await ui.findAll({ type: 'Box' })).find(one => one.props.width === 7)
-  expect(slot?.props).toMatchObject({ width: 7, justifyContent: 'flex-start' })
+  expect(slot?.props).toMatchObject({ width: 7, justifyContent: 'center' })
   expect((slot?.children[0] as { props?: unknown } | undefined)?.props).toMatchObject({
     key: 'elapsed',
     module: 'hooks/elapsed.tsx',
@@ -74,9 +77,17 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   await ui.advance(1_000)
   expect(await ui.find({ type: 'Text', text: '2m 1s', in: 'elapsed' })).toBeDefined()
 
-  // Meter │ cost │ elapsed, no effort known yet so none on the left.
+  // Meter │ cost │ elapsed │ ⓘ, no effort known yet so none on the left.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
-  expect(dividers).toHaveLength(3)
+  expect(dividers).toHaveLength(4)
+  // The pane's button ends the band: a glyph alone, dim until pointed at.
+  const children = (await ui.findAll({ type: 'Button' })).map(one => one.props.key)
+  expect(children).toEqual(['open-context', 'open-details'])
+  expect((await ui.find({ key: 'open-details' }))?.props).toMatchObject({
+    plain: true,
+    dimColor: true,
+    label: 'ⓘ',
+  })
 
   await ui.unmount()
 })
@@ -120,7 +131,7 @@ test('draws a hairline between the model, the effort and the folder', async ($, 
   // Two on the left, one on the right between the meter and the timer: no
   // cost has been read yet, so no hairline is drawn for it.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
-  expect(dividers).toHaveLength(3)
+  expect(dividers).toHaveLength(4)
   for (const one of dividers) {
     expect(one.props).toMatchObject({ width: 2, height: 14 })
     expect(String(one.props.source)).toMatch(/fill="#333333"\/>/)
@@ -184,10 +195,11 @@ test('shows a placeholder bar and no cost before the first response', async ($, 
   expect(await ui.find({ type: 'Text', text: /\$/ })).toBeUndefined()
   await ui.advance(0)
   expect(await ui.find({ type: 'Text', text: '5s', in: 'elapsed' })).toBeDefined()
-  // One before the folder, one between the meter and the timer: the cost
-  // brings its own hairline, so none is drawn for it yet.
+  // One before the folder, one between the meter and the timer, one before
+  // the pane's button: the cost brings its own hairline, so none is drawn for
+  // it yet.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
-  expect(dividers).toHaveLength(2)
+  expect(dividers).toHaveLength(3)
 
   await ui.unmount()
 })

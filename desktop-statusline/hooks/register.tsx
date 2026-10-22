@@ -155,6 +155,9 @@ const GIT_REFRESH_EVERY_TICKS = 15
 // reading sits at the slot's left, so its gap from the hairline matches the
 // other figures' and the spare width falls against the band's edge.
 const ELAPSED_COLUMNS = 7
+
+// The band's own way into the pane: a circled i, as the Tools tab marks its tip.
+const INFO_GLYPH = 'ⓘ'
 // How long the pane takes to redraw after a change, before scrolling it.
 const PANE_SETTLE_MS = 300
 
@@ -1399,13 +1402,26 @@ export const register: Register = on => {
           {usd !== undefined && <Text color="text">${usd.toFixed(2)}</Text>}
 
           {divider()}
-          <Box width={ELAPSED_COLUMNS} justifyContent="flex-start">
+          {/* Centred in a slot as wide as its widest reading, so the figures
+              beside it keep their place as it counts. */}
+          <Box width={ELAPSED_COLUMNS} justifyContent="center">
             <Client
               key="elapsed"
               module="./elapsed.tsx"
               props={{ ms: elapsed } satisfies ElapsedProps}
             />
           </Box>
+
+          {/* The pane's own button, at the end: a Button holds text alone, so
+              the glyph stands in for the icon the Tools tab's tip draws. */}
+          {divider()}
+          <Button
+            key="open-details"
+            plain
+            dimColor
+            label={INFO_GLYPH}
+            onPress={() => attempt(openPane($))}
+          />
         </Box>
       </Box>
     )

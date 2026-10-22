@@ -362,7 +362,8 @@ test('the meter has no hover card; the percentage opens the pane on its Tools ta
   await openTab(pane, 'skills')
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
-  const pressed = band.press({ key: 'open-context' })
+  // The band's ⓘ, at its end, opens the pane (the percentage does too).
+  const pressed = band.press({ key: 'open-details' })
   // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed

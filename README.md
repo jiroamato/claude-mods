@@ -24,7 +24,7 @@ plugins built on function hooks.
 A status bar above the prompt in the Claude desktop app's Code tab. It mirrors
 the figures a terminal status line shows, its text in the app's own theme colours:
 
-![The desktop-statusline band above the prompt box: Opus 5.5, high effort, claude-mods | main, a context meter at 9%, $1.25, 8m 28s, with hairlines between each figure](docs/desktop-statusline-above-prompt.png)
+![The desktop-statusline band above the prompt box: Opus 5.5, high effort, claude-mods | feat/desktop-statusline-context-breakdown with a dot for uncommitted changes, a context meter at 7%, $0.02, 22m 8s and an info button, with hairlines between each figure](docs/desktop-statusline-above-prompt.png)
 
 - **Model** in the Claude accent, with the session's reasoning **effort** beside it,
   coloured from quiet (low) to warning and error tones (x-high, max).
@@ -34,9 +34,10 @@ the figures a terminal status line shows, its text in the app's own theme colour
 
 #### Context details
 
-The desktop app's own Context card lists what fills the context window. Click the
-percentage beside the meter to open the **Context details** pane for what that card
-cannot show, in four tabs, each with its size as `/context` counts it:
+The desktop app's own Context card lists what fills the context window. Click the ⓘ
+at the band's right end, or the percentage beside the meter, to open the **Context
+details** pane for what that card cannot show, in four tabs, each with its size as
+`/context` counts it:
 
 - **Tools**: every built-in tool with a one-line summary and its approximate size,
   grouped as in the context, deferred (loaded on demand), put back for the next
