@@ -15,8 +15,8 @@ claude-mods is a Claude Code plugin marketplace: each top-level folder with a
 - Checks, all of which CI runs on Ubuntu, macOS and Windows:
   `claude plugin validate --strict .`, `claude plugin validate --strict <plugin>`,
   `claude plugin test <plugin>`, `npx --yes prettier@3.9.10 --check .`. Type-check with
-  `tsc -p <plugin>` once the typings exist. CI pins Claude Code and Prettier in `.github/workflows/ci.yml`;
-  bump either there on purpose.
+  `tsc -p <plugin>` once the typings exist. CI runs the latest Claude Code release and pins Prettier
+  in `.github/workflows/ci.yml`; bump Prettier there on purpose.
 - UI changes are proven in the Claude desktop app, not only in tests: the desktop draws differently from
   the test harness (hover cards are a fixed-width popover, an unfocused pane spends its first click on
   focus). Put screenshots and recordings in the PR body.
