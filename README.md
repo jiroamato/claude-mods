@@ -39,8 +39,8 @@ percentage beside the meter to open the **Context details** pane for what that c
 cannot show, in four tabs, each with its size as `/context` counts it:
 
 - **Tools**: every built-in tool with a one-line summary and its approximate size,
-  grouped as in the context, deferred (loaded on demand), and removed, each group open
-  until you close it. **Remove** takes a tool
+  grouped as in the context, deferred (loaded on demand), put back for the next
+  session, and removed, each group open until you close it. **Remove** takes a tool
   out of the open session at once (its schema leaves the context and Claude can no
   longer call it) and adds its name to `permissions.deny` in your user settings
   (`~/.claude/settings.json`, or `$CLAUDE_CONFIG_DIR`), so new sessions in every
@@ -188,14 +188,21 @@ desktop-statusline/
   .claude-plugin/plugin.json   manifest
   hooks/hooks.json             names the hooks module
   hooks/register.tsx           the mod: hooks, state and the band's tree
+  hooks/elapsed.tsx            the band's timer, a region that counts its own seconds
+  hooks/duration.ts            a duration as the band writes it
   hooks/panel.tsx              the Context details pane
   hooks/tabs.tsx               a tab of the pane, a region of its own
+  hooks/disclosure.tsx         a row of the pane that opens and closes
+  hooks/reader.tsx             the reader's top line: the way back
+  hooks/text.tsx               the reader's text, with its scrollbar
   hooks/context.ts             the window broken down as /context counts it
   hooks/tools.ts               tool summaries, sizes and the settings deny edit
+  hooks/folder.ts              opening the traces folder in the file manager
   hooks/trace.ts               tracing's settings, and a trace read for the pane
   trace/receiver.mjs           the trace receiver, run with Node
   trace/store.mjs              what the receiver keeps of each request
   trace/view.mjs               the receiver's pages for the browser
+  trace/*.d.mts                their types, for the hooks and the tests
   types/index.d.ts             its state contract
   tests/                       run with `claude plugin test`
 ```

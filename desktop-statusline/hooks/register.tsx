@@ -21,6 +21,7 @@ import {
   PANE_TITLE,
   READER_KEY,
   READER_SIDE_COLUMNS,
+  TRACE_ITEM_PREFIX,
   readerVisibleRows,
 } from './panel'
 import type { ReaderView } from './panel'
@@ -29,7 +30,6 @@ import type { TextPick, TextProps } from './text'
 import type { DisclosurePick } from './disclosure'
 import type { ReaderBarPick } from './reader'
 import { TAB_PREFIX } from './tabs'
-import type { TabPick } from './tabs'
 import type { RowMatch, TraceRecord } from './trace'
 import {
   currentTrace,
@@ -209,9 +209,14 @@ function meterSvg(percent: number | undefined): string {
   )
 }
 
+/**
+ * Reads the branch and whether the tree is dirty, and writes them when they
+ * changed: a write draws the band again, and a drawing of the band repaints
+ * every element of the plugin's, a focused field in the pane blinking at each.
+ */
 async function refreshGit($: EngineInterface): Promise<void> {
-  let next: GitInfo = null
   try {
+    let next: GitInfo = null
     const cwd = await $.session.cwd()
     const head = await $.process.run(['git', 'rev-parse', '--abbrev-ref', 'HEAD'], {
       cwd,
@@ -226,10 +231,17 @@ async function refreshGit($: EngineInterface): Promise<void> {
       const isDirty = status.exitCode === 0 && status.stdout.trim().length > 0
       next = { branch, isDirty }
     }
+    const was = await read($, git)
+    if (was?.branch === next?.branch && was?.isDirty === next?.isDirty) return
+    await update($, git, () => next)
   } catch {
-    next = null
+    // Unreadable, or unloaded while it ran: the last reading stays.
   }
-  await update($, git, () => next)
+}
+
+/** Starts work nothing waits for; a rejection (unloaded while it ran) is let go. */
+function attempt(work: Promise<unknown>): void {
+  void work.catch(() => undefined)
 }
 
 /** The effort the session is configured with, when no request has told us yet. */
@@ -907,6 +919,8 @@ async function scrollReader($: EngineInterface, pick: TextPick): Promise<void> {
   if (!laid) return
   const visible = readerVisibleRows(readerBodyRows)
   const total = laid.rows.length
+  // The offset kept was clamped to the window as it was: a taller window
+  // since leaves it past the last first row, and a key would move nothing.
   await update($, readerOffset, now =>
     clampOffset(
       'first' in pick
@@ -915,7 +929,7 @@ async function scrollReader($: EngineInterface, pick: TextPick): Promise<void> {
           ? pick.to === 'start'
             ? 0
             : total
-          : now + pick.by,
+          : clampOffset(now, total, visible) + pick.by,
       total,
       visible,
     ),
@@ -1007,14 +1021,19 @@ export const register: Register = on => {
     readStartedTraced($)
     const started = await next(e)
 
-    void (async () => {
-      const configured = await configuredEffort($)
-      await update($, effort, current => current ?? configured)
-      await refreshGit($)
-      await refreshRemoved($)
-      await refreshContext($)
-      await refreshTrace($)
-    })()
+    attempt(
+      (async () => {
+        const configured = await configuredEffort($)
+        await update($, effort, current => current ?? configured)
+        await refreshGit($)
+        await refreshRemoved($)
+        await refreshContext($)
+        await refreshTrace($)
+        // The band drawn while this ran may have read before a write landed:
+        // drawn once more, with everything read at the start.
+        await update($, steps, n => n + 1)
+      })(),
+    )
     void ensureTraceFolder($).catch(() => {
       // No home folder, or it could not be written: the receiver makes the folder when it starts.
     })
@@ -1033,19 +1052,37 @@ export const register: Register = on => {
     let ticks = 0
     $.clock.every(1000, () => {
       ticks += 1
-      if (ticks % GIT_REFRESH_EVERY_TICKS === 0) void refreshGit($)
+      if (ticks % GIT_REFRESH_EVERY_TICKS === 0) attempt(refreshGit($))
     })
 
     return started
   })
 
+  // A /clear or a resume goes on under another session id, and no
+  // session.start fires: what the reader and the trace list showed was that
+  // session's, and the next one's request of the same number is another.
+  on('session.end', async ($, e, next) => {
+    if (e.reason === 'clear' || e.reason === 'resume') {
+      readerCache = null
+      matchCache = null
+      await Promise.all([
+        update($, reader, () => null),
+        update($, readerSearch, () => ({ query: '', index: 0 })),
+        update($, readerOffset, () => 0),
+        update($, expanded, keys => keys.filter(key => !key.startsWith(TRACE_ITEM_PREFIX))),
+      ])
+    }
+
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   // The live effort of each main-loop request, as the engine sends it.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       const level = asEffort(e.effort)
-      if (level) void update($, effort, () => level)
+      if (level) attempt(update($, effort, () => level))
       // A step may have cost, and filled the window: the band draws its figures again.
-      void update($, steps, n => n + 1)
+      attempt(update($, steps, n => n + 1))
     }
 
     return yield* next(e)
@@ -1055,7 +1092,7 @@ export const register: Register = on => {
   // ends, the requests of the others would go nowhere until their turn ended:
   // each prompt makes sure one listens, before the turn's requests are sent.
   on('prompt.submit', async ($, e, next) => {
-    void refreshTrace($)
+    attempt(refreshTrace($))
 
     return next(e)
   })
@@ -1063,8 +1100,8 @@ export const register: Register = on => {
   // A turn may have committed, switched branch or touched files: re-read git.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
-      void refreshGit($)
-      void update($, steps, n => n + 1)
+      attempt(refreshGit($))
+      attempt(update($, steps, n => n + 1))
       // The last request's answer reaches the receiver a moment after the turn
       // ends (the export runs every second), so the trace is read twice.
       void refreshContext($)
@@ -1131,9 +1168,17 @@ export const register: Register = on => {
 
   // A tab picked in the pane's strip, posted by its region.
   on('ui.message', { requestId: PANE_ID }, async ($, e, next) => {
-    const picked = (e.data as Partial<TabPick> | null)?.tab
     const isTab = (value: unknown): value is PaneTab => PANE_TABS.includes(value as PaneTab)
-    if (e.element.startsWith(TAB_PREFIX) && isTab(picked)) await update($, tab, () => picked)
+    if (e.element.startsWith(TAB_PREFIX)) {
+      const pick = e.data as Partial<{ tab: unknown; step: unknown }> | null
+      const picked = pick?.tab
+      if (isTab(picked)) await update($, tab, () => picked)
+      // Left and right step from the open tab: the keyboard stays with the tab pressed.
+      const step = pick?.step
+      if (step === -1 || step === 1) {
+        await update($, tab, now => PANE_TABS[PANE_TABS.indexOf(now) + step] ?? now)
+      }
+    }
     const toggled = (e.data as Partial<DisclosurePick> | null)?.toggle
     if (e.element.startsWith(DISCLOSURE_PREFIX) && typeof toggled === 'string') {
       // A group opens and closes on its own; a section opens alone.
@@ -1260,19 +1305,21 @@ export const register: Register = on => {
       traceError: tracingError,
       folderError: openingError,
       traceText: openSeq === undefined ? null : traceRequestText(Number(openSeq)),
-      onTracing: isOn => void setTracing($, isOn),
-      onShowTraces: () => void showTraceFolder($),
+      onTracing: isOn => attempt(setTracing($, isOn)),
+      onShowTraces: () => attempt(showTraceFolder($)),
       onToggle: (name, shouldRemove) =>
-        void setRemoved($, name, shouldRemove).catch(error =>
-          update($, toolError, () => String(error)),
+        attempt(
+          setRemoved($, name, shouldRemove).catch(error =>
+            update($, toolError, () => String(error)),
+          ),
         ),
-      onExpand: key => void toggleExpanded($, key),
+      onExpand: key => attempt(toggleExpanded($, key)),
       page: shownPage,
       reader: readingSeq === null || shown !== 'trace' ? null : await readerView(),
-      onRead: seq => void openReader($, seq),
-      onSearch: query => void searchReader($, query),
-      onStep: by => void stepReader($, by),
-      onPage: next => void update($, page, () => next),
+      onRead: seq => attempt(openReader($, seq)),
+      onSearch: query => attempt(searchReader($, query)),
+      onStep: by => attempt(stepReader($, by)),
+      onPage: next => attempt(update($, page, () => next)),
     })
   })
 
@@ -1359,7 +1406,7 @@ export const register: Register = on => {
               key="open-context"
               plain
               label={percent === undefined ? '--%' : `${percent}%`}
-              onPress={() => void openPane($)}
+              onPress={() => attempt(openPane($))}
             />
           </Box>
 

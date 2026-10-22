@@ -65,6 +65,13 @@ function breakdown(): SessionContextBreakdown {
         isDeferred: true,
         kind: 'deferred',
       },
+      {
+        name: 'System tools (deferred)',
+        tokens: 300,
+        color: 'inactive',
+        isDeferred: true,
+        kind: 'deferred',
+      },
       { name: 'Free space', tokens: 100_000, color: 'inactive', isDeferred: false, kind: 'free' },
       {
         name: 'Autocompact buffer',
@@ -277,6 +284,7 @@ test('the snapshot lists the rows as /context does, and what the pane details', 
     'Autocompact buffer',
     'Free space',
     'MCP tools (deferred)',
+    'System tools (deferred)',
   ])
   // An empty section is not sent, so it is not listed.
   expect(snapshot.prompt.map(one => [one.id, one.title, one.text])).toEqual([
@@ -379,10 +387,10 @@ test('the pane opens on its tabs, each naming what /context counts for it', asyn
   )
   expect(tabs.map(one => one.props.module)).toEqual(Array(4).fill('hooks/tabs.tsx'))
   expect(tabs.map(one => one.props.props)).toMatchObject([
-    { id: 'tools', label: 'Tools', figure: '20k', isOpen: true, previous: null, next: 'prompt' },
+    { id: 'tools', label: 'Tools', figure: '20k', isOpen: true },
     { id: 'prompt', label: 'Prompt', figure: '8k', isOpen: false },
     { id: 'skills', label: 'Skills', figure: '4k', isOpen: false },
-    { id: 'trace', label: 'Trace', figure: null, isOpen: false, next: null },
+    { id: 'trace', label: 'Trace', figure: null, isOpen: false },
   ])
 
   await pane.unmount()
@@ -407,13 +415,19 @@ test('a tab takes the press anywhere on its pill, and the arrow keys move betwee
   await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'tab-prompt' })
   expect(await open()).toBe('prompt')
 
+  // The keys stay with the tab pressed, and step from the open one.
   await pane.key({ key: 'right', in: 'tab-prompt' })
   expect(await open()).toBe('skills')
-  await pane.key({ key: 'left', in: 'tab-skills' })
+  await pane.key({ key: 'right', in: 'tab-prompt' })
+  expect(await open()).toBe('trace')
+  // No tab right of the last, nor left of the first.
+  await pane.key({ key: 'right', in: 'tab-prompt' })
+  expect(await open()).toBe('trace')
+  await pane.key({ key: 'left', in: 'tab-prompt' })
+  await pane.key({ key: 'left', in: 'tab-prompt' })
   await pane.key({ key: 'left', in: 'tab-prompt' })
   expect(await open()).toBe('tools')
-  // No tab left of the first.
-  await pane.key({ key: 'left', in: 'tab-tools' })
+  await pane.key({ key: 'left', in: 'tab-prompt' })
   expect(await open()).toBe('tools')
 
   await pane.unmount()
@@ -522,6 +536,12 @@ test('removing a tool denies it in the settings and moves it out of the window a
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const bash = { tool: 'Bash', description: 'Executes a command.', provider: ENGINE }
   expect(await $.tool.describe(bash)).toEqual({ description: 'Executes a command.' })
+  await $.tool.describe({
+    tool: 'Monitor',
+    description: 'Streams events.',
+    isDeferred: true,
+    provider: ENGINE,
+  })
 
   // The pane opens on the Tools tab.
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -531,10 +551,20 @@ test('removing a tool denies it in the settings and moves it out of the window a
     label: 'Put back',
   })
   // Grouped: the removed tool under its own heading.
-  expect(
-    (await pane.find({ type: 'Client', key: 'disclose-group-removed' }))?.props.props,
-  ).toMatchObject({ label: 'Removed', figure: '1 tool · ~181', isOpen: true, isHeading: true })
+  const group = async (id: string) =>
+    (await pane.find({ type: 'Client', key: `disclose-group-${id}` }))?.props.props
+  expect(await group('removed')).toMatchObject({
+    label: 'Removed',
+    figure: '1 tool · ~181',
+    isOpen: true,
+    isHeading: true,
+  })
   expect((await pane.find({ key: 'group-removed' }))?.text).toMatch(/^EnterPlanMode/)
+  // What loads on demand is sized by its own estimate, not by /context's
+  // deferred row: that row counts a tool removed this session too.
+  expect(await group('deferred-loaded-on-demand')).toMatchObject({
+    figure: '1 tool · ~320 when loaded',
+  })
 
   const before = invalidated
   await pane.press({ key: 'toggle-Bash' })
@@ -548,10 +578,25 @@ test('removing a tool denies it in the settings and moves it out of the window a
     deny: expect.stringContaining('The user removed Bash from this session'),
   })
   expect((await pane.find({ key: 'toggle-Bash' }))?.props).toMatchObject({ label: 'Put back' })
+  expect(await group('deferred-loaded-on-demand')).toMatchObject({
+    figure: '1 tool · ~320 when loaded',
+  })
 
   await pane.press({ key: 'toggle-Bash' })
   expect(JSON.parse(settings.text).permissions.deny).toEqual(['EnterPlanMode'])
   expect(await $.tool.describe(bash)).toEqual({ description: 'Executes a command.' })
+
+  // A tool put back that this session started without is not in its context:
+  // it waits in a group of its own, counted in no other.
+  await pane.press({ key: 'toggle-EnterPlanMode' })
+  expect(JSON.parse(settings.text).permissions.deny).toEqual([])
+  expect(await group('back-in-a-new-session')).toMatchObject({
+    label: 'Back in a new session',
+    figure: '1 tool · ~181',
+  })
+  expect((await pane.find({ key: 'group-back-in-a-new-session' }))?.text).toMatch(/^EnterPlanMode/)
+  expect((await pane.find({ key: 'group-in-context' }))?.text).not.toMatch(/EnterPlanMode/)
+  expect(await group('removed')).toBeUndefined()
 
   await pane.unmount()
 })

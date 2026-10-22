@@ -81,7 +81,7 @@ function Tabs(props: ContextPaneProps) {
       borderColor={CLEAR}
       backgroundColor={TAB_TRACK}
     >
-      {TABS.map((tab, index) => {
+      {TABS.map(tab => {
         const tokens = rowTokens(props.snapshot, tab.row)
         const count = props.trace.items.length
         const figure =
@@ -97,8 +97,6 @@ function Tabs(props: ContextPaneProps) {
           label: tab.label,
           figure,
           isOpen: props.tab === tab.id,
-          previous: TABS[index - 1]?.id ?? null,
-          next: TABS[index + 1]?.id ?? null,
         }
 
         // Each tab an equal share of the strip, whatever its label.
@@ -356,6 +354,9 @@ const INLINE_CODE = 'bashMessageBackgroundColor'
 
 /** The key prefix of a group that opens and closes, as the hooks module keeps it closed. */
 export const GROUP_PREFIX = 'group-'
+
+/** The prefix of a traced request's key in the expanded list: `trace-` and its number. */
+export const TRACE_ITEM_PREFIX = 'trace-'
 
 /**
  * A group of what a tab lists, set apart as a card: its name, then how many
@@ -640,7 +641,8 @@ const STATUS_NOTE: Record<ToolRow['status'], string> = {
   in: '',
   deferred: '',
   removed: 'removed',
-  'back-next-session': 'back in a new session',
+  // Its group says so.
+  'back-next-session': '',
 }
 
 function ToolLines(props: ContextPaneProps & { rows: ToolRow[] }) {
@@ -681,20 +683,20 @@ function ToolLines(props: ContextPaneProps & { rows: ToolRow[] }) {
   })
 }
 
-/** The Tools tab: the built-in tools in the window, loaded on demand, and removed. */
+/**
+ * The Tools tab: the built-in tools in the window, loaded on demand, put back
+ * for the next session, and removed. Each group's size is the sum of its tools'
+ * estimates: /context's own deferred row counts a tool removed this session
+ * too, which is deferred as far as the engine knows (./register.tsx).
+ */
 function ToolsTab(props: ContextPaneProps) {
   const { Box } = props.ui
-  const groups = [
-    {
-      label: 'In context',
-      rows: props.tools.filter(one => one.status === 'in' || one.status === 'back-next-session'),
-    },
-    {
-      label: 'Deferred (loaded on demand)',
-      isDeferred: true,
-      rows: props.tools.filter(one => one.status === 'deferred'),
-    },
-    { label: 'Removed', rows: props.tools.filter(one => one.status === 'removed') },
+  const byStatus = (status: ToolRow['status']) => props.tools.filter(one => one.status === status)
+  const groups: { label: string; note?: string; rows: ToolRow[] }[] = [
+    { label: 'In context', rows: byStatus('in') },
+    { label: 'Deferred (loaded on demand)', note: 'when loaded', rows: byStatus('deferred') },
+    { label: 'Back in a new session', rows: byStatus('back-next-session') },
+    { label: 'Removed', rows: byStatus('removed') },
   ].filter(group => group.rows.length > 0)
 
   return (
@@ -730,13 +732,9 @@ function ToolsTab(props: ContextPaneProps) {
             isOpen: !props.collapsed.includes(`${GROUP_PREFIX}${slug(group.label)}`),
             count: group.rows.length,
             noun: 'tool',
-            // What loads on demand is out of the window: its size is what it
-            // would take, as /context counts the row where it can.
-            tokens:
-              'isDeferred' in group
-                ? (rowTokens(props.snapshot, 'System tools (deferred)') ?? sumTokens(group.rows))
-                : sumTokens(group.rows),
-            tokensNote: 'isDeferred' in group ? 'when loaded' : undefined,
+            // What loads on demand is out of the window: its size is what it would take.
+            tokens: sumTokens(group.rows),
+            tokensNote: group.note,
             children: ToolLines({ ...props, rows: group.rows }),
           }),
         ),
@@ -1119,7 +1117,7 @@ function TraceTab(props: ContextPaneProps) {
   )
 
   function traceRow(item: TraceItem, isMain: boolean) {
-    const id = `trace-${item.seq}`
+    const id = `${TRACE_ITEM_PREFIX}${item.seq}`
     const isOpen = props.expanded.includes(id)
 
     return (

@@ -6,13 +6,13 @@ export type TabProps = {
   label: string
   figure: string | null
   isOpen: boolean
-  /** The tabs beside it, for the left and right keys. */
-  previous: string | null
-  next: string | null
 }
 
-/** What a tab posts to the hooks module when it is picked. */
-export type TabPick = { tab: string }
+/**
+ * What a tab posts to the hooks module: the tab picked by a press, or a step
+ * of the left or right key, which the hooks module takes from the open tab.
+ */
+export type TabPick = { tab: string } | { step: -1 | 1 }
 
 /** The key prefix of a tab's region, which the hooks module hears it post under. */
 export const TAB_PREFIX = 'tab-'
@@ -35,7 +35,8 @@ const HOVER = '#80808016'
  * whole pill takes the press, not only its label: a Button is drawn no wider
  * than its label. Each tab its own region, so a press is the tab's under the
  * pointer, never one worked out from a width. The left and right keys move
- * to the tabs beside it.
+ * to the tab beside the open one: the keyboard stays with the tab pressed,
+ * so the step is from where the pane is, not from where the keys are.
  */
 export default function Tab(props: TabProps, surface: ClientSurface<State>) {
   const { Box, Text } = surface.elements
@@ -48,22 +49,19 @@ export default function Tab(props: TabProps, surface: ClientSurface<State>) {
   if (!isWired) {
     const now = () => latest.get(surface)!
     const isLit = () => surface.state?.hover === true
-    const pick = (id: string | null) => {
-      if (id !== null && !(id === now().id && now().isOpen)) {
-        surface.post({ tab: id } satisfies TabPick)
-      }
-    }
     surface.onPointer(event => {
       if (event.type === 'leave') {
         if (isLit()) surface.setState({ hover: false })
         return
       }
-      if (event.type === 'down' && event.button === 'left') pick(now().id)
+      if (event.type === 'down' && event.button === 'left' && !now().isOpen) {
+        surface.post({ tab: now().id } satisfies TabPick)
+      }
       if (!isLit()) surface.setState({ hover: true })
     })
     surface.onKey(event => {
-      if (event.key === 'left') pick(now().previous)
-      if (event.key === 'right') pick(now().next)
+      if (event.key === 'left') surface.post({ step: -1 } satisfies TabPick)
+      if (event.key === 'right') surface.post({ step: 1 } satisfies TabPick)
     })
   }
 

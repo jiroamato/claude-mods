@@ -14,7 +14,7 @@ const BAND = {
 } as const
 
 test('draws the CLI status line figures as a band on the desktop', async ($, on) => {
-  mock.clock(on, { now: 100_000 })
+  const clock = mock.clock(on, { now: 100_000 })
   on('session.model', async () => ({ value: 'claude-fable-5-1' }))
   on('session.cwd', async () => ({ value: 'C:/Users/amato/repos/construct-land' }))
   on('session.usage', async () => ({
@@ -60,8 +60,10 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   expect(await ui.find({ type: 'Text', text: '1m 1s', in: 'elapsed' })).toBeDefined()
   await ui.advance(59_000)
   expect(await ui.find({ type: 'Text', text: '2m 0s', in: 'elapsed' })).toBeDefined()
-  // Drawn again (a turn ends), the band hands it the time anew, and it counts
-  // on from there, not from both.
+  // Drawn again a minute on (a turn ends), the band hands it the time anew,
+  // and it counts on from there, not from both: the engine's clock moves,
+  // where `advance` moves the region's frames alone.
+  await clock.set(160_000)
   await $.turn.complete({
     turnId: 'turn-1',
     answer: 'done',

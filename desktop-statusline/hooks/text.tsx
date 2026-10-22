@@ -76,17 +76,38 @@ type State = {
   hover: boolean
   /** Whether the thumb is being dragged. */
   isDragging: boolean
+  /** While dragged, the rows from the thumb's top to the pointer: the thumb keeps them. */
+  grab: number
 }
 
-const AT_REST: State = { step: 0, hover: false, isDragging: false }
+const AT_REST: State = { step: 0, hover: false, isDragging: false, grab: 0 }
+
+/**
+ * The scrollbar's measure for a first row in view: the track's rows, the
+ * thumb's (as tall as the rows in view are of the request, two at least so it
+ * reads as one), the last row that can be first, and the thumb's top row.
+ */
+function thumbAt(props: TextProps, first: number) {
+  const trackRows = Math.max(1, props.page)
+  const thumbRows = Math.min(
+    trackRows,
+    Math.max(THUMB_MIN_ROWS, Math.round((props.page / Math.max(1, props.total)) * trackRows)),
+  )
+  const last = Math.max(0, props.total - props.page)
+  const top = Math.round((last === 0 ? 0 : first / last) * (trackRows - thumbRows))
+
+  return { trackRows, thumbRows, last, top }
+}
 
 /**
  * The reader's text: the rows in view with a scrollbar beside them, drawn as
  * one region so a click gives it the keys, and the keys then move the rows
  * (Up and Down a row, Page Up and Page Down a page, Home and End to the
  * ends), by what it posts to the hooks module; a press or a drag on the
- * track posts the row to put first in view. The pane's own window never
- * moves: the reader's tree fits it.
+ * track posts the row to put first in view. A press on the thumb keeps the
+ * thumb under the pointer where it was pressed; a press beside it brings
+ * the thumb's middle there. The pane's own window never moves: the reader's
+ * tree fits it.
  *
  * The scrollbar is in this region, not one of its own, because the desktop
  * draws nothing of the pane's tree while a pointer is held, nor hands a
@@ -115,27 +136,30 @@ export default function ReaderText(props: TextProps, surface: ClientSurface<Stat
       const pick = KEY_PICKS[event.key]?.(now().page)
       if (pick) surface.post(pick)
     })
-    // Where in the track the pointer is, as the row to put first in view: the
-    // track's rows map onto the rows that can be first.
-    const rowAt = (y: number) => {
-      const { total, page } = now()
-      const rows = Math.max(1, page)
-      const last = Math.max(0, total - page)
-      const row = Math.max(0, Math.min(rows - 1, y))
+    // Where the thumb's top is for the pointer, as the row to put first in
+    // view: the rows the thumb's top can be on map onto the rows that can be
+    // first, so the thumb stays under the pointer as it was grabbed.
+    const rowAt = (y: number, grab: number) => {
+      const { trackRows, thumbRows, last } = thumbAt(now(), 0)
+      const room = Math.max(1, trackRows - thumbRows)
+      const top = Math.max(0, Math.min(room, y - grab))
 
-      return Math.round((row / Math.max(1, rows - 1)) * last)
+      return Math.round((top / room) * last)
     }
     // While the thumb is held, the region moves its own rows from the pointer,
     // over the rows it has, and asks the pane for the row at each move: the
     // desktop draws nothing of the pane's tree, nor hands a region its next
     // props, while a pointer is held, so the pane's answer lands at release.
     const dragTo = (y: number) => {
-      const first = rowAt(y)
+      const first = rowAt(y, current().grab)
       shownBy.set(surface, first)
       surface.post({ first } satisfies TextPick)
       surface.setState({ ...current(), step: current().step + 1 })
     }
     const isOnTrack = (x: number) => x >= surface.columns - SCROLLBAR_COLUMNS
+    // A held pointer reports where it is past the region's edges too.
+    const isInside = (x: number, y: number) =>
+      x >= 0 && x < surface.columns && y >= 0 && y < surface.rows
     surface.onPointer(event => {
       const was = current()
       if (event.type === 'leave') {
@@ -143,7 +167,11 @@ export default function ReaderText(props: TextProps, surface: ClientSurface<Stat
         return
       }
       if (event.type === 'down' && event.button === 'left' && isOnTrack(event.x)) {
-        surface.setState({ ...was, hover: true, isDragging: true })
+        // Grabbed where it is drawn, or by its middle from beside it.
+        const { thumbRows, top } = thumbAt(now(), now().first)
+        const isOnThumb = event.y >= top && event.y < top + thumbRows
+        const grab = isOnThumb ? event.y - top : Math.floor(thumbRows / 2)
+        surface.setState({ ...was, hover: true, isDragging: true, grab })
         dragTo(event.y)
         return
       }
@@ -152,7 +180,8 @@ export default function ReaderText(props: TextProps, surface: ClientSurface<Stat
         return
       }
       if (event.type === 'up' && was.isDragging) {
-        surface.setState({ ...was, isDragging: false, hover: isOnTrack(event.x) })
+        const hover = isOnTrack(event.x) && isInside(event.x, event.y)
+        surface.setState({ ...was, isDragging: false, hover })
         return
       }
       const hover = isOnTrack(event.x)
@@ -184,18 +213,14 @@ export default function ReaderText(props: TextProps, surface: ClientSurface<Stat
   if (!state.isDragging) shownBy.set(surface, shown)
   const rows = props.rows.slice(shown - props.base, shown - props.base + props.page)
 
-  // The scrollbar: the thumb as tall as the rows in view are of the request,
-  // two rows at least so it reads as one, from where the first row in view is
-  // in it: the row the pane asked for, or, while the thumb is held, the row
+  // The scrollbar: the thumb from where the first row in view is in the
+  // request: the row the pane asked for, or, while the thumb is held, the row
   // the pointer is on.
-  const trackRows = Math.max(1, props.page)
-  const thumbRows = Math.min(
+  const {
     trackRows,
-    Math.max(THUMB_MIN_ROWS, Math.round((props.page / Math.max(1, props.total)) * trackRows)),
-  )
-  const last = Math.max(0, props.total - props.page)
-  const at = state.isDragging ? wanted : props.first
-  const thumbTop = Math.round((last === 0 ? 0 : at / last) * (trackRows - thumbRows))
+    thumbRows,
+    top: thumbTop,
+  } = thumbAt(props, state.isDragging ? wanted : props.first)
 
   return (
     <Box flexDirection="row" height={props.page} columnGap={1}>

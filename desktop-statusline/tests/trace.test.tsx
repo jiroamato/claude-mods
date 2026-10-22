@@ -416,6 +416,7 @@ function tracedEngine(
     return { value: undefined }
   })
   on('session.id', async () => ({ value: settings.session }))
+  on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
   on('session.turns', async () => ({ value: turns }))
   on('http.fetch', async (_$, e) => {
     if (e.url.includes('/quit')) settings.quits += 1
@@ -810,6 +811,26 @@ test('after a /clear the Trace tab lists the new session’s requests alone', as
   expect(await pane.find({ type: 'Text', text: '+ "fresh"' })).toBeUndefined()
   const row = await pane.find({ type: 'Client', key: 'disclose-trace-0' })
   expect((row?.props.props as { lines: string[] }).lines[0]).toBe('+ "fresh"')
+
+  // A request open in the reader, with a search, and another opened in the
+  // list, are that session's: the /clear closes them, before the new session
+  // records requests of the same numbers.
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+  await pane.input({ key: 'reader-search', text: 'fresh', kind: 'change' })
+  expect(await pane.find({ type: 'Text', text: /^1 of 1$/ })).toBeDefined()
+  await $.session.end({ reason: 'clear', sessionId: 'session-2', resume: { id: 'session-2' } })
+  settings.session = 'session-3'
+  settings.folders['session-3'] = { 'system-a.json': '[]', '000000.json': kept(0, 'newer') }
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await pane.find({ type: 'Client', key: 'reader' })).toBeUndefined()
+  expect(await traceRows(pane)).toEqual(['#1'])
+  expect(await pane.find({ key: 'read-0' })).toBeUndefined()
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+  expect(await pane.find({ type: 'Text', text: /^1 of 1$/ })).toBeUndefined()
+  expect((await readerText(pane)).some(row => row.includes('newer'))).toBe(true)
 
   await pane.unmount()
 })
@@ -1277,10 +1298,20 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   // A key the text does not know moves nothing.
   await pane.key({ key: 'x', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
+  // At the end, then in a taller window: the first row kept is past the last
+  // that can be, and Up moves from that last one, not from the row kept.
+  await pane.key({ key: 'end', ...text })
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 60 } })
+  await pane.key({ key: 'up', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: total - 55, last: total - 1, total })
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 40 } })
+  await pane.key({ key: 'home', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
 
-  // The reader's own scrollbar, the two columns at the text's right edge, 36
-  // rows tall: a press puts the row under the pointer first, as a share of
-  // the track; a drag follows it. A press on the text itself moves nothing.
+  // The reader's own scrollbar, the two columns at the text's right edge, 35
+  // rows tall: a press beside the thumb brings the thumb's middle under the
+  // pointer, and the rows with it, as a share of the track; a drag follows
+  // it. A press on the text itself moves nothing.
   await pane.resize({ columns: 68, rows: 35, ...text })
   await pane.pointer({ type: 'down', x: 10, y: 34, button: 'left', ...text })
   await pane.pointer({ type: 'up', x: 10, y: 34, button: 'left', ...text })
@@ -1306,19 +1337,34 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   await pane.pointer({ type: 'move', x: 67, y: 0, button: 'left', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
   expect(await thumbTop()).toBe(0)
+  // The thumb is two rows (as tall as 35 rows are of the request, two at
+  // least), so its top has 33 rows to be on; grabbed by its middle, it is a
+  // row above the pointer.
   await pane.pointer({ type: 'move', x: 60, y: 7, button: 'left', ...text })
-  const fifth = Math.round((7 / 34) * (total - 35)) + 1
+  const fifth = Math.round((6 / 33) * (total - 35)) + 1
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
-  expect(await thumbTop()).toBe(7)
-  await pane.pointer({ type: 'up', x: 60, y: 7, button: 'left', ...text })
+  expect(await thumbTop()).toBe(6)
+  // Let go past the track's foot, where a held pointer still reports: not lit.
+  await pane.pointer({ type: 'up', x: 67, y: 40, button: 'left', ...text })
   expect((await thumb())?.props.backgroundColor).toBe('#80808066')
   // A move with no button held moves nothing.
   await pane.pointer({ type: 'move', x: 67, y: 30, ...text })
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
-  // The thumb: as tall as the rows in view are of the request, two rows at least.
   expect((await thumb())?.props.height).toBe(2)
   // Let go, the rows asked for are the rows drawn: row 35 of the text is `line 20`.
   expect((await readerText(pane))[0]).toBe(`line ${fifth - 16}`)
+  // A press on the thumb itself, in the track's other column, grabs it where
+  // it is: nothing moves until the pointer does, and then the thumb keeps the
+  // pointer on the row of it pressed.
+  await pane.pointer({ type: 'down', x: 66, y: 7, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
+  expect(await thumbTop()).toBe(6)
+  await pane.pointer({ type: 'move', x: 66, y: 8, button: 'left', ...text })
+  const sixth = Math.round((7 / 33) * (total - 35)) + 1
+  expect(await readerPosition(pane)).toEqual({ first: sixth, last: sixth + 34, total })
+  expect(await thumbTop()).toBe(7)
+  await pane.pointer({ type: 'up', x: 66, y: 8, button: 'left', ...text })
+  expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
 
   // None of it scrolled the pane: its tree fits its window.
   expect(windowMoves).toBe(0)
