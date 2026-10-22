@@ -223,4 +223,4 @@ Validate, test and type-check it, and hack on it live, as the
 
 ## License
 
-MIT
+[MIT](../LICENSE)

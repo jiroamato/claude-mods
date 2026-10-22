@@ -81,4 +81,4 @@ See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow and
 
 ## License
 
-MIT
+[MIT](LICENSE)
