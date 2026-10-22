@@ -68,9 +68,9 @@ import {
 // surface, drawn as one band above the prompt. Colours are theme keys, so
 // the band follows the app's light and dark palettes and its accent:
 //
-//   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33% │ $1.23 │ 12m 4s
+//   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33% │ $1.23 │ 12m 4s │ ⓘ
 //
-// The percentage opens the Context details pane, for what the desktop's own
+// The ⓘ at its end opens the Context details pane, for what the desktop's own
 // Context card cannot show: the built-in tools, which can be removed from the
 // window and put back, the system prompt's text, the skills' listings and the
 // conversation's trace.
