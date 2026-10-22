@@ -141,10 +141,8 @@ declare module 'claude-code' {
       page: number
       /** The request the pane reads whole, by its number; null while the pane shows its tabs. */
       reader: number | null
-      /** The reader's search: what is looked for, and which match is current. */
-      readerSearch: { query: string; index: number }
-      /** The reader's first text row in view, from 0: the reader scrolls its own rows. */
-      readerOffset: number
+      /** The reader's search: what is looked for, which match is current, and whether the pane has scrolled to it. */
+      readerSearch: { query: string; index: number; isShown: boolean }
       /** The conversation's trace, read from the receiver's folder after each turn. */
       trace: TraceState
       /** Why the last tracing switch failed, until the next one succeeds. */

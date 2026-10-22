@@ -14,8 +14,6 @@ import { formatShare, formatTokens } from './context'
 import { DISCLOSURE_ROWS, disclosureRows } from './disclosure'
 import type { DisclosureProps } from './disclosure'
 import type { ReaderBarProps } from './reader'
-import { READER_TEXT_KEY } from './text'
-import type { TextProps } from './text'
 import { TAB_PREFIX } from './tabs'
 import type { TabProps } from './tabs'
 import type { ToolRow } from './tools'
@@ -513,54 +511,106 @@ export type ContextPaneProps = {
   reader: ReaderView | null
   onRead: (seq: number) => void
   onSearch: (query: string) => void
+  /** Enter in the search: the current match shown, or the next once it is. */
+  onEnter: () => void
   onStep: (by: number) => void
 }
 
-/** What the reader draws: its text's props (./text.tsx), and the search. */
+/** What the reader draws: the rows drawn and the search. */
 export type ReaderView = {
   title: string
   detail: string
-  /** The rows around the view, the row first in view, the view's height and the request's length. */
-  text: TextProps
+  /** The stretches of rows drawn, each from its row `first` of the text; the rest is empty space. */
+  stretches: { first: number; rows: ReaderRow[] }[]
+  /** How many rows the request has. */
+  total: number
+  /** The rows in the pane's window, from 1, for the counter at the top. */
+  inView: { first: number; last: number }
   /** The search: what is looked for, how many matches, and the current one. */
   search: { query: string; index: number; count: number }
 }
 
-/** The reader's top, in rows: its line back and its search. */
-export const READER_TOP_ROWS = 3
-/** The frame round the reader's text, in rows: its border's top and bottom. */
-export const READER_FRAME_ROWS = 2
-/**
- * The columns the reader takes beside its text's rows: the pane's padding
- * and the frame's border, a column each side, and the scrollbar with the
- * gap before it (./text.tsx).
- */
-export const READER_SIDE_COLUMNS = 7
-
-/** How many of the text's rows the reader shows in its frame, in a window `bodyRows` high. */
-export function readerVisibleRows(bodyRows: number): number {
-  return Math.max(1, bodyRows - READER_TOP_ROWS - READER_FRAME_ROWS)
+/** One drawn row: its text, and the matches in it. */
+export type ReaderRow = {
+  text: string
+  hits: { start: number; end: number; isCurrent: boolean }[]
 }
+
+/** The reader's top, in rows: its line back, its search, and a row of space under them. */
+export const READER_TOP_ROWS = 4
+/** The key of the row holding the current match. */
+export const READER_HIT_KEY = 'reader-hit'
+/**
+ * The key of the mark in that row the pane scrolls to, by focusing it: one
+ * per match, as the focus moves to a key it is not on already.
+ */
+export function readerHitMark(index: number): string {
+  return `reader-hit-mark-${index}`
+}
+
+// A match, and the current one, as the desktop marks found text.
+const HIT = '#c9850059'
+const HIT_CURRENT = '#c98500'
 
 /** A count as the pane writes figures: `4,493`. */
 function formatCount(value: number): string {
   return value.toLocaleString('en-US')
 }
 
+/** A row, its matches marked. */
+function RowText(props: { ui: Ui; row: ReaderRow }) {
+  const { Text } = props.ui
+  const row = props.row
+  if (row.hits.length === 0) {
+    return (
+      <Text color="text" mono wrap="truncate-end">
+        {row.text === '' ? ' ' : row.text}
+      </Text>
+    )
+  }
+  const parts: JSX.Element[] = []
+  let at = 0
+  for (const hit of row.hits) {
+    if (hit.start > at) parts.push(<Text>{row.text.slice(at, hit.start)}</Text>)
+    parts.push(
+      <Text
+        backgroundColor={hit.isCurrent ? HIT_CURRENT : HIT}
+        color={hit.isCurrent ? 'inverseText' : 'text'}
+      >
+        {row.text.slice(hit.start, hit.end)}
+      </Text>,
+    )
+    at = hit.end
+  }
+  if (at < row.text.length) parts.push(<Text>{row.text.slice(at)}</Text>)
+
+  return (
+    <Text color="text" mono wrap="truncate-end">
+      {parts}
+    </Text>
+  )
+}
+
 /**
- * A request whole, read in the pane: its top (the way back, the search)
- * stays, and under it the rows that fit the window, in a region
- * of their own (./text.tsx) that moves them by the keys once clicked and
- * glides to each new place, with a scrollbar of the reader's own beside them
- * in that region, to press or drag. The whole is never taller than the
- * window, so the pane's own window has nothing to scroll and nothing in it
- * ever moves: the wheel does nothing here, by design. A drawing holds three
- * screens of text at most, for the glide to cross.
+ * A request whole, read in the pane as a document the pane scrolls: the
+ * wheel, the pane's scrollbar and the scroll keys all move through it. Its
+ * rows are drawn only near the window and around the current match, the rest
+ * stood in for by empty space of the same height, so a drawing holds no more
+ * than the engine draws. Its top (the way back, the search, the counter) is a
+ * fixed height, so the rows below are counted true, and scrolls away with the
+ * rest: Home brings it back.
+ *
+ * Typing a search counts its matches and marks them; Enter scrolls to the
+ * current one, and after that to the next, as do the arrows beside the
+ * counter and the n and p keys while the pane holds the keyboard. Nothing
+ * scrolls while typing: the desktop scrolls to the match by focusing its
+ * mark, which would take the keyboard from the field mid-word.
  */
 function Reader(props: {
   ui: Ui
   view: ReaderView
   onSearch: (query: string) => void
+  onEnter: () => void
   onStep: (by: number) => void
 }) {
   const { Box, Button, Client, Input, Text } = props.ui
@@ -573,14 +623,41 @@ function Reader(props: {
       : search.count === 0
         ? 'No match'
         : `${search.index + 1} of ${formatCount(search.count)}${search.count >= MAX_MATCHES ? '+' : ''}`
-  // Where in the request the rows in view are, in figures beside the scrollbar's thumb.
-  const text = view.text
-  const inView = Math.min(text.page, text.total - text.first)
-  const position = `rows ${formatCount(text.first + 1)} to ${formatCount(text.first + inView)} of ${formatCount(text.total)}`
+  // Where in the request the window is, in figures beside the search.
+  const position = `rows ${formatCount(view.inView.first)} to ${formatCount(view.inView.last)} of ${formatCount(view.total)}`
+  const drawn: JSX.Element[] = []
+  let row = 0
+  for (const stretch of view.stretches) {
+    drawn.push(...Space({ ui: props.ui, rows: stretch.first - row }))
+    stretch.rows.forEach(one => {
+      const line = RowText({ ui: props.ui, row: one })
+      drawn.push(
+        one.hits.some(hit => hit.isCurrent) ? (
+          <Box key={READER_HIT_KEY} flexDirection="column">
+            {line}
+            {/* The desktop scrolls to a Button alone, not to a Box or a Text:
+                one of no size, placed over the row's corner, marks it. */}
+            <Box position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
+              <Button
+                key={readerHitMark(search.index)}
+                plain
+                label=""
+                onPress={() => props.onStep(1)}
+              />
+            </Box>
+          </Box>
+        ) : (
+          line
+        ),
+      )
+    })
+    row = stretch.first + stretch.rows.length
+  }
+  drawn.push(...Space({ ui: props.ui, rows: view.total - row }))
 
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Box height={READER_TOP_ROWS} flexShrink={0} flexDirection="column" overflow="hidden">
+      <Box height={READER_TOP_ROWS - 1} flexShrink={0} flexDirection="column" overflow="hidden">
         <Client key={READER_KEY} module="./reader.tsx" props={bar} width="100%" height={1} />
         <Box height={2} flexShrink={0} flexDirection="row" alignItems="center" columnGap={1}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -593,10 +670,10 @@ function Reader(props: {
               placeholder="Search this request"
               submitLabel="next"
               onInput={value => props.onSearch(value)}
-              onSubmit={() => props.onStep(1)}
+              onSubmit={() => props.onEnter()}
             />
           </Box>
-          {/* Where the rows are gives way before the field, cut short in a narrow pane. */}
+          {/* Where the window is gives way before the field, cut short in a narrow pane. */}
           <Box flexShrink={1} minWidth={0}>
             <Text color="subtle" size="footnote" tabular wrap="truncate-end">
               {position}
@@ -610,27 +687,30 @@ function Reader(props: {
             </Box>
           )}
           {search.count > 0 && (
-            <Button key="reader-previous" label="↑" onPress={() => props.onStep(-1)} />
+            <Button key="reader-previous" label="↑" hotkey="p" onPress={() => props.onStep(-1)} />
           )}
           {search.count > 0 && (
-            <Button key="reader-next" label="↓" onPress={() => props.onStep(1)} />
+            <Button key="reader-next" label="↓" hotkey="n" onPress={() => props.onStep(1)} />
           )}
         </Box>
       </Box>
-      {/* The text with the reader's own scrollbar beside it, one region (./text.tsx),
-          framed as the element it is: the pane's scrollbar never shows here, as the
-          reader fits its window. */}
-      <Box borderStyle="round" height={text.page + READER_FRAME_ROWS} flexShrink={0}>
-        <Client
-          key={READER_TEXT_KEY}
-          module="./text.tsx"
-          props={text}
-          width="100%"
-          height={text.page}
-        />
-      </Box>
+      <Box height={1} flexShrink={0} />
+      {drawn}
     </Box>
   )
+}
+
+/** The tallest Box the engine draws, in rows. */
+const MAX_BOX_ROWS = 10_000
+
+/** Empty space `rows` high: as many Boxes as it takes, each no taller than the engine draws. */
+function Space(props: { ui: Ui; rows: number }) {
+  const { Box } = props.ui
+  const heights: number[] = []
+  for (let left = props.rows; left > 0; left -= MAX_BOX_ROWS)
+    heights.push(Math.min(left, MAX_BOX_ROWS))
+
+  return heights.map(height => <Box height={height} flexShrink={0} />)
 }
 
 /** The key of the reader's top line, which the hooks module hears it post under. */
@@ -1189,6 +1269,7 @@ export function ContextPane(props: ContextPaneProps) {
       ui: props.ui,
       view: props.reader,
       onSearch: props.onSearch,
+      onEnter: props.onEnter,
       onStep: props.onStep,
     })
   }
