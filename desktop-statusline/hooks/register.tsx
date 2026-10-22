@@ -22,6 +22,8 @@ import {
   readerVisibleRows,
 } from './panel'
 import type { ReaderView } from './panel'
+import { READER_SCROLLBAR_KEY } from './scrollbar'
+import type { ScrollbarPick } from './scrollbar'
 import { READER_TEXT_KEY } from './text'
 import type { TextPick } from './text'
 import type { DisclosurePick } from './disclosure'
@@ -864,16 +866,27 @@ async function stepReader($: EngineInterface, by: number): Promise<void> {
 }
 
 /**
- * Moves the reader's rows: by `by` rows, or to an end. What its text posts
- * for a key (./text.tsx), and its page buttons press.
+ * Moves the reader's rows: by `by` rows, to an end, or to a first row. What
+ * its text posts for a key (./text.tsx), its scrollbar for a press or a drag
+ * (./scrollbar.tsx), and its page buttons press.
  */
-async function scrollReader($: EngineInterface, pick: TextPick): Promise<void> {
+async function scrollReader($: EngineInterface, pick: TextPick | ScrollbarPick): Promise<void> {
   const laid = readerCache
   if (!laid) return
   const visible = readerVisibleRows(readerBodyRows)
   const total = laid.rows.length
   await update($, readerOffset, now =>
-    clampOffset('to' in pick ? (pick.to === 'start' ? 0 : total) : now + pick.by, total, visible),
+    clampOffset(
+      'first' in pick
+        ? pick.first
+        : 'to' in pick
+          ? pick.to === 'start'
+            ? 0
+            : total
+          : now + pick.by,
+      total,
+      visible,
+    ),
   )
 }
 
@@ -1106,6 +1119,13 @@ export const register: Register = on => {
         await scrollReader($, { to: pick.to })
       } else if (pick && 'by' in pick && typeof pick.by === 'number') {
         await scrollReader($, { by: pick.by })
+      }
+    }
+    // A press or a drag on the reader's scrollbar: the row to put first in view.
+    if (e.element === READER_SCROLLBAR_KEY) {
+      const first = (e.data as Partial<ScrollbarPick> | null)?.first
+      if (typeof first === 'number' && Number.isFinite(first)) {
+        await scrollReader($, { first: Math.round(first) })
       }
     }
 

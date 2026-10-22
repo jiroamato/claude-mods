@@ -14,6 +14,8 @@ import { formatShare, formatTokens } from './context'
 import { DISCLOSURE_ROWS, disclosureRows } from './disclosure'
 import type { DisclosureProps } from './disclosure'
 import type { ReaderBarProps } from './reader'
+import { READER_SCROLLBAR_KEY, SCROLLBAR_COLUMNS } from './scrollbar'
+import type { ScrollbarProps } from './scrollbar'
 import { READER_TEXT_KEY } from './text'
 import type { TextProps } from './text'
 import { TAB_PREFIX } from './tabs'
@@ -553,9 +555,10 @@ function formatCount(value: number): string {
 /**
  * A request whole, read in the pane: its top (the way back, the search, the
  * page buttons) stays, and under it the rows that fit the window, in a region
- * of their own (./text.tsx) that moves them by the keys once clicked. The
- * whole is never taller than the window, so the pane's own window has
- * nothing to scroll and nothing in it ever moves: the wheel does nothing
+ * of their own (./text.tsx) that moves them by the keys once clicked, with a
+ * scrollbar of the reader's own beside them (./scrollbar.tsx) to press or
+ * drag. The whole is never taller than the window, so the pane's own window
+ * has nothing to scroll and nothing in it ever moves: the wheel does nothing
  * here, by design, and a drawing holds no more than a screen of text.
  */
 function Reader(props: {
@@ -575,9 +578,14 @@ function Reader(props: {
       : search.count === 0
         ? 'No match'
         : `${search.index + 1} of ${formatCount(search.count)}${search.count >= MAX_MATCHES ? '+' : ''}`
-  // With no scrollbar of its own, the reader says where in the request it is.
+  // Where in the request the rows in view are, in figures beside the scrollbar's thumb.
   const position = `rows ${formatCount(view.first + 1)} to ${formatCount(view.first + view.rows.length)} of ${formatCount(view.total)}`
   const text: TextProps = { rows: view.rows, page: view.rows.length }
+  const scrollbar: ScrollbarProps = {
+    first: view.first,
+    visible: view.rows.length,
+    total: view.total,
+  }
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -632,13 +640,26 @@ function Reader(props: {
         </Box>
       </Box>
       <Box height={1} flexShrink={0} />
-      <Client
-        key={READER_TEXT_KEY}
-        module="./text.tsx"
-        props={text}
-        width="100%"
-        height={view.rows.length}
-      />
+      {/* The text, and beside it the reader's own scrollbar (./scrollbar.tsx):
+          the pane's never shows here, as the reader fits its window. */}
+      <Box flexDirection="row" height={view.rows.length} flexShrink={0} columnGap={1}>
+        <Box flexGrow={1} flexShrink={1} minWidth={0}>
+          <Client
+            key={READER_TEXT_KEY}
+            module="./text.tsx"
+            props={text}
+            width="100%"
+            height={view.rows.length}
+          />
+        </Box>
+        <Client
+          key={READER_SCROLLBAR_KEY}
+          module="./scrollbar.tsx"
+          props={scrollbar}
+          width={SCROLLBAR_COLUMNS}
+          height={view.rows.length}
+        />
+      </Box>
     </Box>
   )
 }
