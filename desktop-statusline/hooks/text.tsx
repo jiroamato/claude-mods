@@ -38,6 +38,9 @@ export const SCROLLBAR_COLUMNS = 2
 /** How tall the thumb is at least, in rows: enough to read as one on a long request. */
 const THUMB_MIN_ROWS = 2
 
+// A border no one sees: only a Box with a border has rounded corners.
+const CLEAR = '#00000000'
+
 // A match, and the current one, as the desktop marks found text.
 const HIT = '#c9850059'
 const HIT_CURRENT = '#c98500'
@@ -225,20 +228,28 @@ export default function ReaderText(props: TextProps, surface: ClientSurface<Stat
           )
         })}
       </Box>
+      {/* The track and its thumb, each a pill: a border no one sees rounds the
+          corners. The thumb is laid over the track from the region's own corner,
+          not inside it: the desktop sets a bordered Box's children in from its
+          edges, and a thumb set in would run past the track's end. */}
       <Box
-        flexDirection="column"
         width={SCROLLBAR_COLUMNS}
         height={trackRows}
         flexShrink={0}
+        borderStyle="round"
+        borderColor={CLEAR}
         backgroundColor={TRACK}
-      >
-        {thumbTop > 0 && <Box height={thumbTop} flexShrink={0} />}
-        <Box
-          height={thumbRows}
-          flexShrink={0}
-          backgroundColor={state.hover || state.isDragging ? THUMB_LIT : THUMB}
-        />
-      </Box>
+      />
+      <Box
+        position="absolute"
+        top={thumbTop}
+        right={0}
+        width={SCROLLBAR_COLUMNS}
+        height={thumbRows}
+        borderStyle="round"
+        borderColor={CLEAR}
+        backgroundColor={state.hover || state.isDragging ? THUMB_LIT : THUMB}
+      />
     </Box>
   )
 }
