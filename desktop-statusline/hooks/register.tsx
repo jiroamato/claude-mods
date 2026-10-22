@@ -49,6 +49,7 @@ import {
   sourceLabel,
   summarize,
   wholeRequestText,
+  withBilling,
   wrapRows,
   TRACE_ENV,
   TRACE_PORT,
@@ -747,7 +748,7 @@ function refreshTrace($: EngineInterface): Promise<void> {
         }
         if (blocks) {
           const snapshot = currentSnapshot(await read($, context))
-          prompt = sentPrompt(blocks, snapshot?.prompt ?? [])
+          prompt = sentPrompt(withBilling(last, blocks), snapshot?.prompt ?? [])
         }
       }
       const token = await viewToken($)
@@ -803,7 +804,7 @@ async function readerRows(
   const text = wholeRequestText(
     [...traceCache.values()].map(one => one.record),
     seq,
-    system,
+    withBilling(record, system),
     tools,
   )
   if (text === null) return null

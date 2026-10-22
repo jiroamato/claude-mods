@@ -11,13 +11,16 @@ import {
   headMessages,
   isMain,
   promptRecord as sharedPromptRecord,
+  withBilling,
 } from '../trace/store.mjs'
+
+export { withBilling }
 
 /** The loopback port the trace receiver listens on, and Claude Code exports to. */
 export const TRACE_PORT = 43180
 
 /** What the receiver's `GET /health` answers (trace/store.mjs keeps the same text). */
-export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 11'
+export const RECEIVER_HEALTH = 'desktop-statusline trace receiver 12'
 /** What every version of the receiver's health answer opens with. */
 export const RECEIVER_NAME = 'desktop-statusline trace receiver'
 
@@ -188,6 +191,8 @@ export type TraceRecord = {
   promptId: string | null
   /** The hashes its system prompt and tool list are kept under; null when it could not be read. */
   system: string | null
+  /** Its billing header blocks, kept on it and not in the prompt's file (trace/store.mjs). */
+  billing?: string[]
   tools: string | null
   toolCount: number
   messageCount: number
@@ -197,6 +202,8 @@ export type TraceRecord = {
   added: ApiMessage[]
   /** A body that could not be read (cut short, too large to export whole): its length. */
   unreadable?: number
+  /** A body Claude Code did not record (a memory operation's). */
+  withheld?: boolean
   /** A request whose file is too large to read in the pane: listed, and opened in the browser. */
   tooLarge?: boolean
   /**
@@ -305,7 +312,7 @@ function blockLabel(block: ApiBlock): string {
 export function summarize(record: TraceRecord): TraceItem {
   const added =
     record.unreadable !== undefined
-      ? ['body too large to record']
+      ? [record.withheld ? 'body not recorded by Claude Code' : 'body too large to record']
       : record.tooLarge
         ? [
             record.isHead

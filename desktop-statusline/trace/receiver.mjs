@@ -9,12 +9,15 @@ import { randomBytes } from 'node:crypto'
 import fs from 'node:fs'
 import http from 'node:http'
 import path from 'node:path'
+import zlib from 'node:zlib'
 
-import { HEALTH, logRecords, sessionFolder, TraceStore } from './store.mjs'
+import { HEALTH, logRecords, sessionFolder, TraceStore, withBilling } from './store.mjs'
 import { promptRecord, requestPage, sessionPage } from './view.mjs'
 
 /** The most one OTLP request may carry; a request body is a conversation. */
 const MAX_POST_BYTES = 64 * 1024 * 1024
+/** How long a session may send nothing before the receiver drops what it holds of it in memory. */
+const SESSION_IDLE_MS = 30 * 60 * 1000
 // A trace holds the whole conversation: on a system with other users, only
 // the person reads it (Windows keeps a profile's folders to its owner already).
 const PRIVATE_FOLDER = 0o700
@@ -155,7 +158,10 @@ function page(url, response) {
             session,
             records,
             seq,
-            system: readJson(path.join(root, session, `system-${base.system}.json`)),
+            system: withBilling(
+              record,
+              readJson(path.join(root, session, `system-${base.system}.json`)),
+            ),
             tools: readJson(path.join(root, session, `tools-${base.tools}.json`)),
             link,
             nonce,
@@ -229,7 +235,14 @@ function handle(request, response) {
       return
     }
     try {
-      for (const record of logRecords(JSON.parse(Buffer.concat(chunks).toString('utf8')))) {
+      // Compressed when the person's own environment asks the exporter to
+      // (`OTEL_EXPORTER_OTLP_COMPRESSION`, as for a company's collector).
+      const raw = Buffer.concat(chunks)
+      const encoding = String(request.headers['content-encoding'] ?? '').toLowerCase()
+      const text = (
+        encoding === 'gzip' ? zlib.gunzipSync(raw, { maxOutputLength: MAX_POST_BYTES }) : raw
+      ).toString('utf8')
+      for (const record of logRecords(JSON.parse(text))) {
         store.take(record)
       }
     } catch (error) {
@@ -242,6 +255,7 @@ function handle(request, response) {
 }
 
 const server = http.createServer(handle)
+setInterval(() => store.prune(SESSION_IDLE_MS), SESSION_IDLE_MS / 10).unref()
 
 server.on('error', error => {
   // Another receiver holds the port already: that one serves this session too.

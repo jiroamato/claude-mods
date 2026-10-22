@@ -20,7 +20,7 @@ import {
 } from '../hooks/trace'
 import type { TraceRecord } from '../hooks/trace'
 // The receiver's own logic, as Node runs it.
-import { HEAD_AFTER_BYTES, HEALTH, logRecords, TraceStore } from '../trace/store.mjs'
+import { HEAD_AFTER_BYTES, HEALTH, logRecords, TraceStore, withBilling } from '../trace/store.mjs'
 import { fullMessages, promptRecord, requestPage, sessionPage } from '../trace/view.mjs'
 
 const SESSION = 'session-1'
@@ -149,6 +149,26 @@ test('a body cut short is kept as a request that could not be read', () => {
   const kept = JSON.parse(files[`${SESSION}/000000.json`]!) as TraceRecord
   expect(kept).toMatchObject({ seq: 0, source: 'sdk', unreadable: body.length, added: [] })
   expect(summarize(kept).added).toEqual(['body too large to record'])
+})
+
+test('a body Claude Code withheld is kept as one not recorded', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  // A memory operation's: the export carries a note in the body's place.
+  const body = '{"not_recorded":"<not recorded: extract_memories>"}'
+  store.take(
+    record('api_request_body', {
+      body,
+      body_withheld: true,
+      query_source: 'extract_memories',
+      request_body_id: 'b1',
+    }),
+  )
+  const kept = JSON.parse(files[`${SESSION}/000000.json`]!) as TraceRecord
+  expect(kept).toMatchObject({ seq: 0, unreadable: body.length, withheld: true, added: [] })
+  expect(summarize(kept).added).toEqual(['body not recorded by Claude Code'])
 })
 
 test('a prompt or tool list deleted from the folder is written again when next sent', () => {
@@ -1033,6 +1053,39 @@ const VIEW_RECORDS = [
   },
 ]
 
+test('the browser page counts no text for an image, in a message or a tool result', () => {
+  const image = {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(100_000) },
+  }
+  const html = requestPage({
+    session: 's',
+    records: [
+      {
+        seq: 0,
+        source: 'sdk',
+        from: 0,
+        toolCount: 0,
+        at: '',
+        model: 'm',
+        usage: null,
+        response: null,
+        added: [
+          { role: 'user', content: [image, { type: 'text', text: 'what is this' }] },
+          { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: [image] }] },
+        ],
+      },
+    ],
+    seq: 0,
+    system: null,
+    tools: null,
+    link: () => '#',
+    nonce: 'n',
+  })!
+  // The twelve characters of the question: the encoded bytes are no text the model reads.
+  expect(html).toContain('12 chars · ~3 tokens')
+})
+
 test('a request is rebuilt whole from the requests of its kind before it', () => {
   expect(fullMessages(VIEW_RECORDS, 2)).toEqual([
     { role: 'user', content: 'one' },
@@ -1633,6 +1686,157 @@ test('a body sent twice adds its messages once', () => {
   expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 5 })
   expect(fullMessages(records, 4)).toEqual(whole)
   expect(fullMessages(records, 5)).toEqual(whole)
+})
+
+test('a receiver started mid-conversation keeps a conversation sent whole from where the disk ends', () => {
+  const before: Record<string, string> = {}
+  const first = memoryStore(before)
+  first.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  first.take(answer('b0', 'msg_0'))
+
+  // Sent whole (an SDK session, a retry) to a receiver that took nothing yet:
+  // what the disk holds, its answer counted, is not kept again.
+  const files = { ...before }
+  memoryStore(files, () => 1).take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('ok'), user('next')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ continues: false, from: 2, messageCount: 3 })
+  expect(records[1]!.added).toEqual([user('next')])
+  expect(fullMessages(records, 1)).toEqual([user('hello'), assistant('ok'), user('next')])
+})
+
+test('a message whose cache marker moved is not counted as new', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const said = (text: string, isMarked = false) => ({
+    role: 'user',
+    content: [
+      { type: 'text', text, ...(isMarked ? { cache_control: { type: 'ephemeral' } } : {}) },
+    ],
+  })
+  // Claude Code marks the newest messages at each request, so the marker
+  // moves on: the messages are the same ones.
+  store.take(
+    record('api_request_body', {
+      body: requestBody([said('a'), said('b', true)]),
+      query_source: 'sdk',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: requestBody([said('a'), said('b'), said('c', true)]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ from: 2, messageCount: 3 })
+  expect(records[1]!.added).toEqual([said('c', true)])
+  // Rebuilt, a message carries the marker as the request that added it sent it.
+  expect(fullMessages(records, 1)).toEqual([said('a'), said('b', true), said('c', true)])
+})
+
+test('the billing header is the request’s own: the prompt’s file is one for every request', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const body = (messages: unknown[], header: string) =>
+    JSON.stringify({
+      model: 'm',
+      system: [
+        { type: 'text', text: `x-anthropic-billing-header: ${header}` },
+        { type: 'text', text: 'You are Claude Code.' },
+      ],
+      tools: [{ name: 'Bash' }],
+      messages,
+    })
+  // The header names the request before, so it differs at every request.
+  store.take(
+    record('api_request_body', {
+      body: body([user('hello')], 'cc_prev_req=none'),
+      query_source: 'sdk',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: body([user('hello'), user('more')], 'cc_prev_req=req_1'),
+      query_source: 'sdk',
+    }),
+  )
+  const names = Object.keys(files).filter(name => name.includes('/system-'))
+  expect(names).toHaveLength(1)
+  const prompt = JSON.parse(files[names[0]!]!) as { type: string; text: string }[]
+  expect(prompt).toEqual([{ type: 'text', text: 'You are Claude Code.' }])
+  const records = keptRecords(files)
+  expect(records[1]!.system).toBe(records[0]!.system)
+  expect(records[0]!.billing).toEqual(['x-anthropic-billing-header: cc_prev_req=none'])
+  expect(records[1]!.billing).toEqual(['x-anthropic-billing-header: cc_prev_req=req_1'])
+  // Read back with the header first, as sent; a request kept before the
+  // header was set apart has it in the file, and reads as it was.
+  expect(withBilling(records[1], prompt)).toEqual([
+    { type: 'text', text: 'x-anthropic-billing-header: cc_prev_req=req_1' },
+    { type: 'text', text: 'You are Claude Code.' },
+  ])
+  expect(withBilling({ seq: 0 } as never, prompt)).toEqual(prompt)
+  // One that goes on, told by its shape: the header alone, no tools.
+  store.take(
+    record('api_request_body', {
+      body: JSON.stringify({
+        model: 'm',
+        system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_prev_req=req_2' }],
+        tools: [],
+        messages: [user('on')],
+      }),
+      query_source: 'sdk',
+    }),
+  )
+  expect(keptRecords(files)[2]).toMatchObject({ continues: true, after: 1 })
+})
+
+test('the receiver drops what it holds of a session once idle, and goes on from its folder', () => {
+  const files: Record<string, string> = {}
+  let now = 0
+  const store = new TraceStore(
+    (name: string, text: string) => {
+      files[name] = text
+    },
+    () => keptRecords(files).length,
+    () => true,
+    () => keptRecords(files),
+    () => now,
+  )
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(answer('b0', 'msg_0'))
+  // Heard from within the idle time, it is kept; past it, dropped.
+  now = 4_000
+  store.prune(5_000)
+  expect(store.sessions.size).toBe(1)
+  now = 10_000
+  store.prune(5_000)
+  expect(store.sessions.size).toBe(0)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('ok'), user('next')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records).toHaveLength(2)
+  expect(records[1]).toMatchObject({ seq: 1, from: 2, messageCount: 3 })
 })
 
 test('parallel subagents of one type are each rebuilt whole', () => {

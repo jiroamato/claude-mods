@@ -21,7 +21,7 @@
  * another server, and an older receiver from this one (hooks/trace.ts keeps
  * the same text). Bumped whenever what the receiver serves changes.
  */
-export const HEALTH = 'desktop-statusline trace receiver 11'
+export const HEALTH = 'desktop-statusline trace receiver 12'
 
 /** The events the receiver keeps; the others are left unread. */
 export const KEPT_EVENTS = new Set(['api_request_body', 'api_request', 'api_response_body'])
@@ -67,6 +67,17 @@ export function logRecords(payload) {
 /** Whether a system block is the billing header alone, which every request carries. */
 export function isBillingBlock(block) {
   return /^x-anthropic-billing-header:/.test(String(block?.text ?? ''))
+}
+
+/**
+ * A request's system blocks as sent: its own billing header, which names the
+ * request before it and the prompt, so it is kept on the request and not in
+ * the file of the prompt, which every request would otherwise have one of.
+ */
+export function withBilling(record, blocks) {
+  const billing = Array.isArray(record?.billing) ? record.billing : []
+
+  return [...billing.map(text => ({ type: 'text', text })), ...(blocks ?? [])]
 }
 
 /** A session id safe to name a folder by, or null for one that is not. */
@@ -128,6 +139,21 @@ export function fullMessages(records, seq) {
   }
 
   return messages
+}
+
+/**
+ * A kept request's number and its conversation's hashes, its answer counted
+ * as `TraceStore.answered` counts it, had this receiver kept it.
+ */
+function chainOf(records, record) {
+  const answer = answerMessage(record)
+
+  return {
+    seq: record.seq,
+    hashes: [...(fullMessages(records, record.seq) ?? []), ...(answer ? [answer] : [])].map(
+      hashMessage,
+    ),
+  }
 }
 
 /** A request's answer as a message, as the conversation after it holds it; null for none. */
@@ -273,8 +299,17 @@ const MAX_WAITING = 200
  */
 const MAX_CHAINS = 200
 
+/**
+ * Dropped before hashing: Claude Code moves the cache marker to the newest
+ * messages at each request, which changes nothing of what was sent, and a
+ * message hashed with it would be counted as new again.
+ */
+function withoutCacheControl(key, value) {
+  return key === 'cache_control' ? undefined : value
+}
+
 function hashMessage(message) {
-  return hashText(JSON.stringify(message))
+  return hashText(JSON.stringify(message, withoutCacheControl))
 }
 
 /** Whether a list of hashes ends with another. */
@@ -307,13 +342,27 @@ function number(value) {
  * goes on from a request an earlier receiver kept.
  */
 export class TraceStore {
-  constructor(write, firstSeq = () => 0, exists = () => true, read = () => []) {
+  constructor(write, firstSeq = () => 0, exists = () => true, read = () => [], now = Date.now) {
     this.write = write
     this.firstSeq = firstSeq
     this.exists = exists
     this.read = read
+    this.now = now
     /** Per session: the next request number, what was written, what waits. */
     this.sessions = new Map()
+  }
+
+  /**
+   * Drops the state of every session that sent nothing for `idleMs`: one
+   * receiver serves every session on the machine for as long as the session
+   * that started it lives, and each session's state holds request bodies. A
+   * session heard from again goes on from its folder.
+   */
+  prune(idleMs) {
+    const before = this.now() - idleMs
+    for (const [id, session] of this.sessions) {
+      if (session.touched < before) this.sessions.delete(id)
+    }
   }
 
   session(id) {
@@ -333,9 +382,11 @@ export class TraceStore {
         /** Usage that came before its request's answer named it, by request id. */
         early: new Map(),
         waiting: [],
+        touched: this.now(),
       }
       this.sessions.set(id, session)
     }
+    session.touched = this.now()
 
     return session
   }
@@ -367,9 +418,14 @@ export class TraceStore {
       body = null
     }
     if (!body || !Array.isArray(body.messages)) {
-      // Cut short (a body longer than the export's limit) or not a request:
-      // kept as a request that could not be read, so its usage and answer
-      // still land on it and the numbering says nothing was lost.
+      // Cut short (a body longer than the export's limit), withheld by Claude
+      // Code (a memory operation's), or not a request: kept as a request that
+      // could not be read, so its usage and answer still land on it and the
+      // numbering says nothing was lost.
+      const isWithheld =
+        attributes.body_withheld === true ||
+        attributes.body_withheld === 'true' ||
+        typeof body?.not_recorded === 'string'
       this.open(folder, session, attributes, {
         source,
         model: String(attributes.model ?? ''),
@@ -382,17 +438,23 @@ export class TraceStore {
         after: null,
         added: [],
         unreadable: String(attributes.body ?? '').length,
+        ...(isWithheld ? { withheld: true } : {}),
       })
       return
     }
-    const system = Array.isArray(body.system)
+    const sent = Array.isArray(body.system)
       ? body.system
       : typeof body.system === 'string'
         ? [{ type: 'text', text: body.system }]
         : []
+    // The billing header names the request before and the prompt: the
+    // request's own, kept on it, so the prompt's file is one for every
+    // request that sends the same prompt.
+    const billing = sent.filter(isBillingBlock).map(block => String(block.text))
+    const system = sent.filter(block => !isBillingBlock(block))
     const tools = Array.isArray(body.tools) ? body.tools : []
-    const systemHash = hashText(JSON.stringify(system))
-    const toolsHash = hashText(JSON.stringify(tools))
+    const systemHash = hashText(JSON.stringify(system, withoutCacheControl))
+    const toolsHash = hashText(JSON.stringify(tools, withoutCacheControl))
     this.keep(folder, session, `system-${systemHash}.json`, system)
     this.keep(folder, session, `tools-${toolsHash}.json`, tools)
 
@@ -407,7 +469,7 @@ export class TraceStore {
     const thread = body.thread !== null && typeof body.thread === 'object' ? body.thread : null
     const isContinuation = thread
       ? thread.type === 'continue'
-      : tools.length === 0 && system.length > 0 && system.every(isBillingBlock)
+      : tools.length === 0 && system.length === 0 && billing.length > 0
     const previous =
       typeof thread?.previous_message_id === 'string' ? thread.previous_message_id : null
     const base = isContinuation ? this.chainBefore(folder, session, kind, previous) : null
@@ -429,8 +491,10 @@ export class TraceStore {
       from = base?.hashes.length ?? 0
       chain = [...(base?.hashes ?? []), ...hashes]
     } else {
-      // The messages after what the previous request of this kind already sent.
-      const before = session.last.get(kind)?.hashes ?? []
+      // The messages after what the previous request of this kind already
+      // sent: the last this receiver took, or, started mid-session, the
+      // last on disk, so a conversation sent whole is not kept whole again.
+      const before = (session.last.get(kind) ?? this.keptChain(folder, kind))?.hashes ?? []
       while (from < before.length && from < hashes.length && before[from] === hashes[from])
         from += 1
       chain = hashes
@@ -444,6 +508,7 @@ export class TraceStore {
       model: String(body.model ?? attributes.model ?? ''),
       system: systemHash,
       tools: toolsHash,
+      billing,
       toolCount: tools.length,
       // The conversation's length with this request's messages, not only theirs.
       messageCount: chain.length,
@@ -480,16 +545,16 @@ export class TraceStore {
       previous === null ? undefined : records.findLast(one => one.response?.id === previous)
     const record = named ?? (kind === 'main' ? records.at(-1) : undefined)
     if (!record) return null
-    // Its answer counted as `answered` counts it, had this receiver kept it.
-    const answer = answerMessage(record)
 
-    return {
-      seq: record.seq,
-      hashes: [...(fullMessages(records, record.seq) ?? []), ...(answer ? [answer] : [])].map(
-        hashMessage,
-      ),
-      named: named !== undefined,
-    }
+    return { ...chainOf(records, record), named: named !== undefined }
+  }
+
+  /** The last request of a kind on disk with its conversation's hashes; null for none. */
+  keptChain(folder, kind) {
+    const records = this.kept(folder, kind)
+    const record = records.at(-1)
+
+    return record ? chainOf(records, record) : null
   }
 
   /** The requests of a kind a session has on disk, in order, those read whole. */

@@ -175,7 +175,10 @@ function blockLabel(one) {
   }
 }
 
-/** How much text a block carries, as the page shows it. */
+/**
+ * How much text a block carries, as the page shows it: an image or a document
+ * carries none, its encoded bytes being nothing the model reads as text.
+ */
 function blockChars(one) {
   switch (one.type) {
     case 'text':
@@ -185,7 +188,10 @@ function blockChars(one) {
     case 'tool_use':
       return JSON.stringify(one.input ?? {}).length
     case 'tool_result':
-      return contentText(one.content).length
+      return blocksOf(one.content).reduce((sum, block) => sum + blockChars(block), 0)
+    case 'image':
+    case 'document':
+      return 0
     default:
       return JSON.stringify(one).length
   }

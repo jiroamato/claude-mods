@@ -4,6 +4,10 @@ export declare const HEALTH: string
 export declare const KEPT_EVENTS: Set<string>
 export declare function hashText(text: string): string
 export declare function isBillingBlock(block: unknown): boolean
+export declare function withBilling<B>(
+  record: { billing?: readonly string[] } | null | undefined,
+  blocks: readonly B[] | null | undefined,
+): (B | { type: 'text'; text: string })[]
 export declare function logRecords(payload: unknown): Record<string, unknown>[]
 export declare function sessionFolder(id: unknown): string | null
 /** What the chain of a session's requests is read by: the fields every kept request has. */
@@ -48,6 +52,11 @@ export declare class TraceStore {
     firstSeq?: (folder: string) => number,
     exists?: (name: string) => boolean,
     read?: (folder: string) => readonly ChainRecord[],
+    now?: () => number,
   )
+  /** Per session: what the receiver holds of it in memory. */
+  readonly sessions: Map<string, unknown>
   take(attributes: Record<string, unknown>): void
+  /** Drops the state of every session that sent nothing for `idleMs`. */
+  prune(idleMs: number): void
 }
