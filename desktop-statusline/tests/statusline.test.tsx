@@ -25,6 +25,7 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
       cost: { usd: 1.234 },
     },
   }))
+  on('turn.complete', async () => ({ text: 'done' }))
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
 
@@ -43,9 +44,33 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({ label: '33%' })
 
   expect(await ui.find({ type: 'Text', text: /\$1\.23/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: '1m 0s' })).toBeDefined()
-  const slot = await ui.find({ type: 'Box', text: /^1m 0s$/ })
+  // The timer is a region of its own (hooks/elapsed.tsx), in a slot as wide
+  // as its widest reading, and counts the seconds itself: the band is not
+  // drawn again for them.
+  await ui.advance(0)
+  expect(await ui.find({ type: 'Text', text: '1m 0s', in: 'elapsed' })).toBeDefined()
+  const slot = (await ui.findAll({ type: 'Box' })).find(one => one.props.width === 7)
   expect(slot?.props).toMatchObject({ width: 7, justifyContent: 'flex-start' })
+  expect((slot?.children[0] as { props?: unknown } | undefined)?.props).toMatchObject({
+    key: 'elapsed',
+    module: 'hooks/elapsed.tsx',
+    props: { ms: 60_000 },
+  })
+  await ui.advance(1_000)
+  expect(await ui.find({ type: 'Text', text: '1m 1s', in: 'elapsed' })).toBeDefined()
+  await ui.advance(59_000)
+  expect(await ui.find({ type: 'Text', text: '2m 0s', in: 'elapsed' })).toBeDefined()
+  // Drawn again (a turn ends), the band hands it the time anew, and it counts
+  // on from there, not from both.
+  await $.turn.complete({
+    turnId: 'turn-1',
+    answer: 'done',
+    durationMs: 1_000,
+    isAborted: false,
+    reason: 'answer',
+  })
+  await ui.advance(1_000)
+  expect(await ui.find({ type: 'Text', text: '2m 1s', in: 'elapsed' })).toBeDefined()
 
   // Meter │ cost │ elapsed, no effort known yet so none on the left.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
@@ -155,7 +180,8 @@ test('shows a placeholder bar and no cost before the first response', async ($, 
   expect(String(meter?.props.source)).toMatch(/width="0" height="8" fill="#c19c00"/)
   expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({ label: '--%' })
   expect(await ui.find({ type: 'Text', text: /\$/ })).toBeUndefined()
-  expect(await ui.find({ type: 'Text', text: '5s' })).toBeDefined()
+  await ui.advance(0)
+  expect(await ui.find({ type: 'Text', text: '5s', in: 'elapsed' })).toBeDefined()
   // One before the folder, one between the meter and the timer: the cost
   // brings its own hairline, so none is drawn for it yet.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
@@ -174,8 +200,9 @@ test('drops the seconds once the session passes an hour', async ($, on) => {
 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
 
-  expect(await ui.find({ type: 'Text', text: /^2h 5m$/ })).toBeDefined()
-  expect(await ui.find({ type: 'Text', text: /42s/ })).toBeUndefined()
+  await ui.advance(0)
+  expect(await ui.find({ type: 'Text', text: /^2h 5m$/, in: 'elapsed' })).toBeDefined()
+  expect(await ui.find({ type: 'Text', text: /42s/, in: 'elapsed' })).toBeUndefined()
 
   await ui.unmount()
 })

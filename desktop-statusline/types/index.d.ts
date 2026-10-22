@@ -123,8 +123,8 @@ export type SeenTool = { description: string; isDeferred: boolean }
 declare module 'claude-code' {
   interface PluginState {
     'desktop-statusline': {
-      /** Bumped once a second so the band redraws its live figures. */
-      tick: number
+      /** Bumped at each step of a turn, and its end, so the band redraws its cost and context figures. */
+      steps: number
       /** The working copy's branch and whether it has uncommitted changes. */
       git: GitInfo
       /** The reasoning effort of the last main-loop request, or the configured one. */

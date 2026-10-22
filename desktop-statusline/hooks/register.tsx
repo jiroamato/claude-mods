@@ -11,6 +11,7 @@ import type {
   TraceStatus,
 } from '../types'
 import { buildSnapshot, currentSnapshot } from './context'
+import type { ElapsedProps } from './elapsed'
 import { showFolder } from './folder'
 import {
   ContextPane,
@@ -73,7 +74,7 @@ import {
 // window and put back, the system prompt's text, the skills' listings and the
 // conversation's trace.
 
-const tick = atom({ plugin: 'desktop-statusline', key: 'tick' } as const, 0)
+const steps = atom({ plugin: 'desktop-statusline', key: 'steps' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
 const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, null)
 const context = atom({ plugin: 'desktop-statusline', key: 'context' } as const, null)
@@ -187,16 +188,6 @@ function prettyModel(model: string): string {
   const name = words.join(' ')
 
   return digits.length > 0 ? `${name} ${digits.join('.')}` : name
-}
-
-function formatDuration(ms: number): string {
-  const seconds = Math.max(0, Math.floor(ms / 1000))
-  if (seconds < 60) return `${seconds}s`
-  const minutes = Math.floor(seconds / 60)
-  if (minutes < 60) return `${minutes}m ${seconds % 60}s`
-  const hours = Math.floor(minutes / 60)
-
-  return `${hours}h ${minutes % 60}m`
 }
 
 /** The meter's markup: a grey rounded outline, the fill clipped to its inside. */
@@ -1039,11 +1030,10 @@ export const register: Register = on => {
       // No store here: tools removed in earlier sessions fall back to the catalog.
     })
 
+    let ticks = 0
     $.clock.every(1000, () => {
-      void (async () => {
-        const count = await update($, tick, n => n + 1)
-        if (count % GIT_REFRESH_EVERY_TICKS === 0) await refreshGit($)
-      })()
+      ticks += 1
+      if (ticks % GIT_REFRESH_EVERY_TICKS === 0) void refreshGit($)
     })
 
     return started
@@ -1054,6 +1044,8 @@ export const register: Register = on => {
     if (e.agentId === undefined) {
       const level = asEffort(e.effort)
       if (level) void update($, effort, () => level)
+      // A step may have cost, and filled the window: the band draws its figures again.
+      void update($, steps, n => n + 1)
     }
 
     return yield* next(e)
@@ -1072,12 +1064,16 @@ export const register: Register = on => {
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       void refreshGit($)
+      void update($, steps, n => n + 1)
       // The last request's answer reaches the receiver a moment after the turn
       // ends (the export runs every second), so the trace is read twice.
       void refreshContext($)
         .then(() => refreshTrace($))
         .then(() => $.clock.sleep(TRACE_SETTLE_MS))
         .then(() => refreshTrace($))
+        .catch(() => {
+          // Unloaded while it waited (a reload, the session's end): the next load reads afresh.
+        })
     }
 
     return next(e)
@@ -1285,10 +1281,13 @@ export const register: Register = on => {
     if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
 
     const ui = $.ui.resolve(e)
-    const { Box, Button, Svg, Text } = ui
+    const { Box, Button, Client, Svg, Text } = ui
 
-    // Subscribes this drawing to the once-a-second tick.
-    await read($, tick)
+    // Drawn again after each step of a turn, for the cost and the window; the
+    // seconds are the timer's own (./elapsed.tsx), so the band is not drawn
+    // each second: the desktop paints every element of the plugin's again at
+    // a drawing of the band, and a focused field in the pane blinks at each.
+    await read($, steps)
     const [model, cwd, usage, repo, level, now] = await Promise.all([
       $.session.model(),
       $.session.cwd(),
@@ -1369,7 +1368,11 @@ export const register: Register = on => {
 
           {divider()}
           <Box width={ELAPSED_COLUMNS} justifyContent="flex-start">
-            <Text color="secondaryText">{formatDuration(elapsed)}</Text>
+            <Client
+              key="elapsed"
+              module="./elapsed.tsx"
+              props={{ ms: elapsed } satisfies ElapsedProps}
+            />
           </Box>
         </Box>
       </Box>
