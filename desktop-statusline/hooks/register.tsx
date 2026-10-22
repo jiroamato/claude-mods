@@ -18,6 +18,7 @@ import {
   GROUP_PREFIX,
   PANE_ID,
   PANE_TITLE,
+  READER_HIT_MARK,
   READER_KEY,
   READER_TOP_ROWS,
 } from './panel'
@@ -824,32 +825,27 @@ function readerMatches(laid: { key: string; rows: string[] }, query: string): Ro
 /** How long a redraw takes to put the current match's row in the tree, before scrolling to it. */
 const HIT_SETTLE_MS = 150
 
-/**
- * The pane's window as the reader last drew it: where it stands and how many
- * rows it shows, for the row the reader scrolls to.
- */
-let readerWindow = { offset: 0, bodyRows: 40 }
-/**
- * The row the reader is scrolling to, while its own `ui.scroll` hook moves
- * the window there; null between. The desktop scrolls to a Button alone, not
- * to a Box or a Text, and a row only stood in for by empty space has no
- * Button to scroll to: so the reader asks for the site's edge, and its hook
- * moves the window to the row instead.
- */
-let revealRow: number | null = null
+/** How many times the scroll is asked for, while the redraw has not drawn the mark yet. */
+const HIT_TRIES = 10
 
-/** Scrolls the pane to the current match, once the redraw has counted its row. */
+/**
+ * Scrolls the pane to the current match, once the redraw has drawn its row.
+ * The desktop scrolls to a Button alone, not to a Box or a Text: the row
+ * carries one of no size (./panel.tsx). It takes longer to draw a long
+ * request than a short one, and refuses a scroll to a mark not drawn yet: so
+ * it is asked again, a while.
+ */
 async function revealHit($: EngineInterface): Promise<void> {
   try {
-    await $.clock.sleep(HIT_SETTLE_MS)
-    const index = (await read($, readerSearch)).index
-    const row = matchCache?.matches[index]?.row
-    if (row === undefined) return
-    // The row in the middle of the window, as a scroll to it would put it.
-    revealRow = Math.max(0, row + READER_TOP_ROWS - Math.floor(readerWindow.bodyRows / 2))
-    // An edge the window is not at, so the move is raised and the hook moves it.
-    await $.ui.scroll({ in: PANE_ID, to: readerWindow.offset > 0 ? 'start' : 'end' })
-    revealRow = null
+    for (let tried = 0; tried < HIT_TRIES; tried += 1) {
+      await $.clock.sleep(HIT_SETTLE_MS)
+      const moved = await $.ui.scroll({
+        in: PANE_ID,
+        to: { key: READER_HIT_MARK },
+        block: 'center',
+      })
+      if (moved.deny === undefined || !/drawn/.test(moved.deny)) return
+    }
   } catch {
     // The pane closed, or the plugin unloaded, meanwhile: there is nothing to scroll.
   }
@@ -1053,13 +1049,6 @@ export const register: Register = on => {
   // key by a page), so such a move is refused and the window stays put.
   on('ui.scroll', { requestId: PANE_ID }, async ($, e, next) => {
     const lastOffset = Math.max(0, e.contentRows - e.bodyRows)
-    // The reader's own move to the current match: to its row, not the edge asked for.
-    if (revealRow !== null && e.origin.kind === 'plugin') {
-      const offset = Math.min(revealRow, lastOffset)
-      revealRow = null
-
-      return next({ ...e, offset, by: offset - readerWindow.offset })
-    }
     const isRedrawJump =
       e.origin.kind === 'person' &&
       !e.pointer &&
@@ -1139,7 +1128,6 @@ export const register: Register = on => {
     const readerView = async (): Promise<ReaderView | null> => {
       const laid = await readerRows($, readingSeq!, Math.max(20, e.props.bodyColumns - 2))
       if (!laid) return null
-      readerWindow = { offset: e.props.scroll.offset, bodyRows: e.props.scroll.bodyRows }
       const matches = readerMatches(laid, searching.query)
       const current =
         matches.length > 0 ? matches[Math.min(searching.index, matches.length - 1)]! : null

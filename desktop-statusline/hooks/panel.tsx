@@ -534,8 +534,10 @@ export type ReaderRow = {
 /** The reader's top, in rows: its line back, its search, and a row of space under them. */
 export const READER_TOP_ROWS = 4
 
-/** The key of the row holding the current match, which the reader scrolls to. */
+/** The key of the row holding the current match. */
 export const READER_HIT_KEY = 'reader-hit'
+/** The key of the mark in that row the reader scrolls to: the desktop scrolls to a Button alone. */
+export const READER_HIT_MARK = 'reader-hit-mark'
 
 // A match, and the current one, as the desktop marks found text.
 const HIT = '#c9850059'
@@ -607,6 +609,11 @@ function Reader(props: {
         one.hits.some(hit => hit.isCurrent) ? (
           <Box key={READER_HIT_KEY} flexDirection="column">
             {line}
+            {/* The desktop scrolls to a Button alone, not to a Box or a Text:
+                one of no size, placed over the row's corner, marks it. */}
+            <Box position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
+              <Button key={READER_HIT_MARK} plain label="" onPress={() => undefined} />
+            </Box>
           </Box>
         ) : (
           line
