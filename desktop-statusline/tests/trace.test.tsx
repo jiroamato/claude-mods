@@ -481,6 +481,7 @@ function tracedEngine(
   on('config.list', async () => ({ value: [] }))
   on('session.start', async (_$, e) => ({ cwd: e.cwd }))
   on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.panes', async () => ({ value: [] }))
 
   return settings
 }

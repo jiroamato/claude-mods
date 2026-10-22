@@ -124,7 +124,14 @@ const DEPLOY = {
 } as const
 
 /** The engine around the plugin: a settings file in memory, the usage and the transcript. */
-type SettingsFile = { text: string; isLocked?: boolean; path?: RegExp; writes?: number }
+type SettingsFile = {
+  text: string
+  isLocked?: boolean
+  path?: RegExp
+  writes?: number
+  /** Whether the engine lists the pane as open and shown, as `$.ui.panes()` reports it. */
+  isPaneShown?: boolean
+}
 
 /** Files under the trace folder, by name, as the receiver writes them. */
 type TraceFiles = Record<string, string>
@@ -158,6 +165,24 @@ function engine(
   on('session.id', async () => ({ value: 'session-1' }))
   on('http.fetch', async () => ({
     value: { status: 200, ok: true, headers: {}, text: RECEIVER_HEALTH },
+  }))
+  on('ui.panes', async () => ({
+    value: settings.isPaneShown
+      ? [
+          {
+            id: 'context-map',
+            title: 'Context details',
+            isShown: true,
+            isFocused: false,
+            isPlaced: true,
+            plugin: 'desktop-statusline',
+            element: 'context-map',
+            component: 'Pane' as const,
+            requestId: 'context-map',
+            surface: 'desktop' as const,
+          },
+        ]
+      : [],
   }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)
@@ -342,8 +367,9 @@ async function openTab(
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: `tab-${id}` })
 }
 
-test('the meter has no hover card; the percentage opens the pane on its Tools tab', async ($, on) => {
-  const clock = engine(on, { text: '{}' })
+test('the meter has no hover card; the meter and the ⓘ open the pane on its Tools tab', async ($, on) => {
+  const settings: SettingsFile = { text: '{}' }
+  const clock = engine(on, settings)
   let opened: unknown
   on('ui.open', async (_$, e) => {
     opened = e
@@ -352,17 +378,22 @@ test('the meter has no hover card; the percentage opens the pane on its Tools ta
   })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
 
-  // The desktop's own Context card lists the rows; the band adds nothing over the meter.
+  // The desktop's own Context card lists the rows; the band adds no card over
+  // the meter: the one Box placed over it holds the button that opens the pane.
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const boxes = await band.findAll({ type: 'Box' })
-  expect(boxes.filter(one => one.props.position === 'absolute')).toEqual([])
+  const placed = boxes.filter(one => one.props.position === 'absolute')
+  expect(placed).toHaveLength(1)
+  expect((placed[0]?.children[0] as { props?: unknown } | undefined)?.props).toMatchObject({
+    key: 'open-context',
+  })
   expect(boxes.filter(one => one.props.hover !== undefined)).toEqual([])
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await openTab(pane, 'skills')
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
-  // The band's ⓘ, at its end, opens the pane (the percentage does too).
+  // The band's ⓘ, at its end, opens the pane (the meter does too).
   const pressed = band.press({ key: 'open-details' })
   // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
@@ -371,6 +402,14 @@ test('the meter has no hover card; the percentage opens the pane on its Tools ta
   expect(opened).toMatchObject({ id: 'context-map', title: 'Context details', focus: true })
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: 'Built-in tools' })).toBeDefined()
+
+  // Open already, with another tab picked, a press leaves it as it is.
+  settings.isPaneShown = true
+  await openTab(pane, 'skills')
+  const again = band.press({ key: 'open-context' })
+  for (let step = 0; step < 10; step += 1) await clock.advance(100)
+  await again
+  expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
   await pane.unmount()
   await band.unmount()

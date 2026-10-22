@@ -156,6 +156,10 @@ const GIT_REFRESH_EVERY_TICKS = 15
 // other figures' and the spare width falls against the band's edge.
 const ELAPSED_COLUMNS = 7
 
+// The meter and the gap to its percentage, in figure spaces: the width of the
+// button laid over them, less the percentage's own characters.
+const METER_FIGURES = 9
+
 // The band's own way into the pane: a circled i, as the Tools tab marks its
 // tip, a figure space either side so the desktop's pill around it has room.
 const INFO_GLYPH = ' ⓘ '
@@ -1000,17 +1004,22 @@ async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
  * Opens the Context details pane at its top, on its Tools tab, with the deny
  * list and the breakdown read afresh: the settings may have been edited by hand
  * since the session began, and the window may have moved since the last turn
- * (a /compact).
+ * (a /compact). A pane already open is left as the person has it, its figures
+ * read afresh.
  */
 async function openPane($: EngineInterface): Promise<void> {
   try {
-    await update($, tab, () => 'tools')
-    await update($, reader, () => null)
-    readerCache = null
+    const isOpen = (await $.ui.panes()).some(pane => pane.id === PANE_ID && pane.isShown)
+    if (!isOpen) {
+      await update($, tab, () => 'tools')
+      await update($, reader, () => null)
+      readerCache = null
+    }
     // Focused, so the first click in the pane presses its button: an
     // unfocused pane spends that click on taking the focus.
     await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
     await Promise.all([refreshRemoved($), refreshContext($).then(() => refreshTrace($))])
+    if (isOpen) return
     await $.clock.sleep(PANE_SETTLE_MS)
     await $.ui.scroll({ in: PANE_ID, to: 'start' })
   } catch {
@@ -1335,6 +1344,7 @@ export const register: Register = on => {
 
     const folder = basename(cwd)
     const percent = usage.context.percent
+    const percentText = percent === undefined ? '--%' : `${percent}%`
     const usd = usage.cost?.usd
     const elapsed = now - usage.startedAt
 
@@ -1383,7 +1393,10 @@ export const register: Register = on => {
 
         {/* Live figures: context, cost, elapsed, a hairline between each. */}
         <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={0}>
-          {/* The percentage opens the Context details pane. */}
+          {/* The meter and its percentage open the Context details pane, as
+              one control: a Button holds text alone, so one of figure spaces
+              lies over both, and the desktop's pill under the pointer, which
+              lets them show through, spans the two. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
             <Svg
               source={meterSvg(percent)}
@@ -1391,12 +1404,17 @@ export const register: Register = on => {
               width={METER_WIDTH}
               height={METER_HEIGHT}
             />
-            <Button
-              key="open-context"
-              plain
-              label={percent === undefined ? '--%' : `${percent}%`}
-              onPress={() => attempt(openPane($))}
-            />
+            <Text color="text" tabular>
+              {percentText}
+            </Text>
+            <Box position="absolute" top={0} left={0}>
+              <Button
+                key="open-context"
+                plain
+                label={'\u2007'.repeat(METER_FIGURES + percentText.length)}
+                onPress={() => attempt(openPane($))}
+              />
+            </Box>
           </Box>
 
           {usd !== undefined && divider()}

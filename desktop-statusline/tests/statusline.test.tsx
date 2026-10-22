@@ -41,7 +41,13 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
     /<rect x="1" y="1" width="20" height="8" fill="#c19c00"/,
   )
   expect(String(meter?.props.source)).toMatch(/stroke="#8a8a8a"/)
-  expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({ label: '33%' })
+  // The percentage is text; the button over it and the meter is figure spaces,
+  // as wide as the two, so the desktop's pill spans both.
+  expect((await ui.find({ type: 'Text', text: '33%' }))?.props).toMatchObject({ tabular: true })
+  expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({
+    plain: true,
+    label: '\u2007'.repeat(12),
+  })
 
   expect(await ui.find({ type: 'Text', text: /\$1\.23/ })).toBeDefined()
   // The timer is a region of its own (hooks/elapsed.tsx), in a slot as wide
@@ -192,7 +198,10 @@ test('shows a placeholder bar and no cost before the first response', async ($, 
   )
   expect(meter?.props).toMatchObject({ alt: 'context: no reading yet' })
   expect(String(meter?.props.source)).toMatch(/width="0" height="8" fill="#c19c00"/)
-  expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({ label: '--%' })
+  expect(await ui.find({ type: 'Text', text: '--%' })).toBeDefined()
+  expect((await ui.find({ key: 'open-context' }))?.props).toMatchObject({
+    label: '\u2007'.repeat(12),
+  })
   expect(await ui.find({ type: 'Text', text: /\$/ })).toBeUndefined()
   await ui.advance(0)
   expect(await ui.find({ type: 'Text', text: '5s', in: 'elapsed' })).toBeDefined()
