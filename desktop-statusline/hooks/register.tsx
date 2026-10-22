@@ -18,9 +18,8 @@ import {
   GROUP_PREFIX,
   PANE_ID,
   PANE_TITLE,
-  READER_HIT_MARK,
   READER_KEY,
-  READER_TOP_ROWS,
+  readerVisibleRows,
 } from './panel'
 import type { ReaderView } from './panel'
 import type { DisclosurePick } from './disclosure'
@@ -41,7 +40,6 @@ import {
   findMatches,
   fromHead,
   promptRecord,
-  readerRanges,
   replacedNames,
   sentPrompt,
   sourceLabel,
@@ -84,6 +82,7 @@ const readerSearch = atom({ plugin: 'desktop-statusline', key: 'readerSearch' } 
   query: '',
   index: 0,
 })
+const readerOffset = atom({ plugin: 'desktop-statusline', key: 'readerOffset' } as const, 0)
 const tab = atom({ plugin: 'desktop-statusline', key: 'tab' } as const, 'tools' as PaneTab)
 const PANE_TABS: readonly PaneTab[] = ['tools', 'prompt', 'skills', 'trace']
 const NO_TRACE: TraceState = {
@@ -822,33 +821,33 @@ function readerMatches(laid: { key: string; rows: string[] }, query: string): Ro
   return matchCache.matches
 }
 
-/** How long a redraw takes to put the current match's row in the tree, before scrolling to it. */
-const HIT_SETTLE_MS = 150
+/** How many rows the window showed at the reader's last drawing; a guess until it is drawn. */
+let readerBodyRows = 40
 
-/** How many times the scroll is asked for, while the redraw has not drawn the mark yet. */
-const HIT_TRIES = 10
+/** Rows a wheel tick moves the reader: the person's tick is a row, too slow over a long request. */
+const WHEEL_ROWS = 3
+
+/** The reader's first row in view, kept so the rows in view are all text. */
+function clampOffset(offset: number, total: number, visible: number): number {
+  return Math.max(0, Math.min(offset, total - visible))
+}
 
 /**
- * Scrolls the pane to the current match, once the redraw has drawn its row.
- * The desktop scrolls to a Button alone, not to a Box or a Text: the row
- * carries one of no size (./panel.tsx). It takes longer to draw a long
- * request than a short one, and refuses a scroll to a mark not drawn yet: so
- * it is asked again, a while.
+ * Moves the reader's rows so the current match is in the middle of those in
+ * view. The reader draws its own rows under its top (./panel.tsx), so this is
+ * a change of state, which redraws it, not a scroll of the pane.
  */
 async function revealHit($: EngineInterface): Promise<void> {
-  try {
-    for (let tried = 0; tried < HIT_TRIES; tried += 1) {
-      await $.clock.sleep(HIT_SETTLE_MS)
-      const moved = await $.ui.scroll({
-        in: PANE_ID,
-        to: { key: READER_HIT_MARK },
-        block: 'center',
-      })
-      if (moved.deny === undefined || !/drawn/.test(moved.deny)) return
-    }
-  } catch {
-    // The pane closed, or the plugin unloaded, meanwhile: there is nothing to scroll.
-  }
+  const laid = readerCache
+  if (!laid) return
+  const searching = await read($, readerSearch)
+  const matches = readerMatches(laid, searching.query)
+  const current = matches[Math.min(searching.index, matches.length - 1)]
+  if (!current) return
+  const visible = readerVisibleRows(readerBodyRows)
+  await update($, readerOffset, () =>
+    clampOffset(current.row - Math.floor(visible / 2), laid.rows.length, visible),
+  )
 }
 
 /** A new search in the reader: its first match current. */
@@ -867,7 +866,10 @@ async function stepReader($: EngineInterface, by: number): Promise<void> {
 
 /** Opens a request whole in the pane's reader, at its top. */
 async function openReader($: EngineInterface, seq: number): Promise<void> {
+  // Laid out afresh for this request: until it is, the pane scrolls as it does for the tabs.
+  readerCache = null
   await update($, readerSearch, () => ({ query: '', index: 0 }))
+  await update($, readerOffset, () => 0)
   await update($, reader, () => seq)
   await $.ui.scroll({ in: PANE_ID, to: 'start' }).catch(() => undefined)
 }
@@ -1043,11 +1045,22 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
+  // The reader draws its own rows under its top, which stays: the person's
+  // wheel and scroll keys move those rows, and the pane's window stays put.
   // The desktop sometimes moves the pane's window straight to its last row as
   // it redraws (after a press, or a wheel tick), reported as the person's own
   // scroll. No key or wheel moves it that way (End moves by every row, a page
   // key by a page), so such a move is refused and the window stays put.
   on('ui.scroll', { requestId: PANE_ID }, async ($, e, next) => {
+    const laid = readerCache
+    if (e.origin.kind === 'person' && laid && (await read($, reader)) !== null) {
+      readerBodyRows = e.bodyRows
+      const visible = readerVisibleRows(e.bodyRows)
+      const by = e.pointer ? e.by * WHEEL_ROWS : e.by
+      await update($, readerOffset, now => clampOffset(now + by, laid.rows.length, visible))
+
+      return {}
+    }
     const lastOffset = Math.max(0, e.contentRows - e.bodyRows)
     const isRedrawJump =
       e.origin.kind === 'person' &&
@@ -1104,6 +1117,7 @@ export const register: Register = on => {
       shownPage,
       readingSeq,
       searching,
+      readingOffset,
     ] = await Promise.all([
       read($, context).then(currentSnapshot),
       read($, expanded),
@@ -1120,48 +1134,44 @@ export const register: Register = on => {
       read($, page),
       read($, reader),
       read($, readerSearch),
+      read($, readerOffset),
     ])
     const openSeq = open.map(key => /^trace-(\d+)$/.exec(key)?.[1]).find(Boolean)
-    // The reader draws the rows near the window only: a screen above, the
-    // screen in view and one below, so a scroll in either direction lands on
-    // drawn text, and the rest is empty space of the same height.
+    // The reader draws the rows that fit under its top, from the first the
+    // person scrolled to: the rest of the request is not drawn at all.
     const readerView = async (): Promise<ReaderView | null> => {
       const laid = await readerRows($, readingSeq!, Math.max(20, e.props.bodyColumns - 2))
       if (!laid) return null
+      readerBodyRows = e.props.scroll.bodyRows
+      const visible = readerVisibleRows(e.props.scroll.bodyRows)
+      const first = clampOffset(readingOffset, laid.rows.length, visible)
+      const last = Math.min(laid.rows.length, first + visible)
       const matches = readerMatches(laid, searching.query)
       const current =
         matches.length > 0 ? matches[Math.min(searching.index, matches.length - 1)]! : null
-      const ranges = readerRanges(
-        laid.rows.length,
-        e.props.scroll.offset - READER_TOP_ROWS,
-        e.props.scroll.bodyRows,
-        current?.row ?? null,
-      )
       // The matches by row, for the rows drawn.
       const byRow = new Map<number, RowMatch[]>()
       for (const match of matches) {
-        if (!ranges.some(range => match.row >= range.first && match.row < range.last)) continue
+        if (match.row < first || match.row >= last) continue
         byRow.set(match.row, [...(byRow.get(match.row) ?? []), match])
       }
 
       return {
         title: laid.title,
         detail: laid.detail,
+        first,
         total: laid.rows.length,
         search: {
           query: searching.query,
           index: current ? matches.indexOf(current) : 0,
           count: matches.length,
         },
-        stretches: ranges.map(range => ({
-          first: range.first,
-          rows: laid.rows.slice(range.first, range.last).map((text, at) => ({
-            text,
-            hits: (byRow.get(range.first + at) ?? []).map(match => ({
-              start: match.start,
-              end: match.end,
-              isCurrent: match === current,
-            })),
+        rows: laid.rows.slice(first, last).map((text, at) => ({
+          text,
+          hits: (byRow.get(first + at) ?? []).map(match => ({
+            start: match.start,
+            end: match.end,
+            isCurrent: match === current,
           })),
         })),
       }

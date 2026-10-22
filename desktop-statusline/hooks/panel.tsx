@@ -507,19 +507,21 @@ export type ContextPaneProps = {
   /** The page of the open request or section's text. */
   page: number
   onPage: (page: number) => void
-  /** The request read whole, as the rows on screen and around them; null while the tabs show. */
+  /** The request read whole, as the rows in view; null while the tabs show. */
   reader: ReaderView | null
   onRead: (seq: number) => void
   onSearch: (query: string) => void
   onStep: (by: number) => void
 }
 
-/** What the reader draws: the rows near the window, and how many rows come before and after. */
+/** What the reader draws: the rows in view, and where they sit in the request. */
 export type ReaderView = {
   title: string
   detail: string
-  /** The stretches of rows drawn, each from its row `first` of the text. */
-  stretches: { first: number; rows: ReaderRow[] }[]
+  /** The row of the text the first one drawn is, from 0. */
+  first: number
+  /** The rows in view, as many as the pane's window holds under the reader's top. */
+  rows: ReaderRow[]
   total: number
   /** The search: what is looked for, how many matches, and the current one. */
   search: { query: string; index: number; count: number }
@@ -534,10 +536,13 @@ export type ReaderRow = {
 /** The reader's top, in rows: its line back, its search, and a row of space under them. */
 export const READER_TOP_ROWS = 4
 
+/** How many of the text's rows the reader shows under its top, in a window `bodyRows` high. */
+export function readerVisibleRows(bodyRows: number): number {
+  return Math.max(1, bodyRows - READER_TOP_ROWS)
+}
+
 /** The key of the row holding the current match. */
 export const READER_HIT_KEY = 'reader-hit'
-/** The key of the mark in that row the reader scrolls to: the desktop scrolls to a Button alone. */
-export const READER_HIT_MARK = 'reader-hit-mark'
 
 // A match, and the current one, as the desktop marks found text.
 const HIT = '#c9850059'
@@ -577,11 +582,16 @@ function RowText(props: { ui: Ui; row: ReaderRow }) {
   )
 }
 
+/** A count as the pane writes figures: `4,493`. */
+function formatCount(value: number): string {
+  return value.toLocaleString('en-US')
+}
+
 /**
- * A request whole, read in the pane: its rows drawn only near the window and
- * around the current match, the rest stood in for by empty space of the same
- * height, so the pane scrolls through all of it and draws no more than a
- * drawing holds. Its top is a fixed height, so the rows below are counted true.
+ * A request whole, read in the pane: its top (the way back, the search) stays,
+ * and under it the rows that fit the window, which the hooks module moves as
+ * the person scrolls. The whole is no taller than the window, so the pane's
+ * own window never moves, and a drawing holds no more than a screen of text.
  */
 function Reader(props: {
   ui: Ui
@@ -598,31 +608,9 @@ function Reader(props: {
       ? ''
       : search.count === 0
         ? 'No match'
-        : `${search.index + 1} of ${search.count.toLocaleString('en-US')}${search.count >= MAX_MATCHES ? '+' : ''}`
-  const drawn: JSX.Element[] = []
-  let row = 0
-  for (const stretch of view.stretches) {
-    drawn.push(...Space({ ui: props.ui, rows: stretch.first - row }))
-    stretch.rows.forEach(one => {
-      const line = RowText({ ui: props.ui, row: one })
-      drawn.push(
-        one.hits.some(hit => hit.isCurrent) ? (
-          <Box key={READER_HIT_KEY} flexDirection="column">
-            {line}
-            {/* The desktop scrolls to a Button alone, not to a Box or a Text:
-                one of no size, placed over the row's corner, marks it. */}
-            <Box position="absolute" top={0} left={0} width={0} height={0} overflow="hidden">
-              <Button key={READER_HIT_MARK} plain label="" onPress={() => undefined} />
-            </Box>
-          </Box>
-        ) : (
-          line
-        ),
-      )
-    })
-    row = stretch.first + stretch.rows.length
-  }
-  drawn.push(...Space({ ui: props.ui, rows: view.total - row }))
+        : `${search.index + 1} of ${formatCount(search.count)}${search.count >= MAX_MATCHES ? '+' : ''}`
+  // With no scrollbar of its own, the reader says where in the request it is.
+  const position = `rows ${formatCount(view.first + 1)} to ${formatCount(view.first + view.rows.length)} of ${formatCount(view.total)}`
 
   return (
     <Box flexDirection="column" paddingX={1}>
@@ -642,11 +630,19 @@ function Reader(props: {
               onSubmit={() => props.onStep(1)}
             />
           </Box>
-          <Box flexShrink={0}>
-            <Text color={search.count === 0 && status !== '' ? 'error' : 'subtle'} tabular>
-              {status}
+          {/* Where the rows are gives way before the field, cut short in a narrow pane. */}
+          <Box flexShrink={1} minWidth={0}>
+            <Text color="subtle" size="footnote" tabular wrap="truncate-end">
+              {position}
             </Text>
           </Box>
+          {status !== '' && (
+            <Box flexShrink={0}>
+              <Text color={search.count === 0 ? 'error' : 'subtle'} tabular>
+                {status}
+              </Text>
+            </Box>
+          )}
           {search.count > 0 && (
             <Button key="reader-previous" label="↑" onPress={() => props.onStep(-1)} />
           )}
@@ -656,22 +652,21 @@ function Reader(props: {
         </Box>
       </Box>
       <Box height={1} flexShrink={0} />
-      {drawn}
+      <Box flexDirection="column" height={view.rows.length} flexShrink={0} overflow="hidden">
+        {view.rows.map(one => {
+          const line = RowText({ ui: props.ui, row: one })
+
+          return one.hits.some(hit => hit.isCurrent) ? (
+            <Box key={READER_HIT_KEY} flexDirection="column">
+              {line}
+            </Box>
+          ) : (
+            line
+          )
+        })}
+      </Box>
     </Box>
   )
-}
-
-/** The tallest Box the engine draws, in rows. */
-const MAX_BOX_ROWS = 10_000
-
-/** Empty space `rows` high: as many Boxes as it takes, each no taller than the engine draws. */
-function Space(props: { ui: Ui; rows: number }) {
-  const { Box } = props.ui
-  const heights: number[] = []
-  for (let left = props.rows; left > 0; left -= MAX_BOX_ROWS)
-    heights.push(Math.min(left, MAX_BOX_ROWS))
-
-  return heights.map(height => <Box height={height} flexShrink={0} />)
 }
 
 /** The key of the reader's top line, which the hooks module hears it post under. */

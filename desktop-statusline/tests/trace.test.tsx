@@ -1,5 +1,5 @@
 import { expect, mock, test } from 'claude-code/testing'
-import type { TestBody } from 'claude-code/testing'
+import type { Mounted, TestBody } from 'claude-code/testing'
 import type { On } from 'claude-code'
 
 import { FOLDER_VARIABLE, SHOW_FOLDER_SCRIPT, encodedCommand } from '../hooks/folder'
@@ -13,7 +13,6 @@ import {
   fromHead,
   isTraceOn,
   promptRecord as tracePromptRecord,
-  readerRanges,
   sentPrompt,
   summarize,
   TRACE_ENV,
@@ -1110,9 +1109,11 @@ test('wrapped rows are each one line, cut at a space where one fits', () => {
   expect(wrapRows('x'.repeat(25), 10)).toEqual(['x'.repeat(10), 'x'.repeat(10), 'x'.repeat(5)])
 })
 
-test('the reader draws only the rows near the window, and empty space for the rest', async ($, on) => {
-  const long = Array.from({ length: 20_000 }, (_, index) => `line ${index}`).join('\n')
-  const files: Record<string, string> = {
+/** A request of `lines` numbered lines, as the reader tests read it. */
+function longRequest(lines: number): Record<string, string> {
+  const long = Array.from({ length: lines }, (_, index) => `line ${index}`).join('\n')
+
+  return {
     'system-a.json': JSON.stringify([{ type: 'text', text: 'You are Claude.' }]),
     'tools-b.json': JSON.stringify([{ name: 'Bash' }]),
     '000000.json': JSON.stringify({
@@ -1131,38 +1132,116 @@ test('the reader draws only the rows near the window, and empty space for the re
       response: null,
     } satisfies TraceRecord),
   }
-  tracedEngine(on, files)
+}
+
+type ReaderPane = Pick<Mounted<'desktop', 'Pane'>, 'find' | 'findAll'>
+
+/** The reader's text rows as drawn, top to bottom. */
+async function readerText(pane: ReaderPane): Promise<string[]> {
+  return (await pane.findAll({ type: 'Text' }))
+    .filter(one => one.props.mono === true)
+    .map(one => one.text)
+}
+
+/** Where the reader says its rows are: the first and last in view, and how many in all. */
+async function readerPosition(pane: ReaderPane) {
+  const text = (await pane.find({ type: 'Text', text: /^rows / }))?.text ?? ''
+  const match = /^rows ([\d,]+) to ([\d,]+) of ([\d,]+)$/.exec(text)
+  const figure = (part: string | undefined) => Number(part?.replace(/,/g, ''))
+
+  return { first: figure(match?.[1]), last: figure(match?.[2]), total: figure(match?.[3]) }
+}
+
+/** The pane's window as the desktop reports the person's scroll of it with the reader open. */
+const READER_WINDOW = {
+  component: 'Pane',
+  requestId: 'context-map',
+  bodyRows: 40,
+  contentRows: 40,
+  origin: { kind: 'person' },
+} as const
+
+test('the reader keeps its top and draws only the rows that fit under it', async ($, on) => {
+  tracedEngine(on, longRequest(20_000))
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   await pane.press({ key: 'read-0' })
 
-  // At the top: the way back, then the start of the request.
+  // The way back and the search, then the window's 40 rows less the top's 4.
   expect((await pane.find({ type: 'Client', key: 'reader' }))?.props).toMatchObject({ height: 1 })
-  const drawnRows = async () =>
-    (await pane.findAll({ type: 'Text' }))
-      .filter(one => one.props.mono === true)
-      .map(one => one.text)
-  const atTop = await drawnRows()
+  expect(await pane.find({ key: 'reader-search' })).toBeDefined()
+  const atTop = await readerText(pane)
   expect(atTop[0]).toBe('══ System prompt: 1 blocks')
-  expect(atTop.length).toBeLessThanOrEqual(80)
-  // Scrolled far down: the rows there, and every row before stood in for.
-  await pane.redraw({ ...PANE.props, scroll: { offset: 15_002, bodyRows: 40 } })
-  const below = await drawnRows()
-  expect(below.length).toBeLessThanOrEqual(120)
-  expect(below).toContain('line 14990')
-  // The rows before stand in as space, in Boxes no taller than the engine draws.
-  const spaces = (await pane.findAll({ type: 'Box' }))
+  expect(atTop).toHaveLength(36)
+  const { total } = await readerPosition(pane)
+  expect(total).toBeGreaterThan(20_000)
+  expect(
+    await pane.find({ type: 'Text', text: `rows 1 to 36 of ${total.toLocaleString('en-US')}` }),
+  ).toBeDefined()
+  // Nothing stands in for the rest: no Box is taller than the window.
+  const heights = (await pane.findAll({ type: 'Box' }))
     .map(one => one.props.height)
-    .filter((height): height is number => typeof height === 'number' && height > 100)
-  expect(spaces.every(height => height <= 10_000)).toBe(true)
-  expect(spaces.reduce((sum, height) => sum + height, 0)).toBeGreaterThan(14_000)
+    .filter((height): height is number => typeof height === 'number')
+  expect(Math.max(...heights)).toBeLessThanOrEqual(40)
+
+  // A shorter window draws fewer rows, one at the least.
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 20 } })
+  expect(await readerText(pane)).toHaveLength(16)
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 3 } })
+  expect(await readerText(pane)).toHaveLength(1)
 
   // Back to the trace.
   await pane.post({ back: true }, { in: 'reader' })
   expect(await pane.find({ type: 'Client', key: 'reader' })).toBeUndefined()
   expect(await pane.find({ type: 'Client', key: 'disclose-trace-0' })).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('scrolling the reader moves its rows, and the pane’s window stays', async ($, on) => {
+  tracedEngine(on, longRequest(20_000))
+  // Counts the moves that reach the pane's window.
+  let windowMoves = 0
+  on('ui.scroll', async () => {
+    windowMoves += 1
+
+    return {}
+  })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+  // Opening the reader put the window at its top, a move of the plugin's own.
+  windowMoves = 0
+  const atTop = await readerText(pane)
+  const { total } = await readerPosition(pane)
+
+  // A page key: the rows move by the window's height.
+  expect(await $.ui.scroll({ ...READER_WINDOW, by: 40, offset: 0 })).toEqual({})
+  expect(await readerPosition(pane)).toEqual({ first: 41, last: 76, total })
+  // An arrow: a row back.
+  await $.ui.scroll({ ...READER_WINDOW, by: -1, offset: 0 })
+  expect(await readerPosition(pane)).toEqual({ first: 40, last: 75, total })
+  // A wheel tick: three rows.
+  await $.ui.scroll({ ...READER_WINDOW, by: 1, offset: 0, pointer: { column: 5, row: 10 } })
+  expect(await readerPosition(pane)).toEqual({ first: 43, last: 78, total })
+  // A move past either end stops at it.
+  await $.ui.scroll({ ...READER_WINDOW, by: 2 * total, offset: 0 })
+  expect(await readerPosition(pane)).toEqual({ first: total - 35, last: total, total })
+  expect(await readerText(pane)).toHaveLength(36)
+  await $.ui.scroll({ ...READER_WINDOW, by: -2 * total, offset: 0 })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 36, total })
+  expect(await readerText(pane)).toEqual(atTop)
+  // None of it moved the window.
+  expect(windowMoves).toBe(0)
+
+  // Back on the tabs, the window scrolls again.
+  await pane.post({ back: true }, { in: 'reader' })
+  await $.ui.scroll({ ...READER_WINDOW, contentRows: 80, by: 3, offset: 3 })
+  expect(windowMoves).toBe(1)
 
   await pane.unmount()
 })
@@ -1181,56 +1260,43 @@ test('a search finds every match in a row, ignoring case', () => {
   expect(findMatches(['anything'], '   ')).toEqual([])
 })
 
-test('the reader draws the window and the rows around the current match', () => {
-  // Far apart: two stretches.
-  expect(readerRanges(100_000, 500, 40, 90_000)).toEqual([
-    { first: 460, last: 580 },
-    { first: 89_960, last: 90_040 },
-  ])
-  // Near each other: one.
-  expect(readerRanges(100_000, 500, 40, 520)).toEqual([{ first: 460, last: 580 }])
-  // Clamped at the ends.
-  expect(readerRanges(50, 0, 40, null)).toEqual([{ first: 0, last: 50 }])
-})
-
-test('searching the reader marks each match and steps to the next', async ($, on) => {
-  const long = Array.from({ length: 20_000 }, (_, index) => `line ${index}`).join('\n')
-  const files: Record<string, string> = {
-    'system-a.json': JSON.stringify([{ type: 'text', text: 'You are Claude.' }]),
-    'tools-b.json': JSON.stringify([]),
-    '000000.json': JSON.stringify({
-      seq: 0,
-      at: '2026-10-19T12:00:05Z',
-      source: 'sdk',
-      model: 'claude-opus-5-5',
-      promptId: 'p1',
-      system: 'a',
-      tools: 'b',
-      toolCount: 0,
-      messageCount: 1,
-      from: 0,
-      added: [{ role: 'user', content: long }],
-      usage: null,
-      response: null,
-    } satisfies TraceRecord),
-  }
-  tracedEngine(on, files)
+test('searching the reader marks each match and brings it to the middle of the rows', async ($, on) => {
+  // Long enough that every match sits clear of the end.
+  tracedEngine(on, longRequest(30_000))
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   await pane.press({ key: 'read-0' })
+  const { total } = await readerPosition(pane)
 
   await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'change' })
-  // line 1999, 19990 to 19999: eleven, the first current and drawn though far below.
+  // line 1999, 19990 to 19999: eleven, the first current, in the middle of the 36 rows.
   expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
   expect((await pane.find({ key: 'reader-hit' }))?.text).toBe('line 1999')
+  expect((await readerText(pane)).indexOf('line 1999')).toBe(18)
+  const first = (await readerPosition(pane)).first
+  expect(await readerPosition(pane)).toEqual({ first, last: first + 35, total })
+
+  // Thousands of rows down.
   await pane.press({ key: 'reader-next' })
   expect(await pane.find({ type: 'Text', text: '2 of 11' })).toBeDefined()
   expect((await pane.find({ key: 'reader-hit' }))?.text).toBe('line 19990')
+  const shown = await readerText(pane)
+  expect(shown.indexOf('line 19990')).toBe(18)
+  expect(shown.slice(18, 28)).toEqual(
+    Array.from({ length: 10 }, (_, index) => `line ${19990 + index}`),
+  )
+  // Back round the start to the last.
   await pane.press({ key: 'reader-previous' })
   await pane.press({ key: 'reader-previous' })
   expect(await pane.find({ type: 'Text', text: '11 of 11' })).toBeDefined()
+  expect((await pane.find({ key: 'reader-hit' }))?.text).toBe('line 19999')
+  expect((await readerText(pane)).indexOf('line 19999')).toBe(18)
+  // Enter in the field steps on, round the end to the first.
+  await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'submit' })
+  expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
+  expect((await pane.find({ key: 'reader-hit' }))?.text).toBe('line 1999')
 
   await pane.input({ key: 'reader-search', text: 'nowhere', kind: 'change' })
   expect(await pane.find({ type: 'Text', text: 'No match' })).toBeDefined()

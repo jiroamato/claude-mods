@@ -143,6 +143,8 @@ declare module 'claude-code' {
       reader: number | null
       /** The reader's search: what is looked for, and which match is current. */
       readerSearch: { query: string; index: number }
+      /** The reader's first text row in view, from 0: the reader scrolls its own rows. */
+      readerOffset: number
       /** The conversation's trace, read from the receiver's folder after each turn. */
       trace: TraceState
       /** Why the last tracing switch failed, until the next one succeeds. */
