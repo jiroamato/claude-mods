@@ -19,13 +19,19 @@ A [Claude Code](https://code.claude.com) plugin from the
 A status bar above the prompt in the Claude desktop app's Code tab, its text in the
 app's own theme colours:
 
-![The desktop-statusline band above the prompt box: Opus 5.5, high effort, claude-mods | feat/desktop-statusline-context-breakdown with a dot for uncommitted changes, a context meter at 7%, $0.02, 22m 8s and an info button, with hairlines between each figure](docs/desktop-statusline-above-prompt.png)
+![The desktop-statusline band above the prompt box, its figures numbered 1 to 9: 1 Opus 5.5, 2 high, 3 claude-mods, 4 feat/desktop-statusline-context-breakdown, 5 a dot, 6 a context meter at 7%, 7 $0.02, 8 22m 8s, 9 an info button](docs/desktop-statusline-numbered.png)
 
-- **Model** in the Claude accent, with the session's reasoning **effort** beside it,
-  coloured from quiet (low) to warning and error tones (x-high, max).
-- **Folder** and **git branch**, with a dot when the working copy has uncommitted changes.
-- **Context meter**: a hollow rounded rectangle that fills as the context window does.
-- **Cost** so far and **elapsed** session time. Seconds are dropped past an hour.
+1. **Model**, in the Claude accent.
+2. **Effort**: the session's reasoning effort, coloured from quiet (low) to warning and
+   error tones (x-high, max).
+3. **Folder** the session works in.
+4. **Git branch**.
+5. **Uncommitted changes**: a dot when the working copy has them.
+6. **Context meter**: a hollow rounded rectangle that fills as the context window does,
+   and the share of it used.
+7. **Cost** so far.
+8. **Elapsed** session time. Seconds are dropped past an hour.
+9. **ⓘ**: opens the [Context details](#context-details) pane.
 
 ## Context details
 
