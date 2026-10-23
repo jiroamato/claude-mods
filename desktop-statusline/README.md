@@ -16,8 +16,8 @@ A [Claude Code](https://code.claude.com) plugin from the
 
 ![A Code session in the Claude desktop app with the status bar above the prompt. Clicking its ⓘ opens the Context details pane: built-in tools are removed and put back in the Tools tab, the system prompt is read section by section in the Prompt tab, the installed skills are listed in the Skills tab, and the Trace tab shows the session's request, expands it, and opens the whole trace in the browser](docs/demo.gif)
 
-A status bar above the prompt in the Claude desktop app's Code tab. It mirrors
-the figures a terminal status line shows, its text in the app's own theme colours:
+A status bar above the prompt in the Claude desktop app's Code tab, its text in the
+app's own theme colours:
 
 ![The desktop-statusline band above the prompt box: Opus 5.5, high effort, claude-mods | feat/desktop-statusline-context-breakdown with a dot for uncommitted changes, a context meter at 7%, $0.02, 22m 8s and an info button, with hairlines between each figure](docs/desktop-statusline-above-prompt.png)
 
