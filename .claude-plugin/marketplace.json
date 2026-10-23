@@ -14,7 +14,7 @@
       "name": "desktop-statusline",
       "source": "./desktop-statusline",
       "description": "Status bar above the prompt in the Claude desktop app: model, effort, folder, git branch, context meter, cost and elapsed time. Click the ⓘ at its end to remove built-in tools, read the system prompt as sent, and trace every request to the model.",
-      "version": "0.1.0",
+      "version": "0.1.1",
       "category": "productivity",
       "tags": [
         "status-line",
