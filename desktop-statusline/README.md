@@ -41,7 +41,8 @@ Context card leaves out.
 ![The Context details pane: its tabs, and the Tools tab's In context group with Remove beside each tool](docs/context-pane.png)
 
 - **Tools.** Every built-in tool and its size. **Remove** takes a tool out of the session
-  and adds it to `permissions.deny` in your user settings. **Put back** undoes both.
+  and adds it to `permissions.deny` in `~/.claude/settings.json`, or the settings in
+  `$CLAUDE_CONFIG_DIR`. **Put back** undoes both.
 - **Prompt.** The system prompt section by section, with sizes. With tracing on, it
   shows the prompt exactly as the last request sent it.
 - **Skills.** Every skill listing Claude sees, yours apart from the built-in ones.
