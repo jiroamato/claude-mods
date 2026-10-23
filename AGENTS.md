@@ -30,6 +30,7 @@ Read the matching file before you act:
   `folder.ts` opens the traces folder. `trace/` is the receiver Node runs for tracing, its browser
   pages, and the record code `hooks/trace.ts` shares. `package.json`, `install.mjs` and
   `pack-docs.mjs` are the npm installer, which `RELEASING.md` covers.
+- Code carries no comments: names, types and test names say what it does, so nothing drifts from it.
 - Checks, all of which CI runs on Ubuntu, macOS and Windows:
   `claude plugin validate --strict .`, `claude plugin validate --strict <plugin>`,
   `claude plugin test <plugin>`, `npx --yes prettier@3.9.10 --check .`. Type-check with

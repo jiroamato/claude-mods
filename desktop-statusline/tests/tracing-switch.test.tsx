@@ -27,10 +27,6 @@ const PANE = {
   },
 } as const
 
-/**
- * An engine with the user settings' text, the plugin's store, the process's
- * environment and this session's traces folder as given.
- */
 function switchEngine(
   on: On,
   start: {
@@ -101,7 +97,6 @@ function switchEngine(
   return state
 }
 
-/** Tracing's env with some values changed by hand. */
 const EDITED = {
   ...TRACE_ENV,
   CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH: '60000',
@@ -114,13 +109,11 @@ test('tracing is on while telemetry goes to the receiver, whatever else was chan
     'OTEL_LOGS_EXPORT_INTERVAL',
     'CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH',
   ])
-  // A name taken out differs too.
   const { OTEL_LOG_RAW_API_BODIES: _, ...without } = TRACE_ENV
   expect(isTraceOn({ env: without })).toBe(true)
   expect(differingNames({ env: without })).toEqual(['OTEL_LOG_RAW_API_BODIES'])
   expect(differingNames({ env: TRACE_ENV })).toEqual([])
 
-  // Any of the three that decide where telemetry goes, set otherwise, is off.
   for (const [key, value] of [
     ['CLAUDE_CODE_ENABLE_TELEMETRY', '0'],
     ['OTEL_LOGS_EXPORTER', 'otlp,console'],
@@ -143,7 +136,6 @@ test('off leaves a value changed by hand as it is, and on sets it back', () => {
   })
   expect(off.isLost).toBe(false)
 
-  // On while partly edited sets every value back, noting the edited ones.
   const on = editTraceEnv(JSON.stringify({ env: EDITED }), true, before)
   expect(JSON.parse(on.text).env).toEqual(TRACE_ENV)
   expect(on.before).toMatchObject({
@@ -157,8 +149,6 @@ test('off leaves a value changed by hand as it is, and on sets it back', () => {
 })
 
 test('a partly edited env reads as on, says what differs, and turns off', async ($, on) => {
-  // The person had their own interval before; tracing replaced it, then they
-  // changed it and the length by hand.
   const before = {
     ...Object.fromEntries(Object.keys(TRACE_ENV).map(key => [key, null])),
     OTEL_LOGS_EXPORT_INTERVAL: '5000',
@@ -181,7 +171,6 @@ test('a partly edited env reads as on, says what differs, and turns off', async 
   expect(note?.text).toMatch(
     /^ *OTEL_LOGS_EXPORT_INTERVAL +and +CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH +in your settings are not as tracing sets them, so requests may arrive later or be cut short\. Turning tracing off and on again sets them back\.$/,
   )
-  // Only the value tracing still holds in place of the person's is theirs to get back.
   const replaced = await pane.find({ type: 'Text', text: /^Tracing set its own values in place/ })
   expect(replaced?.text).toMatch(/your +OTEL_LOGS_EXPORTER +;/)
   expect(replaced?.text).not.toMatch(/OTEL_LOGS_EXPORT_INTERVAL/)
@@ -200,7 +189,6 @@ test('a partly edited env reads as on, says what differs, and turns off', async 
 })
 
 test('a session traced from its start whose folder was deleted does not say it started before', async ($, on) => {
-  // Telemetry pointed here as the process started, three turns, and an empty folder.
   switchEngine(on, { settings: { env: TRACE_ENV }, env: TRACE_ENV, turns: 3 })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -219,7 +207,6 @@ test('a session traced from its start whose folder was deleted does not say it s
 })
 
 test('a trace state an earlier version kept is read in this version’s shape', () => {
-  // What a version before `replaced` and `differing` wrote, still in the state after a reload.
   const kept = {
     status: 'on',
     items: [{ seq: 0 }],

@@ -1,11 +1,5 @@
 import type { SeenTool } from '../types'
 
-/**
- * A one-line summary of each built-in tool, and the size of its input schema in
- * characters, read off the request Claude Code 2.1.302 sends. The schema is not
- * visible to a plugin, so a tool's size is estimated from its live description
- * plus this. Tools missing here are summarised from their own description.
- */
 const CATALOG: Record<string, { summary: string; schemaChars?: number }> = {
   Agent: {
     summary: 'Launches a subagent to work on a task in its own context.',
@@ -57,34 +51,27 @@ const CATALOG: Record<string, { summary: string; schemaChars?: number }> = {
   Write: { summary: 'Writes a whole file to disk.', schemaChars: 367 },
 }
 
-/** Tools the panel never offers to remove: removing them breaks removal itself. */
 export const KEPT_TOOLS: readonly string[] = ['ToolSearch']
 
-/** The schema size assumed for a tool the catalog does not measure. */
 const DEFAULT_SCHEMA_CHARS = 600
-/** Characters per token, for schema JSON and English prose alike. */
 export const CHARS_PER_TOKEN = 3.6
 const SUMMARY_MAX = 90
 
-/** A bare built-in tool name, as a deny rule spells a whole tool (`NotebookEdit`). */
 function isBareToolName(rule: string): boolean {
   return /^[A-Z][A-Za-z0-9_]*$/.test(rule)
 }
 
-/** The first sentence of a description, cut to a line's length. */
 export function firstSentence(text: string, max = SUMMARY_MAX): string {
   const flat = text.replace(/\s+/g, ' ').trim()
   const sentence = /^(.+?[.!?])(\s|$)/.exec(flat)?.[1] ?? flat
 
   if (sentence.length <= max) return sentence
-  // Cut at the last whole word, and before a parenthesis or dash it opens.
   const cut = sentence.slice(0, max - 1)
   const word = cut.slice(0, Math.max(cut.lastIndexOf(' '), max / 2)).replace(/[\s(\[{,;:–-]+$/, '')
 
   return `${word}…`
 }
 
-/** The tool's one-liner: the catalog's, else the first sentence of its description. */
 export function summarize(name: string, description: string | undefined): string {
   const known = CATALOG[name]?.summary
   if (known) return known
@@ -94,7 +81,6 @@ export function summarize(name: string, description: string | undefined): string
   return sentence === '' ? 'A built-in tool.' : sentence
 }
 
-/** A rough size of the tool's schema in the request: name, description and input schema. */
 function estimateTokens(name: string, description: string | undefined): number {
   const schema = CATALOG[name]?.schemaChars ?? DEFAULT_SCHEMA_CHARS
   const chars = name.length + (description?.length ?? 0) + schema + 40
@@ -102,17 +88,10 @@ function estimateTokens(name: string, description: string | undefined): number {
   return Math.round(chars / CHARS_PER_TOKEN)
 }
 
-/** Where a tool stands, as the panel shows it. */
 export type ToolStatus = 'in' | 'deferred' | 'removed' | 'back-next-session'
 
 export type ToolRow = { name: string; summary: string; tokens: number; status: ToolStatus }
 
-/**
- * The panel's tool rows: every built-in tool of the session, then any tool the
- * session started without because the settings deny it, or that was put back.
- * `known` holds the descriptions of tools seen in earlier sessions, so a tool
- * removed then still has its one-liner.
- */
 export function toolRows(
   seen: Readonly<Record<string, SeenTool>>,
   known: Readonly<Record<string, string>>,
@@ -126,7 +105,6 @@ export function toolRows(
     rows.push({
       name,
       summary: summarize(name, tool.description),
-      // A tool loaded on demand costs nothing until loaded: its size is what it would take.
       tokens: estimateTokens(name, tool.description),
       status: isRemoved ? 'removed' : tool.isDeferred ? 'deferred' : 'in',
     })
@@ -155,7 +133,6 @@ export function toolRows(
   )
 }
 
-/** The bare tool names a settings object denies (`permissions.deny`). */
 export function deniedTools(settings: unknown): string[] {
   const deny = (settings as { permissions?: { deny?: unknown } } | null)?.permissions?.deny
   if (!Array.isArray(deny)) return []
@@ -163,14 +140,12 @@ export function deniedTools(settings: unknown): string[] {
   return deny.filter((rule): rule is string => typeof rule === 'string' && isBareToolName(rule))
 }
 
-/** Why the settings file was left untouched: it holds something the panel will not rewrite. */
 export class SettingsShapeError extends Error {}
 
 export function isPlainObject(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
-/** The settings a file holds: `{}` when it is empty; a byte-order mark is ignored. */
 export function parseSettings(text: string): Record<string, unknown> {
   const body = text.replace(/^\uFEFF/, '')
   if (body.trim() === '') return {}
@@ -189,12 +164,6 @@ export function parseSettings(text: string): Record<string, unknown> {
   return parsed
 }
 
-/**
- * The settings file's text with `name` added to or dropped from
- * `permissions.deny`, everything else kept, and the file's byte-order mark,
- * line endings and indentation too. A `permissions` that is not an object, or
- * a `deny` that is not a list, is refused rather than rewritten.
- */
 export function editDeny(text: string, name: string, shouldDeny: boolean): string {
   const settings = parseSettings(text)
   const permissions = settings.permissions ?? {}
@@ -217,7 +186,6 @@ export function editDeny(text: string, name: string, shouldDeny: boolean): strin
   return writeSettings(text, settings)
 }
 
-/** `settings` as the file's text, keeping the file's byte-order mark, line endings and indentation. */
 export function writeSettings(text: string, settings: Record<string, unknown>): string {
   const bom = text.startsWith('\uFEFF') ? '\uFEFF' : ''
   const eol = text.includes('\r\n') ? '\r\n' : '\n'

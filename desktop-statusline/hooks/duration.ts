@@ -1,4 +1,3 @@
-/** A running time as the band writes it: `42s`, `8m 28s`, and past an hour `2h 5m`. */
 export function formatDuration(ms: number): string {
   const seconds = Math.max(0, Math.floor(ms / 1000))
   if (seconds < 60) return `${seconds}s`

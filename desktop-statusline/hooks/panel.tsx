@@ -21,31 +21,20 @@ import type { TabProps } from './tabs'
 import type { ToolRow } from './tools'
 import { MAX_MATCHES, isMainSource, sourceLabel, viewLink } from './trace'
 
-/** The pane the band's ⓘ opens. */
 export const PANE_ID = 'context-details'
-/** The ID earlier versions opened the pane under. */
 export const OLD_PANE_ID = 'context-map'
 export const PANE_TITLE = 'Context details'
 
 type Ui = ElementTable<'desktop'>
 
-// Sizes in cells: across in character widths, down in rows.
 const TOKENS_COLUMNS = 7
-// A border no one sees: only a Box with a border has rounded corners.
 const CLEAR = '#00000000'
-// A one-pixel rule between the pieces a tab lists, in the border's own faint colour.
 const HAIRLINE = 0.05
 const RULE = 'promptBorderShimmer'
-// The system prompt /context counts beyond the sections, below which the
-// difference is the sections' estimate erring rather than text left unread.
 const UNREAD_MIN_TOKENS = 100
-// One drawing holds at most 100000 characters of code, so long text is read a
-// page at a time, each well short of that.
 const PAGE_CHARS = 40_000
-// A page ends at the last line break this close to its end, so it never cuts a line.
 const PAGE_SLACK = 4_000
 
-/** The tabs in their order, each with its label and the /context row it details. */
 const TABS: readonly { id: PaneTab; label: string; row?: string }[] = [
   { id: 'tools', label: 'Tools', row: 'System tools' },
   { id: 'prompt', label: 'Prompt', row: 'System prompt' },
@@ -66,15 +55,10 @@ function rowTokens(snapshot: ContextSnapshot | null, name: string | undefined): 
   return row ? row.tokens : null
 }
 
-/**
- * The tab strip: each tab's label and, where /context counts it, its tokens.
- * A region of its own (./tabs.tsx), so the whole pill of a tab takes the press.
- */
 function Tabs(props: ContextPaneProps) {
   const { Box, Client } = props.ui
 
   return (
-    // A recessed track, each tab a region of its own on it (./tabs.tsx).
     <Box
       flexDirection="row"
       columnGap="xs"
@@ -101,7 +85,6 @@ function Tabs(props: ContextPaneProps) {
           isOpen: props.tab === tab.id,
         }
 
-        // Each tab an equal share of the strip, whatever its label.
         return (
           <Client
             key={`${TAB_PREFIX}${tab.id}`}
@@ -116,10 +99,8 @@ function Tabs(props: ContextPaneProps) {
   )
 }
 
-// The strip's track, recessed under its tabs.
 const TAB_TRACK = '#0000004d'
 
-/** Where each page of `text` starts: about PAGE_CHARS apart, each at a line's start. */
 export function pageStarts(text: string): number[] {
   const starts = [0]
   while (text.length - starts.at(-1)! > PAGE_CHARS) {
@@ -132,7 +113,6 @@ export function pageStarts(text: string): number[] {
   return starts
 }
 
-/** Long text, a page at a time, with the way to the pages before and after. */
 function Paged(props: { ui: Ui; text: string; page: number; onPage: (page: number) => void }) {
   const { Box, Button, Code, Text } = props.ui
   const starts = pageStarts(props.text)
@@ -141,7 +121,6 @@ function Paged(props: { ui: Ui; text: string; page: number; onPage: (page: numbe
   const to = starts[page + 1] ?? props.text.length
   const code = <Code source={props.text.slice(from, to)} wrap="wrap" />
   if (starts.length === 1) return code
-  // Above the page and again under it; each Button keyed by where it sits.
   const pager = (at: 'top' | 'bottom') => (
     <Box flexDirection="row" alignItems="center" columnGap={1}>
       <Box flexGrow={1} flexShrink={1} minWidth={0}>
@@ -175,14 +154,9 @@ function Paged(props: { ui: Ui; text: string; page: number; onPage: (page: numbe
   )
 }
 
-/** How much of a request its open row shows: the reader shows the rest. */
 const PREVIEW_ROWS = 12
 const PREVIEW_CHARS = 1_500
 
-/**
- * An open request's opening: a few lines of what it added and what came
- * back, enough to tell it apart. Expand shows all of it.
- */
 function RequestText(props: { ui: Ui; text: string | null }) {
   const { Box, Code, Text } = props.ui
   if (props.text === null) return <Text color="subtle">This request could not be read.</Text>
@@ -206,25 +180,12 @@ function RequestText(props: { ui: Ui; text: string | null }) {
   )
 }
 
-/** The key prefix of a row that opens, which the hooks module hears it post under. */
 export const DISCLOSURE_PREFIX = 'disclose-'
 
-/**
- * A row that opens what is under it: the chevron, the label, the figure at the
- * far end, the whole row lit and pressed (./disclosure.tsx).
- */
 function DisclosureRow(props: { ui: Ui; row: DisclosureProps }) {
   const { Box, Client, Svg } = props.ui
 
   return (
-    // The desktop's own chevron, the icon its rows draw, under the row's
-    // region: a region draws no icon, and an icon over it would take the press.
-    // The region, laid over the icon with no background of its own, lets it
-    // show and takes the press on the whole row.
-    // Set out into its card's padding by the row's own, so the chevron lines up
-    // with the card's heading and the figure with its figures, as the lit row
-    // runs past them both.
-    // The chevron sits by the row's first line, whatever lines the region draws under it.
     <Box
       flexDirection="column"
       height={disclosureRows(props.row)}
@@ -252,8 +213,6 @@ function DisclosureRow(props: { ui: Ui; row: DisclosureProps }) {
   )
 }
 
-// The desktop's chevrons: Phosphor's CaretRight and CaretDown (regular), as
-// its rows that open draw them, at its `xs` icon size in its muted text colour.
 const CARET_SIZE = 12
 const CARET_COLOR = '#898781'
 const caret = (path: string) =>
@@ -265,10 +224,8 @@ const CARET_RIGHT = caret(
 const CARET_DOWN = caret(
   'M213.66,101.66l-80,80a8,8,0,0,1-11.32,0l-80-80A8,8,0,0,1,53.66,90.34L128,164.69l74.34-74.35a8,8,0,0,1,11.32,11.32Z',
 )
-// The row region's own padding, so the icon sits where its room is kept.
 const CARET_INSET = 1
 
-/** A tab's heading: what it lists, and its tokens and share as /context counts them. */
 function Heading(props: { ui: Ui; title: string; snapshot: ContextSnapshot | null; row: string }) {
   const { Box, Text } = props.ui
   const tokens = rowTokens(props.snapshot, props.row)
@@ -289,7 +246,6 @@ function Heading(props: { ui: Ui; title: string; snapshot: ContextSnapshot | nul
   )
 }
 
-/** Right-aligned figures in a column of fixed width, so the rows line up. */
 function Figure(props: { ui: Ui; text: string; dim?: boolean }) {
   const { Box, Text } = props.ui
 
@@ -306,10 +262,8 @@ function sumTokens(items: readonly { tokens: number }[]): number {
   return items.reduce((sum, one) => sum + one.tokens, 0)
 }
 
-/** What a tab says before it lists its pieces: small and muted, so the list leads. */
 function Intro(props: { ui: Ui; text: string }) {
   const { Text } = props.ui
-  // A word in backticks reads as inline code, as Markdown draws it.
   const parts = props.text.split(/(`[^`]+`)/).filter(part => part !== '')
 
   return (
@@ -327,13 +281,11 @@ function Intro(props: { ui: Ui; text: string }) {
   )
 }
 
-/** A recommendation, set apart from a tab's intro by an info icon. */
 function Tip(props: { ui: Ui; text: string }) {
   const { Box, Svg, Text } = props.ui
 
   return (
     <Box flexDirection="row" columnGap={1} alignItems="flex-start">
-      {/* As tall as the footnote's line, so the icon sits by its first line. */}
       <Box height={1} flexShrink={0} justifyContent="center">
         <Svg source={INFO_ICON} alt="tip" width={CARET_SIZE} height={CARET_SIZE} />
       </Box>
@@ -346,25 +298,16 @@ function Tip(props: { ui: Ui; text: string }) {
   )
 }
 
-// Phosphor's Info (regular), in the chevrons' size and colour.
 const INFO_ICON = caret(
   'M128,24A104,104,0,1,0,232,128,104.11,104.11,0,0,0,128,24Zm0,192a88,88,0,1,1,88-88A88.1,88.1,0,0,1,128,216Zm16-40a8,8,0,0,1-8,8,16,16,0,0,1-16-16V128a8,8,0,0,1,0-16,16,16,0,0,1,16,16v40A8,8,0,0,1,144,176ZM112,84a12,12,0,1,1,12,12A12,12,0,0,1,112,84Z',
 )
 
-// Inline code's ground: the raised surface the desktop sets code on.
 const INLINE_CODE = 'bashMessageBackgroundColor'
 
-/** The key prefix of a group that opens and closes, as the hooks module keeps it closed. */
 export const GROUP_PREFIX = 'group-'
 
-/** The prefix of a traced request's key in the expanded list: `trace-` and its number. */
 export const TRACE_ITEM_PREFIX = 'trace-'
 
-/**
- * A group of what a tab lists, set apart as a card: its name, then how many
- * it holds and their size, then the list. Given `isOpen`, its heading is a
- * row that opens and closes the list.
- */
 function Group(props: {
   ui: Ui
   id: string
@@ -372,11 +315,8 @@ function Group(props: {
   count: number
   noun: string
   tokens?: number
-  /** Said after the size, as `when loaded`. */
   tokensNote?: string
-  /** A last figure, as a cost. */
   extra?: string
-  /** Whether the list shows, for a group that opens and closes. */
   isOpen?: boolean
   children: JSX.Element
 }) {
@@ -426,7 +366,6 @@ function Group(props: {
   )
 }
 
-/** A tab's groups, stacked under its intro with room between each. */
 function Groups(props: { ui: Ui; children: JSX.Element[] }) {
   const { Box } = props.ui
 
@@ -437,7 +376,6 @@ function Groups(props: { ui: Ui; children: JSX.Element[] }) {
   )
 }
 
-/** The pieces a tab lists, a faint rule between each so one reads apart from the next. */
 function Ruled(props: { ui: Ui; children: JSX.Element[] }) {
   const { Box } = props.ui
 
@@ -452,19 +390,12 @@ function Ruled(props: { ui: Ui; children: JSX.Element[] }) {
   )
 }
 
-/** A name with a line under it and its tokens, as a tab lists its pieces. */
-function ItemLine(props: {
-  ui: Ui
-  item: ContextItem
-  /** A line under the name in place of the item's detail, wrapped rather than cut. */
-  note?: string
-}) {
+function ItemLine(props: { ui: Ui; item: ContextItem; note?: string }) {
   const { Box, Text } = props.ui
   const item = props.item
   const detail = props.note ?? item.detail
 
   return (
-    // The figure sits on the name's line; a long line under it never pushes past the figures.
     <Box flexDirection="row" alignItems="flex-start" columnGap={1}>
       <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
         <Text color="text" wrap="truncate-end">
@@ -481,85 +412,50 @@ function ItemLine(props: {
   )
 }
 
-/** Props the pane is drawn from. */
 export type ContextPaneProps = {
   ui: Ui
   snapshot: ContextSnapshot | null
   tools: ToolRow[]
-  /** The tab that is open. */
   tab: PaneTab
-  /** Keys of the prompt sections and trace requests that are open. */
   expanded: readonly string[]
-  /** Keys of the groups that are closed: a group is open until closed. */
   collapsed: readonly string[]
-  /** Why the last Remove or Put back failed, if it did. */
   error: string | null
-  /** The conversation's trace, from the trace receiver. */
   trace: TraceState
-  /** The settings file tracing writes and the folder its traces are kept in. */
   places: TracePlaces | null
-  /** Why the last tracing switch failed, if it did. */
   traceError: string | null
-  /** Why the traces folder did not open. */
   folderError: string | null
-  /** The open request of the Trace tab, as text; null when none is open. */
   traceText: string | null
   onToggle: (name: string, isRemoved: boolean) => void
   onExpand: (key: string) => void
   onTracing: (isOn: boolean) => void
-  /** Opens the traces folder in the system's file manager. */
   onShowTraces: () => void
-  /** The page of the open prompt section's text. */
   page: number
   onPage: (page: number) => void
-  /** The request read whole, as the rows in view; null while the tabs show. */
   reader: ReaderView | null
   onRead: (seq: number) => void
   onSearch: (query: string) => void
   onStep: (by: number) => void
 }
 
-/** What the reader draws: its text's props (./text.tsx), and the search. */
 export type ReaderView = {
   title: string
   detail: string
-  /** The rows around the view, the row first in view, the view's height and the request's length. */
   text: TextProps
-  /** The search: what is looked for, how many matches, and the current one. */
   search: { query: string; index: number; count: number }
 }
 
-/** The reader's top, in rows: its line back and its search. */
 const READER_TOP_ROWS = 3
-/** The frame round the reader's text, in rows: its border's top and bottom. */
 const READER_FRAME_ROWS = 2
-/**
- * The columns the reader takes beside its text's rows: the pane's padding
- * and the frame's border, a column each side, and the scrollbar with the
- * gap before it (./text.tsx).
- */
 export const READER_SIDE_COLUMNS = 7
 
-/** How many of the text's rows the reader shows in its frame, in a window `bodyRows` high. */
 export function readerVisibleRows(bodyRows: number): number {
   return Math.max(1, bodyRows - READER_TOP_ROWS - READER_FRAME_ROWS)
 }
 
-/** A count as the pane writes figures: `4,493`. */
 function formatCount(value: number): string {
   return value.toLocaleString('en-US')
 }
 
-/**
- * A request whole, read in the pane: its top (the way back, the search)
- * stays, and under it the rows that fit the window, in a region
- * of their own (./text.tsx) that moves them by the keys once clicked and
- * glides to each new place, with a scrollbar of the reader's own beside them
- * in that region, to press or drag. The whole is never taller than the
- * window, so the pane's own window has nothing to scroll and nothing in it
- * ever moves: the wheel does nothing here, by design. A drawing holds three
- * screens of text at most, for the glide to cross.
- */
 function Reader(props: {
   ui: Ui
   view: ReaderView
@@ -576,7 +472,6 @@ function Reader(props: {
       : search.count === 0
         ? 'No match'
         : `${search.index + 1} of ${formatCount(search.count)}${search.count >= MAX_MATCHES ? '+' : ''}`
-  // Where in the request the rows in view are, in figures beside the scrollbar's thumb.
   const text = view.text
   const inView = Math.min(text.page, text.total - text.first)
   const position = `rows ${formatCount(text.first + 1)} to ${formatCount(text.first + inView)} of ${formatCount(text.total)}`
@@ -587,10 +482,6 @@ function Reader(props: {
         <Client key={READER_KEY} module="./reader.tsx" props={bar} width="100%" height={1} />
         <Box height={2} flexShrink={0} flexDirection="row" alignItems="center" columnGap={1}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
-            {/* No `value`: the field keeps what is typed. Drawn with one, each
-                keystroke's redraw sets the field back to the state's text, and
-                a key pressed meanwhile is lost. The field is fresh at each
-                opening, as the reader is drawn anew, and the state starts empty. */}
             <Input
               key="reader-search"
               placeholder="Search this request"
@@ -599,7 +490,6 @@ function Reader(props: {
               onSubmit={() => props.onStep(1)}
             />
           </Box>
-          {/* Where the rows are gives way before the field, cut short in a narrow pane. */}
           <Box flexShrink={1} minWidth={0}>
             <Text color="subtle" size="footnote" tabular wrap="truncate-end">
               {position}
@@ -620,9 +510,6 @@ function Reader(props: {
           )}
         </Box>
       </Box>
-      {/* The text with the reader's own scrollbar beside it, one region (./text.tsx),
-          framed as the element it is: the pane's scrollbar never shows here, as the
-          reader fits its window. */}
       <Box borderStyle="round" height={text.page + READER_FRAME_ROWS} flexShrink={0}>
         <Client
           key={READER_TEXT_KEY}
@@ -636,14 +523,12 @@ function Reader(props: {
   )
 }
 
-/** The key of the reader's top line, which the hooks module hears it post under. */
 export const READER_KEY = 'reader'
 
 const STATUS_NOTE: Record<ToolRow['status'], string> = {
   in: '',
   deferred: '',
   removed: 'removed',
-  // Its group says so.
   'back-next-session': '',
 }
 
@@ -659,7 +544,6 @@ function ToolLines(props: ContextPaneProps & { rows: ToolRow[] }) {
       return (
         <Box key={`tool-${tool.name}`} flexDirection="row" alignItems="center" columnGap={1}>
           <Box flexDirection="column" flexGrow={1} flexShrink={1} minWidth={0}>
-            {/* In a narrow pane the note drops under the name whole, rather than a word a line. */}
             <Box flexDirection="row" flexWrap="wrap" columnGap={1}>
               <Text color={isRemoved ? 'inactive' : 'text'} bold strikethrough={isRemoved}>
                 {tool.name}
@@ -685,12 +569,6 @@ function ToolLines(props: ContextPaneProps & { rows: ToolRow[] }) {
   })
 }
 
-/**
- * The Tools tab: the built-in tools in the window, loaded on demand, put back
- * for the next session, and removed. Each group's size is the sum of its tools'
- * estimates: /context's own deferred row counts a tool removed this session
- * too, which is deferred as far as the engine knows (./register.tsx).
- */
 function ToolsTab(props: ContextPaneProps) {
   const { Box } = props.ui
   const byStatus = (status: ToolRow['status']) => props.tools.filter(one => one.status === status)
@@ -718,8 +596,6 @@ function ToolsTab(props: ContextPaneProps) {
       })}
       {Tip({
         ui: props.ui,
-        // The tools are the start of what the prompt cache keeps, so a change
-        // to them leaves nothing of it to read.
         text:
           'Changing tools at the start of a session is recommended. A mid-session change ' +
           'invalidates the prompt cache, so the next request costs more.',
@@ -734,7 +610,6 @@ function ToolsTab(props: ContextPaneProps) {
             isOpen: !props.collapsed.includes(`${GROUP_PREFIX}${slug(group.label)}`),
             count: group.rows.length,
             noun: 'tool',
-            // What loads on demand is out of the window: its size is what it would take.
             tokens: sumTokens(group.rows),
             tokensNote: group.note,
             children: ToolLines({ ...props, rows: group.rows }),
@@ -745,7 +620,6 @@ function ToolsTab(props: ContextPaneProps) {
   )
 }
 
-/** The Prompt tab: the system prompt section by section, each opening to its text. */
 function PromptTab(props: ContextPaneProps) {
   const { Box } = props.ui
   const sent = props.trace.prompt
@@ -807,7 +681,6 @@ function PromptTab(props: ContextPaneProps) {
               children: Ruled({ ui: props.ui, children: group.sections.map(section) }),
             }),
           ),
-          // What /context counts that no plugin can read, so the groups add up to the row.
           ...(unread >= UNREAD_MIN_TOKENS
             ? [
                 Group({
@@ -839,10 +712,6 @@ const SKILL_GROUPS: readonly { origin: SkillOrigin; label: string }[] = [
   { origin: 'anthropic', label: 'Anthropic skills' },
 ]
 
-/**
- * The Skills tab: each skill's listing as the model sees it, the ones the
- * person added apart from the ones Claude Code and the app bring.
- */
 function SkillsTab(props: ContextPaneProps) {
   const { Box } = props.ui
   const skills = props.snapshot?.skills ?? []
@@ -879,7 +748,6 @@ function SkillsTab(props: ContextPaneProps) {
                 <Box key={`skill-${skill.name}`} flexDirection="column">
                   {ItemLine({
                     ui: props.ui,
-                    // Anthropic's are named under one prefix; their group says so.
                     item: {
                       name: skill.name.replace(/^anthropic-skills:/, ''),
                       tokens: skill.tokens,
@@ -897,12 +765,10 @@ function SkillsTab(props: ContextPaneProps) {
   )
 }
 
-/** A path as the person's system writes it: backslashes throughout on Windows. */
 function shownPath(path: string): string {
   return path.includes('\\') ? path.replace(/\//g, '\\') : path
 }
 
-/** What turning tracing on changes, and where its traces are kept. */
 function tracingNotes(places: TracePlaces | null): string[] {
   const settings = places ? `\`${shownPath(places.settings)}\`` : 'your user settings'
   const traces = places ? `\`${shownPath(places.traces)}\`` : 'your home folder'
@@ -920,7 +786,6 @@ function tracingNotes(places: TracePlaces | null): string[] {
   ]
 }
 
-/** What tracing holds in place of the person's own `env` values, and that off puts them back. */
 function replacedNote(names: string[]): string {
   const joined = joinWords(
     names.map(name => `\`${name}\``),
@@ -934,7 +799,6 @@ function replacedNote(names: string[]): string {
   )
 }
 
-/** What each of tracing's names, set otherwise, does to the requests recorded. */
 const DIFFERING_EFFECT: Readonly<Record<string, string>> = {
   CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH: 'be cut short',
   OTEL_LOGS_EXPORT_INTERVAL: 'arrive later',
@@ -942,7 +806,6 @@ const DIFFERING_EFFECT: Readonly<Record<string, string>> = {
   OTEL_EXPORTER_OTLP_LOGS_PROTOCOL: 'not be recorded',
 }
 
-/** Which of tracing's values the settings hold otherwise while it is on, and how to set them back. */
 function differingNote(names: string[]): string {
   const effects = [...new Set(names.flatMap(name => DIFFERING_EFFECT[name] ?? []))]
   const effect = effects.length === 0 ? '' : `, so requests may ${joinWords(effects, 'or')}`
@@ -958,12 +821,10 @@ function differingNote(names: string[]): string {
   )
 }
 
-/** Words as a list in a sentence: `a`, `a and b`, `a, b and c`. */
 function joinWords(words: string[], last: string): string {
   return words.length === 1 ? words[0]! : `${words.slice(0, -1).join(', ')} ${last} ${words.at(-1)}`
 }
 
-/** Where traces are kept, said under the list: the one folder, to find or delete. */
 function keptNote(places: TracePlaces | null): string {
   return places
     ? `Kept in \`${shownPath(places.traces)}\` until you delete them, one folder per session.`
@@ -989,7 +850,6 @@ const TRACE_NOTE: Record<Exclude<TraceState['status'], 'on' | 'off'>, string> = 
     'on your PATH. Install Node.js, then start a new session.',
 }
 
-/** A request's figures: tokens read and written, cost, time. */
 function usageLine(item: TraceItem): string {
   const usage = item.usage
   if (!usage) return 'waiting for its answer'
@@ -1008,7 +868,6 @@ function clock(at: string): string {
   return match?.[1] ?? ''
 }
 
-/** The Trace tab: every request of the conversation as sent, each opening onto its text. */
 function TraceTab(props: ContextPaneProps) {
   const { Box, Button, Link, Text } = props.ui
   const traced = props.trace
@@ -1024,7 +883,6 @@ function TraceTab(props: ContextPaneProps) {
     Intro({ ui: props.ui, text: differingNote(traced.differing) })
   const switchButton = (
     <Box flexDirection="row" columnGap={1}>
-      {/* Where the traces are, in Explorer, Finder or the desktop's file manager. */}
       {props.places && (
         <Button
           key="trace-folder"
@@ -1080,7 +938,6 @@ function TraceTab(props: ContextPaneProps) {
       {traced.status === 'on' && differing}
       {traced.status === 'on' && replaced}
       {traced.status === 'on' && (
-        // The tab's actions on one line: the whole trace, and the switch at the far end.
         <Box flexDirection="row" alignItems="center" columnGap={2}>
           <Box flexGrow={1} flexShrink={1} minWidth={0}>
             {traced.view && items.length > 0 && (
@@ -1128,12 +985,10 @@ function TraceTab(props: ContextPaneProps) {
           ui: props.ui,
           row: {
             id,
-            // Its group names the main loop; a side request says where it came from.
             label: isMain ? `#${item.seq + 1}` : `#${item.seq + 1} ${sourceLabel(item.source)}`,
             tag: clock(item.at),
             figure: usageLine(item),
             isOpen,
-            // What it added and what came back, lit with the row as one pill.
             lines: [
               `+ ${item.added.join(', ') || 'nothing new'}`,
               ...(item.reply === null ? [] : [`→ ${item.reply}`]),
@@ -1150,8 +1005,6 @@ function TraceTab(props: ContextPaneProps) {
               onPress={() => props.onRead(item.seq)}
             />
             {traced.view && (
-              // A pill beside Expand, quieter: only a Link opens the browser,
-              // so the Link is set on a pill of its own.
               <Box
                 borderStyle="round"
                 borderColor={CLEAR}
@@ -1171,17 +1024,11 @@ function TraceTab(props: ContextPaneProps) {
   }
 }
 
-// The main loop's requests, then the ones made beside it (titles, subagents, compaction).
 const TRACE_GROUPS: readonly { isMain: boolean; label: string }[] = [
   { isMain: true, label: 'Conversation' },
   { isMain: false, label: 'Side requests' },
 ]
 
-/**
- * The pane: a tab for each thing the desktop's own Context card cannot show:
- * the built-in tools (which can be removed), the system prompt as sent, the
- * skills' listings and the conversation's trace.
- */
 export function ContextPane(props: ContextPaneProps) {
   const { Box, Text } = props.ui
   if (props.reader) {
@@ -1210,6 +1057,5 @@ export function ContextPane(props: ContextPaneProps) {
   )
 }
 
-// The browser's pill: light grey, set apart from Expand's white.
 const BROWSER_PILL = '#c2c0b6'
 const BROWSER_PILL_TEXT = '#1f1e1d'
