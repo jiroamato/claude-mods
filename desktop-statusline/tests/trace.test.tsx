@@ -1,0 +1,2207 @@
+import { expect, mock, test } from 'claude-code/testing'
+import type { Mounted, TestBody } from 'claude-code/testing'
+import type { On } from 'claude-code'
+
+import { FOLDER_VARIABLE, SHOW_FOLDER_SCRIPT, encodedCommand } from '../hooks/folder'
+import { pageStarts } from '../hooks/panel'
+import {
+  RECEIVER_HEALTH,
+  RECEIVER_NAME,
+  editTraceEnv,
+  replacedNames,
+  findMatches,
+  fromHead,
+  isTraceOn,
+  promptRecord as tracePromptRecord,
+  sentPrompt,
+  summarize,
+  TRACE_ENV,
+  wrapRows,
+} from '../hooks/trace'
+import type { TraceRecord } from '../hooks/trace'
+import { HEAD_AFTER_BYTES, HEALTH, logRecords, TraceStore, withBilling } from '../trace/store.mjs'
+import { fullMessages, promptRecord, requestPage, sessionPage } from '../trace/view.mjs'
+
+const SESSION = 'session-1'
+
+function requestBody(messages: unknown[], system = 'You are Claude Code.') {
+  return JSON.stringify({
+    model: 'claude-opus-5-5',
+    system: [
+      { type: 'text', text: 'x-anthropic-billing-header: cc_version=1' },
+      { type: 'text', text: system },
+    ],
+    tools: [{ name: 'Bash' }],
+    messages,
+  })
+}
+
+function record(name: string, extra: Record<string, unknown>) {
+  return { 'event.name': name, 'session.id': SESSION, 'event.timestamp': 'T12:00:01Z', ...extra }
+}
+
+test('the store keeps each request once: what it added, its usage and its answer', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const first = [{ role: 'user', content: 'hello' }]
+  const second = [
+    ...first,
+    { role: 'assistant', content: [{ type: 'text', text: 'hi' }] },
+    { role: 'user', content: 'list the files' },
+  ]
+  for (const one of [
+    record('api_request_body', {
+      body: requestBody(first),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+    record('api_request', {
+      query_source: 'sdk',
+      input_tokens: 5,
+      output_tokens: 7,
+      cost_usd: 0.01,
+    }),
+    record('api_response_body', {
+      request_body_id: 'b1',
+      body: JSON.stringify({ content: [{ type: 'text', text: 'hi' }], stop_reason: 'end_turn' }),
+    }),
+    record('api_request_body', {
+      body: requestBody(second),
+      query_source: 'sdk',
+      request_body_id: 'b2',
+    }),
+    record('tool_result', { tool_name: 'Bash' }),
+  ]) {
+    store.take(one)
+  }
+
+  const names = Object.keys(files).sort()
+  expect(names.filter(name => name.includes('/system-'))).toHaveLength(1)
+  expect(names.filter(name => name.includes('/tools-'))).toHaveLength(1)
+  const one = JSON.parse(files[`${SESSION}/000000.json`]!) as TraceRecord
+  expect(one).toMatchObject({ seq: 0, source: 'sdk', from: 0, messageCount: 1 })
+  expect(one.usage).toMatchObject({ input: 5, output: 7, costUsd: 0.01 })
+  expect(one.response).toMatchObject({ stop_reason: 'end_turn' })
+  const two = JSON.parse(files[`${SESSION}/000001.json`]!) as TraceRecord
+  expect(two).toMatchObject({ seq: 1, from: 2, messageCount: 3, usage: null, response: null })
+  expect(two.added).toEqual([{ role: 'user', content: 'list the files' }])
+})
+
+test('usage lands on its own request by the API request id, whichever comes first', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const kept = (seq: number) =>
+    JSON.parse(files[`${SESSION}/${String(seq).padStart(6, '0')}.json`]!) as TraceRecord
+  const answer = (bodyId: string, requestId: string) =>
+    record('api_response_body', {
+      request_body_id: bodyId,
+      request_id: requestId,
+      body: JSON.stringify({ content: [], stop_reason: 'end_turn' }),
+    })
+  const usage = (requestId: string, input: number) =>
+    record('api_request', { query_source: 'sdk', request_id: requestId, input_tokens: input })
+  for (const one of [
+    record('api_request_body', {
+      body: requestBody([]),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+    record('api_request_body', {
+      body: requestBody([]),
+      query_source: 'sdk',
+      request_body_id: 'b2',
+    }),
+    answer('b2', 'req_2'),
+    usage('req_2', 20),
+    record('api_request_body', {
+      body: requestBody([]),
+      query_source: 'sdk',
+      request_body_id: 'b3',
+    }),
+    usage('req_3', 30),
+    answer('b3', 'req_3'),
+  ]) {
+    store.take(one)
+  }
+
+  expect(kept(0).usage).toBeNull()
+  expect(kept(1).usage).toMatchObject({ input: 20 })
+  expect(kept(2).usage).toMatchObject({ input: 30 })
+})
+
+test('a body cut short is kept as a request that could not be read', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const body = '{"model":"claude-opus-5-5","messages":[{"role":"user","content":"a lo'
+  store.take(record('api_request_body', { body, query_source: 'sdk', request_body_id: 'b1' }))
+  const kept = JSON.parse(files[`${SESSION}/000000.json`]!) as TraceRecord
+  expect(kept).toMatchObject({ seq: 0, source: 'sdk', unreadable: body.length, added: [] })
+  expect(summarize(kept).added).toEqual(['body too large to record'])
+})
+
+test('a body Claude Code withheld is kept as one not recorded', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const body = '{"not_recorded":"<not recorded: extract_memories>"}'
+  store.take(
+    record('api_request_body', {
+      body,
+      body_withheld: true,
+      query_source: 'extract_memories',
+      request_body_id: 'b1',
+    }),
+  )
+  const kept = JSON.parse(files[`${SESSION}/000000.json`]!) as TraceRecord
+  expect(kept).toMatchObject({ seq: 0, unreadable: body.length, withheld: true, added: [] })
+  expect(summarize(kept).added).toEqual(['body not recorded by Claude Code'])
+})
+
+test('a prompt or tool list deleted from the folder is written again when next sent', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore(
+    (name: string, text: string) => {
+      files[name] = text
+    },
+    () => 0,
+    (name: string) => name in files,
+  )
+  store.take(record('api_request_body', { body: requestBody([]), query_source: 'sdk' }))
+  for (const name of Object.keys(files)) delete files[name]
+  store.take(record('api_request_body', { body: requestBody([]), query_source: 'sdk' }))
+
+  expect(Object.keys(files).filter(name => /\/(system|tools)-/.test(name))).toHaveLength(2)
+})
+
+test('the receiver and the plugin agree on the receiver’s health text', () => {
+  expect(RECEIVER_HEALTH).toBe(HEALTH)
+  expect(HEALTH.startsWith(RECEIVER_NAME)).toBe(true)
+})
+
+test('a restarted store goes on numbering where the session left off', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore(
+    (name: string, text: string) => {
+      files[name] = text
+    },
+    () => 12,
+  )
+  store.take(record('api_request_body', { body: requestBody([]), query_source: 'sdk' }))
+  expect(Object.keys(files)).toContain(`${SESSION}/000012.json`)
+})
+
+test('an OTLP/JSON payload reads as each record’s attributes', () => {
+  const payload = {
+    resourceLogs: [
+      {
+        scopeLogs: [
+          {
+            logRecords: [
+              {
+                attributes: [
+                  { key: 'event.name', value: { stringValue: 'api_request' } },
+                  { key: 'input_tokens', value: { intValue: '12' } },
+                  { key: 'cost_usd', value: { doubleValue: 0.5 } },
+                ],
+              },
+            ],
+          },
+        ],
+      },
+    ],
+  }
+  expect(logRecords(payload)).toEqual([
+    { 'event.name': 'api_request', input_tokens: 12, cost_usd: 0.5 },
+  ])
+})
+
+test('tracing’s switch adds its env values, and off gives back the person’s own', () => {
+  const text =
+    '{\n    "env": {\n        "MINE": "1",\n        "OTEL_LOGS_EXPORTER": "console"\n    }\n}\n'
+  const on = editTraceEnv(text, true)
+  const settings = JSON.parse(on.text) as { env: Record<string, string> }
+  expect(isTraceOn(settings)).toBe(true)
+  expect(settings.env.MINE).toBe('1')
+  expect(on.text).toMatch(/^\{\n {4}"env"/)
+  expect(on.before).toEqual({
+    ...Object.fromEntries(Object.keys(TRACE_ENV).map(key => [key, null])),
+    OTEL_LOGS_EXPORTER: 'console',
+  })
+  expect(replacedNames(on.before)).toEqual(['OTEL_LOGS_EXPORTER'])
+
+  const off = editTraceEnv(on.text, false, on.before!)
+  const offSettings = JSON.parse(off.text) as { env: Record<string, string> }
+  expect(isTraceOn(offSettings)).toBe(false)
+  expect(offSettings.env).toEqual({ MINE: '1', OTEL_LOGS_EXPORTER: 'console' })
+  expect(off).toMatchObject({ before: null, isLost: false })
+
+  const changed = editTraceEnv(
+    JSON.stringify({ env: { ...TRACE_ENV, OTEL_LOGS_EXPORTER: 'none' } }),
+    false,
+    on.before!,
+  )
+  expect(JSON.parse(changed.text).env).toEqual({ OTEL_LOGS_EXPORTER: 'none' })
+})
+
+test('a value of the person’s equal to tracing’s is noted, and stays when tracing goes off', () => {
+  const text = JSON.stringify({ env: { CLAUDE_CODE_ENABLE_TELEMETRY: '1' } })
+  const on = editTraceEnv(text, true)
+  expect(on.before?.CLAUDE_CODE_ENABLE_TELEMETRY).toBe('1')
+  expect(replacedNames(on.before)).toEqual([])
+
+  const off = editTraceEnv(on.text, false, on.before!)
+  expect(JSON.parse(off.text).env).toEqual({ CLAUDE_CODE_ENABLE_TELEMETRY: '1' })
+})
+
+test('turning tracing on again keeps what it noted the first time', () => {
+  const on = editTraceEnv(JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'console' } }), true)
+  const again = editTraceEnv(on.text, true, on.before!)
+  expect(again.text).toBe(on.text)
+  expect(again.before).toEqual(on.before)
+
+  const edited = JSON.stringify({
+    env: { ...JSON.parse(on.text).env, OTEL_LOG_RAW_API_BODIES: '0' },
+  })
+  const reOn = editTraceEnv(edited, true, on.before!)
+  expect(reOn.before).toMatchObject({ OTEL_LOGS_EXPORTER: 'console', OTEL_LOG_RAW_API_BODIES: '0' })
+  const off = editTraceEnv(reOn.text, false, reOn.before!)
+  expect(JSON.parse(off.text).env).toEqual({
+    OTEL_LOGS_EXPORTER: 'console',
+    OTEL_LOG_RAW_API_BODIES: '0',
+  })
+})
+
+test('off with nothing noted takes tracing’s values out, and says yours were not found', () => {
+  const lost = editTraceEnv(JSON.stringify({ env: { ...TRACE_ENV, MINE: '1' } }), false)
+  expect(JSON.parse(lost.text).env).toEqual({ MINE: '1' })
+  expect(lost.isLost).toBe(true)
+
+  expect(editTraceEnv(JSON.stringify({ env: { MINE: '1' } }), false).isLost).toBe(false)
+})
+
+test('the sent prompt reads as the engine’s sections, and what was added around them', () => {
+  const sections = [
+    { id: 'intro', title: 'Introduction', tokens: 5, text: 'You are an agent.' },
+    { id: 'env_info_simple', title: 'Environment', tokens: 5, text: '# Environment\n - linux' },
+  ]
+  const blocks = [
+    { type: 'text', text: 'x-anthropic-billing-header: cc_version=1' },
+    { type: 'text', text: 'You are Claude Code, Anthropic’s official CLI.' },
+    {
+      type: 'text',
+      text:
+        'You are an agent.\n\n# Environment\n - linux\n\n# Output Style: Concise\nBe brief.\n\n' +
+        '# Desktop\nThe app’s own.',
+    },
+  ]
+  expect(sentPrompt(blocks, sections).map(one => [one.title, one.isAdded ?? false])).toEqual([
+    ['Billing header', true],
+    ['You are Claude Code, Anthropic’s official CLI.', true],
+    ['Introduction', false],
+    ['Environment', false],
+    ['Output Style: Concise', true],
+    ['Desktop', true],
+  ])
+})
+
+test('a request reads in a line: what it added and what came back', () => {
+  const item = summarize({
+    seq: 3,
+    at: '2026-10-19T12:00:00Z',
+    source: 'sdk',
+    model: 'claude-opus-5-5',
+    promptId: 'p1',
+    system: 'a',
+    tools: 'b',
+    toolCount: 1,
+    messageCount: 4,
+    from: 2,
+    added: [
+      { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: 'hi' }] },
+      { role: 'user', content: '<system-reminder>\nnote\n</system-reminder>' },
+    ],
+    usage: null,
+    response: {
+      content: [
+        { type: 'text', text: 'Reading it.' },
+        { type: 'tool_use', name: 'Read' },
+      ],
+      stop_reason: 'tool_use',
+    },
+  })
+  expect(item).toMatchObject({ added: ['tool result', 'reminder'], reply: '"Reading it." · Read' })
+})
+
+const PANE = {
+  plugin: 'desktop-statusline',
+  component: 'Pane',
+  requestId: 'context-details',
+  props: {
+    title: 'Context details',
+    isFocused: false,
+    bodyColumns: 70,
+    placement: 'dock',
+    scroll: { offset: 0, bodyRows: 40 },
+    view: {},
+  },
+} as const
+
+function tracedEngine(
+  on: On,
+  files: Record<string, string>,
+  turns = 0,
+  env: Record<string, string> = {},
+) {
+  const settings = {
+    text: JSON.stringify({ env: TRACE_ENV }),
+    written: [] as string[],
+    missing: [] as RegExp[],
+    ran: [] as string[][],
+    env: [] as Record<string, string>[],
+    system: 'Linux',
+    absent: [] as string[],
+    explorerFails: false,
+    session: SESSION,
+    folders: { [SESSION]: files } as Record<string, Record<string, string>>,
+    sizes: {} as Record<string, number>,
+    health: RECEIVER_HEALTH,
+    quits: 0,
+    clock: mock.clock(on, { now: 1_000 }),
+  }
+  mock.store(on)
+  mock.env(on, { HOME: '/home/me', OTEL_LOG_RAW_API_BODIES: '1', ...env })
+  const traceFile = (path: string) => /[\\/]traces[\\/]([^\\/]+)[\\/]([^\\/]+)$/.exec(path)
+  const isToken = (path: string) => /[\\/]traces[\\/]\.view-token$/.test(path)
+  on('fs.exists', async (_$, e) => ({ value: !settings.missing.some(one => one.test(e.path)) }))
+  on('fs.read', async (_$, e) => {
+    if (isToken(e.path)) return { value: '0123456789abcdef0123456789abcdef' }
+    const found = traceFile(e.path)
+    if (!found) return { value: settings.text }
+    const text = settings.folders[found[1]!]?.[found[2]!]
+    if (text === undefined) throw new Error(`ENOENT: ${e.path}`)
+
+    return { value: text }
+  })
+  on('fs.list', async (_$, e) => {
+    const folder =
+      settings.folders[/[\\/]traces[\\/]([^\\/]+)$/.exec(e.path ?? '')?.[1] ?? ''] ?? {}
+
+    return {
+      value: Object.keys(folder).map(name => ({
+        name,
+        kind: 'file' as const,
+        size: settings.sizes[name] ?? folder[name]!.length,
+        mtimeMs: settings.sizes[name] ?? 1,
+        isLink: false,
+      })),
+    }
+  })
+  on('fs.write', async (_$, e) => {
+    if (e.path.endsWith('settings.json')) settings.text = e.text
+    settings.written.push(e.path)
+
+    return { value: undefined }
+  })
+  on('session.id', async () => ({ value: settings.session }))
+  on('session.end', async (_$, e) => ({ sessionId: e.sessionId }))
+  on('session.turns', async () => ({ value: turns }))
+  on('http.fetch', async (_$, e) => {
+    if (e.url.includes('/quit')) settings.quits += 1
+
+    return { value: { status: 200, ok: true, headers: {}, text: settings.health } }
+  })
+  on('session.model', async () => ({ value: 'Opus 5.5' }))
+  on('session.cwd', async () => ({ value: '/repo' }))
+  on('session.usage', async () => ({
+    value: { startedAt: 0, context: { window: 200_000, tokens: 1, percent: 0 }, rateLimits: [] },
+  }))
+  on('command.list', async () => ({ value: [] }))
+  on('prompt.compose', async () => ({ sections: [] }))
+  on('process.run', async (_$, e) => {
+    const program = e.argv[0]!
+    settings.ran.push([...e.argv])
+    settings.env.push({ ...e.init?.env })
+    if (settings.absent.includes(program)) throw new Error(`spawn ${program} ENOENT`)
+    const stdout: Record<string, string> = {
+      uname: `${settings.system}\n`,
+      ...(settings.explorerFails && {
+        'powershell.exe': 'FOLDER-NOT-SHOWN: Explorer did not open C:\\x\\traces.\r\n',
+      }),
+      wslpath: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude\\desktop-statusline\\traces\n',
+    }
+
+    return {
+      value: {
+        exitCode:
+          program === 'xdg-open' ||
+          program === 'git' ||
+          (program === 'powershell.exe' && settings.explorerFails)
+            ? 1
+            : 0,
+        stdout: stdout[program] ?? '',
+        stderr: program === 'xdg-open' ? 'no method available for opening' : '',
+        isStdoutTruncated: false,
+        isStderrTruncated: false,
+      },
+    }
+  })
+  on('config.list', async () => ({ value: [] }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  on('ui.panes', async () => ({ value: [] }))
+
+  return settings
+}
+
+test('the Trace tab lists each request, opening onto it, and the Prompt tab shows it as sent', async ($, on) => {
+  const files: Record<string, string> = {
+    'system-a.json': JSON.stringify([
+      { type: 'text', text: 'x-anthropic-billing-header: cc_version=1' },
+      { type: 'text', text: '# Output Style: Concise\nBe brief.' },
+    ]),
+    '000000.json': JSON.stringify({
+      seq: 0,
+      at: '2026-10-19T12:00:05Z',
+      source: 'sdk',
+      model: 'claude-opus-5-5',
+      promptId: 'p1',
+      system: 'a',
+      tools: 'b',
+      toolCount: 1,
+      messageCount: 1,
+      from: 0,
+      added: [{ role: 'user', content: 'list the files' }],
+      usage: { input: 10, output: 5, costUsd: 0.25, durationMs: 1500 },
+      response: { content: [{ type: 'text', text: 'Here they are.' }], stop_reason: 'end_turn' },
+    } satisfies TraceRecord),
+  }
+  tracedEngine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(
+    await pane.find({ key: 'trace-main', text: /^Conversation1 request · \$0\.25/ }),
+  ).toBeDefined()
+  expect(await pane.find({ key: 'trace-side' })).toBeUndefined()
+  expect((await pane.find({ type: 'Client', key: 'disclose-trace-0' }))?.props.props).toMatchObject(
+    {
+      label: '#1',
+      tag: '12:00:05',
+      isOpen: false,
+    },
+  )
+  const row = await pane.find({ type: 'Client', key: 'disclose-trace-0' })
+  expect(row?.props.props).toMatchObject({ lines: ['+ "list the files"', '→ "Here they are."'] })
+  expect(Math.abs(Number(row?.props.height) - 4.05)).toBeLessThan(1e-9)
+  expect((await pane.find({ type: 'Client', key: 'disclose-trace-0' }))?.props.props).toMatchObject(
+    {
+      figure: '10 in · 5 out · $0.25 · 1.5s',
+    },
+  )
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  expect(String((await pane.find({ type: 'Code' }))?.props.source)).toMatch(
+    /\[user\]\nlist the files[\s\S]*── Answer \(end_turn\)\n\nHere they are\./,
+  )
+
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-prompt' })
+  const added = await pane.find({ key: 'prompt-added' })
+  expect(added?.text).toMatch(/^Added at send time\d+ sections · ~\d+/)
+  expect(
+    (await pane.find({ type: 'Client', key: 'disclose-prompt-billing-0' }))?.props.props,
+  ).toMatchObject({ label: 'Billing header' })
+  const sections = (await pane.findAll({ type: 'Client' }))
+    .filter(one => String(one.props.key).startsWith('disclose-prompt-'))
+    .map(one => (one.props.props as { label: string }).label)
+  expect(sections).toContain('Output Style: Concise')
+
+  await pane.unmount()
+})
+
+test('turning tracing on writes its env to the user settings', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect((await pane.find({ key: 'tracing' }))?.props).toMatchObject({ label: 'Turn on tracing' })
+  await pane.press({ key: 'tracing' })
+  expect(isTraceOn(JSON.parse(settings.text))).toBe(true)
+  expect((await pane.find({ key: 'tracing' }))?.props).toMatchObject({ label: 'Turn off tracing' })
+
+  await pane.unmount()
+})
+
+test('the Trace tab says what turning tracing on changes, and where the traces are kept', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(
+    await pane.find({ type: 'Text', text: /seven telemetry settings to the\s+env\s+block of/ }),
+  ).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '/home/me/.claude/settings.json' })).toBeDefined()
+  expect(
+    await pane.find({ type: 'Text', text: '/home/me/.claude/desktop-statusline/traces' }),
+  ).toBeDefined()
+
+  await pane.press({ key: 'tracing' })
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: /^Kept in .* until you delete them, one folder per session\.$/,
+    }),
+  ).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('traces are kept under the home folder, wherever CLAUDE_CONFIG_DIR puts the settings', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { CLAUDE_CONFIG_DIR: '/cfg' })
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(await pane.find({ type: 'Text', text: '/cfg/settings.json' })).toBeDefined()
+  expect(
+    await pane.find({ type: 'Text', text: '/home/me/.claude/desktop-statusline/traces' }),
+  ).toBeDefined()
+  await pane.press({ key: 'tracing' })
+  expect(settings.written).toHaveLength(1)
+  expect(settings.written[0]).toMatch(/[\\/]cfg[\\/]settings\.json$/)
+
+  await pane.unmount()
+})
+
+test('a session makes the traces folder when it is missing, tracing on or off', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = '{}'
+  settings.missing = [/[\\/]\.claude[\\/]desktop-statusline[\\/]traces$/]
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  expect(settings.written).toHaveLength(1)
+  expect(settings.written[0]).toMatch(
+    /[\\/]home[\\/]me[\\/]\.claude[\\/]desktop-statusline[\\/]traces[\\/]README\.txt$/,
+  )
+
+  await pane.unmount()
+})
+
+test('a session leaves a traces folder that is there as it is', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  expect(settings.written).toEqual([])
+
+  await pane.unmount()
+})
+
+test('the traces folder opens in the system’s file manager', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { OS: 'Windows_NT' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  const opened = () => settings.ran.filter(argv => argv[0] !== 'git')
+
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()).toEqual([
+    [
+      'powershell.exe',
+      '-NoProfile',
+      '-NonInteractive',
+      '-EncodedCommand',
+      encodedCommand(SHOW_FOLDER_SCRIPT),
+    ],
+  ])
+  const folder = settings.env.at(-1)![FOLDER_VARIABLE]
+  expect(folder).toMatch(/\\traces$/)
+  expect(folder).not.toContain('/')
+  expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
+
+  settings.explorerFails = true
+  await pane.press({ key: 'trace-folder' })
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: 'Could not open the traces folder: Explorer did not open C:\\x\\traces.',
+    }),
+  ).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('a script is encoded as PowerShell takes it, UTF-16LE in base64', () => {
+  expect(encodedCommand('dir')).toBe('ZABpAHIA')
+  expect(encodedCommand('é!')).toBe('6QAhAA==')
+  expect(encodedCommand('ab')).toBe('YQBiAA==')
+  expect(SHOW_FOLDER_SCRIPT).toContain(`$env:${FOLDER_VARIABLE}`)
+  expect(SHOW_FOLDER_SCRIPT).toContain("ProcessStartInfo 'explorer.exe'")
+  expect(SHOW_FOLDER_SCRIPT).not.toContain('cmd.exe')
+})
+
+test('the traces folder opens in Finder on macOS and through xdg-open elsewhere', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  const opened = () => settings.ran.filter(argv => argv[0] !== 'git' && argv[0] !== 'uname')
+
+  settings.system = 'Darwin'
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()).toEqual([['open', expect.stringMatching(/traces$/)]])
+
+  settings.system = 'Linux 6.8.0-45-generic'
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()[1]).toEqual(['xdg-open', expect.stringMatching(/traces$/)])
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: 'Could not open the traces folder: no method available for opening',
+    }),
+  ).toBeDefined()
+
+  settings.absent = ['xdg-open']
+  await pane.press({ key: 'trace-folder' })
+  expect(
+    await pane.find({
+      type: 'Text',
+      text: /^Could not open the traces folder: xdg-open could not be run \(.+\)\. Is it installed\?$/,
+    }),
+  ).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('under WSL the traces folder opens in Windows Explorer, as Windows reaches it', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { WSLENV: 'USERPROFILE/p' })
+  settings.system = 'Linux 6.6.87.2-microsoft-standard-WSL2'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  const opened = () => settings.ran.filter(argv => argv[0] !== 'git' && argv[0] !== 'uname')
+  const script = [
+    '-NoProfile',
+    '-NonInteractive',
+    '-EncodedCommand',
+    encodedCommand(SHOW_FOLDER_SCRIPT),
+  ]
+
+  await pane.press({ key: 'trace-folder' })
+  expect(opened()).toEqual([
+    ['wslpath', '-w', expect.stringMatching(/\/home\/me\/\.claude\/desktop-statusline\/traces$/)],
+    ['powershell.exe', ...script],
+  ])
+  expect(settings.env.at(-1)).toEqual({
+    [FOLDER_VARIABLE]: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude\\desktop-statusline\\traces',
+    WSLENV: `USERPROFILE/p:${FOLDER_VARIABLE}`,
+  })
+  expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
+
+  settings.absent = ['powershell.exe']
+  await pane.press({ key: 'trace-folder' })
+  expect(opened().slice(-2)).toEqual([
+    ['powershell.exe', ...script],
+    ['/mnt/c/Windows/System32/WindowsPowerShell/v1.0/powershell.exe', ...script],
+  ])
+  expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+const BAND = {
+  plugin: 'desktop-statusline',
+  component: 'AbovePrompt',
+  props: {
+    hasSurvey: false,
+    isWorking: false,
+    maxRows: 6,
+    bodyColumns: 120,
+    scroll: { offset: 0, bodyRows: 6 },
+    view: {},
+  },
+} as const
+
+function kept(seq: number, text: string): string {
+  return JSON.stringify({
+    seq,
+    at: '2026-10-19T12:00:05Z',
+    source: 'sdk',
+    model: 'claude-opus-5-5',
+    promptId: 'p1',
+    system: 'a',
+    tools: 'b',
+    toolCount: 1,
+    messageCount: 1,
+    from: 0,
+    added: [{ role: 'user', content: text }],
+    usage: null,
+    response: null,
+  } satisfies TraceRecord)
+}
+
+async function reopen($: Parameters<TestBody>[0], settings: ReturnType<typeof tracedEngine>) {
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const pressed = band.press({ key: 'open-details' })
+  for (let step = 0; step < 10; step += 1) await settings.clock.advance(100)
+  await pressed
+  await band.unmount()
+}
+
+async function traceRows(pane: {
+  findAll: (query: { type: 'Client' }) => Promise<{ props: Record<string, unknown> }[]>
+}) {
+  return (await pane.findAll({ type: 'Client' }))
+    .filter(one => String(one.props.key).startsWith('disclose-trace-'))
+    .map(one => (one.props.props as { label: string }).label)
+}
+
+test('after a /clear the Trace tab lists the new session’s requests alone', async ($, on) => {
+  const settings = tracedEngine(on, {
+    'system-a.json': '[]',
+    '000000.json': kept(0, 'one'),
+    '000001.json': kept(1, 'two'),
+  })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await traceRows(pane)).toEqual(['#2', '#1'])
+
+  settings.session = 'session-2'
+  settings.folders['session-2'] = { 'system-a.json': '[]', '000000.json': kept(0, 'fresh') }
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await traceRows(pane)).toEqual(['#1'])
+  expect(await pane.find({ type: 'Text', text: '+ "fresh"' })).toBeUndefined()
+  const row = await pane.find({ type: 'Client', key: 'disclose-trace-0' })
+  expect((row?.props.props as { lines: string[] }).lines[0]).toBe('+ "fresh"')
+
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+  await pane.input({ key: 'reader-search', text: 'fresh', kind: 'change' })
+  expect(await pane.find({ type: 'Text', text: /^1 of 1$/ })).toBeDefined()
+  await $.session.end({ reason: 'clear', sessionId: 'session-2', resume: { id: 'session-2' } })
+  settings.session = 'session-3'
+  settings.folders['session-3'] = { 'system-a.json': '[]', '000000.json': kept(0, 'newer') }
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await pane.find({ type: 'Client', key: 'reader' })).toBeUndefined()
+  expect(await traceRows(pane)).toEqual(['#1'])
+  expect(await pane.find({ key: 'read-0' })).toBeUndefined()
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+  expect(await pane.find({ type: 'Text', text: /^1 of 1$/ })).toBeUndefined()
+  expect((await readerText(pane)).some(row => row.includes('newer'))).toBe(true)
+
+  await pane.unmount()
+})
+
+test('a request deleted from the folder leaves the list, and one too large to read is listed', async ($, on) => {
+  const files = {
+    'system-a.json': '[]',
+    '000000.json': kept(0, 'one'),
+    '000001.json': kept(1, 'two'),
+  }
+  const settings = tracedEngine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+
+  delete (files as Record<string, string>)['000000.json']
+  settings.sizes['000001.json'] = 5 * 1024 * 1024
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(await traceRows(pane)).toEqual(['#2 unknown'])
+  const row = await pane.find({ type: 'Client', key: 'disclose-trace-1' })
+  expect((row?.props.props as { lines: string[] }).lines[0]).toBe(
+    '+ too large to read here: open it in your browser',
+  )
+
+  await pane.unmount()
+})
+
+test('a newer receiver is left to serve, and a port another server holds says so', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  settings.health = 'desktop-statusline trace receiver 999'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(settings.quits).toBe(0)
+  expect(
+    await pane.find({ type: 'Text', text: /^Tracing is on\. Each request appears here/ }),
+  ).toBeDefined()
+
+  settings.health = 'Welcome to nginx!'
+  await reopen($, settings)
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  expect(settings.quits).toBe(0)
+  expect(await pane.find({ type: 'Text', text: /no receiver answers on port 43180/ })).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('telemetry sent to an endpoint set elsewhere is said, not shown as recorded', async ($, on) => {
+  tracedEngine(on, {}, 0, { OTEL_EXPORTER_OTLP_LOGS_ENDPOINT: 'https://collector.example/v1/logs' })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(
+    await pane.find({ type: 'Text', text: /sends its telemetry to an endpoint set elsewhere/ }),
+  ).toBeDefined()
+  expect((await pane.find({ type: 'Button', key: 'tracing' }))?.props).toMatchObject({
+    label: 'Turn off tracing',
+  })
+
+  await pane.unmount()
+})
+
+test('turning tracing off gives back the telemetry values it replaced', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  const mine = { OTEL_LOGS_EXPORTER: 'console', CLAUDE_CODE_ENABLE_TELEMETRY: '1', MINE: '1' }
+  settings.text = JSON.stringify({ env: mine })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  await pane.press({ key: 'tracing' })
+  expect(JSON.parse(settings.text).env.OTEL_LOGS_EXPORTER).toBe('otlp')
+  const note = await pane.find({ type: 'Text', text: /^Tracing set its own values in place/ })
+  expect(note?.text).toMatch(/your +OTEL_LOGS_EXPORTER +; turning it off puts yours back/)
+  expect(note?.text).not.toMatch(/CLAUDE_CODE_ENABLE_TELEMETRY/)
+  expect(note?.text).toMatch(/your log events come here, not to where you had them go\.$/)
+
+  await pane.press({ key: 'tracing' })
+  expect(JSON.parse(settings.text).env).toEqual(mine)
+  expect(await pane.find({ type: 'Text', text: /was not found/ })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+test('turning tracing off with nothing noted says your own values were not put back', async ($, on) => {
+  const settings = tracedEngine(on, {})
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  await pane.press({ key: 'tracing' })
+  expect(JSON.parse(settings.text).env).toEqual({})
+  expect(
+    await pane.find({ type: 'Text', text: /^Tracing is off, but what you had under its settings/ }),
+  ).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('under WSL the traces are kept in the Linux home, not the Windows profile', async ($, on) => {
+  const settings = tracedEngine(on, {}, 0, { USERPROFILE: '/mnt/c/Users/me' })
+  settings.text = '{}'
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(
+    await pane.find({ type: 'Text', text: '/home/me/.claude/desktop-statusline/traces' }),
+  ).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: '/home/me/.claude/settings.json' })).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('a session that started before tracing was on says so', async ($, on) => {
+  tracedEngine(on, {}, 3)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(await pane.find({ type: 'Text', text: /start a new session to trace it/ })).toBeDefined()
+  expect((await pane.find({ key: 'tracing' }))?.props).toMatchObject({ label: 'Turn off tracing' })
+
+  await pane.unmount()
+})
+
+test('long text is read a page at a time, each page starting on a line', () => {
+  const line = `${'x'.repeat(99)}\n`
+  const text = line.repeat(1_000)
+  const starts = pageStarts(text)
+  expect(starts).toHaveLength(3)
+  for (const start of starts) expect(start === 0 || text[start - 1] === '\n').toBe(true)
+  expect(pageStarts('short')).toEqual([0])
+})
+
+test('an open request shows a short preview, and opens whole here or in the browser', async ($, on) => {
+  const long = 'line of the request\n'.repeat(5_000)
+  const files: Record<string, string> = {
+    'system-a.json': JSON.stringify([{ type: 'text', text: 'You are Claude.' }]),
+    '000000.json': JSON.stringify({
+      seq: 0,
+      at: '2026-10-19T12:00:05Z',
+      source: 'sdk',
+      model: 'claude-opus-5-5',
+      promptId: 'p1',
+      system: 'a',
+      tools: 'b',
+      toolCount: 0,
+      messageCount: 1,
+      from: 0,
+      added: [{ role: 'user', content: long }],
+      usage: null,
+      response: null,
+    } satisfies TraceRecord),
+  }
+  tracedEngine(on, files)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect((await pane.find({ type: 'Link' }))?.props).toMatchObject({
+    href: 'http://localhost:43180/view/session-1?t=0123456789abcdef0123456789abcdef',
+  })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  const links = (await pane.findAll({ type: 'Link' })).map(one => one.props.href)
+  expect(links).toContain(
+    'http://localhost:43180/view/session-1/0?t=0123456789abcdef0123456789abcdef',
+  )
+  expect(await pane.find({ key: 'page-next' })).toBeUndefined()
+  const preview = String((await pane.find({ type: 'Code' }))?.props.source)
+  expect(preview.split('\n')).toHaveLength(12)
+  expect(await pane.find({ type: 'Text', text: /^4,9\d\d more lines$/ })).toBeDefined()
+  expect((await pane.find({ key: 'read-0' }))?.props).toMatchObject({ label: 'Expand' })
+
+  await pane.unmount()
+})
+
+const VIEW_RECORDS = [
+  { seq: 0, source: 'sdk', from: 0, added: [{ role: 'user', content: 'one' }] },
+  {
+    seq: 1,
+    source: 'generate_session_title',
+    from: 0,
+    added: [{ role: 'user', content: 'title' }],
+  },
+  {
+    seq: 2,
+    source: 'sdk',
+    from: 1,
+    added: [
+      { role: 'assistant', content: [{ type: 'text', text: 'two' }] },
+      { role: 'user', content: '<b>three</b>' },
+    ],
+  },
+]
+
+test('the browser page counts no text for an image, in a message or a tool result', () => {
+  const image = {
+    type: 'image',
+    source: { type: 'base64', media_type: 'image/png', data: 'A'.repeat(100_000) },
+  }
+  const html = requestPage({
+    session: 's',
+    records: [
+      {
+        seq: 0,
+        source: 'sdk',
+        from: 0,
+        toolCount: 0,
+        at: '',
+        model: 'm',
+        usage: null,
+        response: null,
+        added: [
+          { role: 'user', content: [image, { type: 'text', text: 'what is this' }] },
+          { role: 'user', content: [{ type: 'tool_result', tool_use_id: 't1', content: [image] }] },
+        ],
+      },
+    ],
+    seq: 0,
+    system: null,
+    tools: null,
+    link: () => '#',
+    nonce: 'n',
+  })!
+  expect(html).toContain('12 chars · ~3 tokens')
+})
+
+test('a request is rebuilt whole from the requests of its kind before it', () => {
+  expect(fullMessages(VIEW_RECORDS, 2)).toEqual([
+    { role: 'user', content: 'one' },
+    { role: 'assistant', content: [{ type: 'text', text: 'two' }] },
+    { role: 'user', content: '<b>three</b>' },
+  ])
+  expect(fullMessages(VIEW_RECORDS, 1)).toEqual([{ role: 'user', content: 'title' }])
+  expect(fullMessages(VIEW_RECORDS, 9)).toBeNull()
+})
+
+test('a request page draws whatever shape a record holds, escaped, without throwing', () => {
+  const odd = {
+    seq: 0,
+    at: '',
+    source: 'sdk',
+    model: 'm',
+    promptId: null,
+    system: 'a',
+    tools: 'b',
+    toolCount: 0,
+    messageCount: 4,
+    from: 0,
+    added: [
+      { role: 'user', content: { a: '<i>1</i>' } },
+      { role: 'user', content: [null, 7, { type: 'text', text: 42 }] },
+      null,
+      { role: 'assistant', content: [{ type: 'tool_use', name: { x: 1 }, input: null }] },
+    ],
+    usage: null,
+    response: { content: { not: 'a list' }, stop_reason: null },
+  }
+  const html = requestPage({
+    session: 's',
+    records: [odd as unknown as TraceRecord],
+    seq: 0,
+    system: { not: 'a list' } as unknown as { type: string; text: string }[],
+    tools: [null, 'x'] as unknown as { name?: string }[],
+    link: () => '#',
+  })!
+  expect(html).toContain('&lt;i&gt;1&lt;/i&gt;')
+  expect(html).not.toContain('<i>1</i>')
+})
+
+test('the browser pages show every message, escaped, and link to each other', () => {
+  const link = (session: string, seq?: number) =>
+    `/view/${session}${seq === undefined ? '' : `/${seq}`}?t=x`
+  const html = requestPage({
+    session: 's',
+    records: VIEW_RECORDS.map(one => ({ ...one, at: '', model: 'm', usage: null, response: null })),
+    seq: 2,
+    system: [{ type: 'text', text: 'You are <Claude>.' }],
+    tools: [{ name: 'Bash' }],
+    link,
+  })!
+  expect(html).toContain('&lt;b&gt;three&lt;/b&gt;')
+  expect(html).not.toContain('<b>three</b>')
+  expect(html).toContain('You are &lt;Claude&gt;.')
+  expect(html).toContain('href="/view/s?t=x"')
+  expect(html.match(/<details class="row new" open/g)).toHaveLength(2)
+  expect(html).toContain(
+    '<details class="row"><summary><span class="chev"></span><span class="label"><span class="seq">#1</span>',
+  )
+  expect(html).toContain('<details class="row new" open id="new">')
+  expect(html).not.toContain('<script')
+  expect(
+    requestPage({
+      session: 's',
+      records: VIEW_RECORDS.map(one => ({
+        ...one,
+        at: '',
+        model: 'm',
+        usage: null,
+        response: null,
+      })),
+      seq: 2,
+      system: null,
+      tools: null,
+      link,
+      nonce: 'abc',
+    }),
+  ).toContain('<script nonce="abc">')
+  const index = sessionPage({
+    session: 's',
+    records: VIEW_RECORDS.map(one => ({ ...one, at: '', usage: null, messageCount: 1 })),
+    link,
+  })
+  expect(index).toContain('href="/view/s/2?t=x"')
+})
+
+test('wrapped rows are each one line, cut at a space where one fits', () => {
+  expect(wrapRows('aaaa bbbb cccc\n\nshort', 10)).toEqual(['aaaa bbbb ', 'cccc', '', 'short'])
+  expect(wrapRows('x'.repeat(25), 10)).toEqual(['x'.repeat(10), 'x'.repeat(10), 'x'.repeat(5)])
+})
+
+function longRequest(lines: number): Record<string, string> {
+  const long = Array.from({ length: lines }, (_, index) => `line ${index}`).join('\n')
+
+  return {
+    'system-a.json': JSON.stringify([{ type: 'text', text: 'You are Claude.' }]),
+    'tools-b.json': JSON.stringify([{ name: 'Bash' }]),
+    '000000.json': JSON.stringify({
+      seq: 0,
+      at: '2026-10-19T12:00:05Z',
+      source: 'sdk',
+      model: 'claude-opus-5-5',
+      promptId: 'p1',
+      system: 'a',
+      tools: 'b',
+      toolCount: 1,
+      messageCount: 1,
+      from: 0,
+      added: [{ role: 'user', content: long }],
+      usage: null,
+      response: null,
+    } satisfies TraceRecord),
+  }
+}
+
+type ReaderPane = Pick<Mounted<'desktop', 'Pane'>, 'find' | 'findAll' | 'advance'>
+
+const GLIDE_SETTLE_MS = 1000
+
+async function readerText(pane: ReaderPane): Promise<string[]> {
+  await pane.advance(GLIDE_SETTLE_MS)
+
+  return readerTextNow(pane)
+}
+
+async function readerTextNow(pane: ReaderPane): Promise<string[]> {
+  return (await pane.findAll({ type: 'Text', in: 'reader-text' }))
+    .filter(one => one.props.mono === true)
+    .map(one => one.text)
+}
+
+async function readerHit(pane: ReaderPane): Promise<string | undefined> {
+  await pane.advance(GLIDE_SETTLE_MS)
+  const rows = (await pane.findAll({ type: 'Text', in: 'reader-text' })).filter(
+    one => one.props.mono === true,
+  )
+
+  return rows.find(row =>
+    row.children.some(
+      child =>
+        typeof child === 'object' &&
+        child !== null &&
+        (child as { props?: { backgroundColor?: string } }).props?.backgroundColor === '#c98500',
+    ),
+  )?.text
+}
+
+async function readerPosition(pane: ReaderPane) {
+  const text = (await pane.find({ type: 'Text', text: /^rows / }))?.text ?? ''
+  const match = /^rows ([\d,]+) to ([\d,]+) of ([\d,]+)$/.exec(text)
+  const figure = (part: string | undefined) => Number(part?.replace(/,/g, ''))
+
+  return { first: figure(match?.[1]), last: figure(match?.[2]), total: figure(match?.[3]) }
+}
+
+test('the reader keeps its top and draws only the rows that fit under it', async ($, on) => {
+  tracedEngine(on, longRequest(20_000))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+
+  expect((await pane.find({ type: 'Client', key: 'reader' }))?.props).toMatchObject({ height: 1 })
+  expect(await pane.find({ key: 'reader-search' })).toBeDefined()
+  const atTop = await readerText(pane)
+  expect(atTop[0]).toBe('══ System prompt: 1 blocks')
+  expect(atTop).toHaveLength(35)
+  const { total } = await readerPosition(pane)
+  expect(total).toBeGreaterThan(20_000)
+  expect(
+    await pane.find({ type: 'Text', text: `rows 1 to 35 of ${total.toLocaleString('en-US')}` }),
+  ).toBeDefined()
+  const heights = (await pane.findAll({ type: 'Box' }))
+    .map(one => one.props.height)
+    .filter((height): height is number => typeof height === 'number')
+  expect(Math.max(...heights)).toBe(37)
+  const region = await pane.find({ type: 'Client', key: 'reader-text' })
+  expect(region?.props).toMatchObject({ height: 35 })
+  expect((region?.props.props as { rows: unknown[]; base: number }).rows).toHaveLength(70)
+  expect((region?.props.props as { base: number; total: number }).base).toBe(0)
+  expect((region?.props.props as { total: number }).total).toBe(total)
+
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 20 } })
+  expect(await readerText(pane)).toHaveLength(15)
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 3 } })
+  expect(await readerText(pane)).toHaveLength(1)
+
+  await pane.post({ back: true }, { in: 'reader' })
+  expect(await pane.find({ type: 'Client', key: 'reader' })).toBeUndefined()
+  expect(await pane.find({ type: 'Client', key: 'disclose-trace-0' })).toBeDefined()
+
+  await pane.unmount()
+})
+
+test('the keys in the reader’s text and its scrollbar move the rows, never the pane', async ($, on) => {
+  tracedEngine(on, longRequest(20_000))
+  let windowMoves = 0
+  on('ui.scroll', async () => {
+    windowMoves += 1
+
+    return {}
+  })
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+  windowMoves = 0
+  const atTop = await readerText(pane)
+  const { total } = await readerPosition(pane)
+  const text = { in: 'reader-text' }
+
+  await pane.key({ key: 'pagedown', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 36, last: 70, total })
+  expect((await readerTextNow(pane))[0]).toBe(atTop[0])
+  await pane.advance(16)
+  const midway = (await readerTextNow(pane))[0]
+  expect(midway).not.toBe(atTop[0])
+  expect(midway).not.toBe('line 20')
+  expect((await readerText(pane))[0]).toBe('line 20')
+  await pane.key({ key: 'up', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 35, last: 69, total })
+  await pane.key({ key: 'down', ...text })
+  await pane.key({ key: 'down', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 37, last: 71, total })
+  await pane.key({ key: 'pageup', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 2, last: 36, total })
+  await pane.key({ key: 'end', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
+  expect(await readerText(pane)).toHaveLength(35)
+  await pane.key({ key: 'pagedown', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
+  await pane.key({ key: 'home', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
+  expect(await readerText(pane)).toEqual(atTop)
+  await pane.key({ key: 'up', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
+  await pane.key({ key: 'x', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
+  await pane.key({ key: 'end', ...text })
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 60 } })
+  await pane.key({ key: 'up', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: total - 55, last: total - 1, total })
+  await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 40 } })
+  await pane.key({ key: 'home', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
+
+  await pane.resize({ columns: 68, rows: 35, ...text })
+  await pane.pointer({ type: 'down', x: 10, y: 34, button: 'left', ...text })
+  await pane.pointer({ type: 'up', x: 10, y: 34, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
+  const thumb = async () =>
+    (await pane.findAll({ type: 'Box', ...text })).find(
+      one => one.props.backgroundColor === '#80808066' || one.props.backgroundColor === '#808080aa',
+    )
+  const thumbTop = async () => {
+    const track = (await pane.findAll({ type: 'Box', ...text })).find(
+      one => one.props.backgroundColor === '#80808018',
+    )
+
+    return (track?.children[0] as { props: { height: number } } | undefined)?.props.height
+  }
+  await pane.pointer({ type: 'down', x: 67, y: 34, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
+  expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
+  expect(await thumbTop()).toBe(33)
+  await pane.pointer({ type: 'move', x: 67, y: 0, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
+  expect(await thumbTop()).toBe(0)
+  await pane.pointer({ type: 'move', x: 60, y: 7, button: 'left', ...text })
+  const fifth = Math.round((6 / 33) * (total - 35)) + 1
+  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
+  expect(await thumbTop()).toBe(6)
+  await pane.pointer({ type: 'up', x: 67, y: 40, button: 'left', ...text })
+  expect((await thumb())?.props.backgroundColor).toBe('#80808066')
+  await pane.pointer({ type: 'move', x: 67, y: 30, ...text })
+  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
+  expect((await thumb())?.props.height).toBe(2)
+  expect((await readerText(pane))[0]).toBe(`line ${fifth - 16}`)
+  await pane.pointer({ type: 'down', x: 66, y: 7, button: 'left', ...text })
+  expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
+  expect(await thumbTop()).toBe(6)
+  await pane.pointer({ type: 'move', x: 66, y: 8, button: 'left', ...text })
+  const sixth = Math.round((7 / 33) * (total - 35)) + 1
+  expect(await readerPosition(pane)).toEqual({ first: sixth, last: sixth + 34, total })
+  expect(await thumbTop()).toBe(7)
+  await pane.pointer({ type: 'up', x: 66, y: 8, button: 'left', ...text })
+  expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
+
+  expect(windowMoves).toBe(0)
+
+  await pane.unmount()
+})
+
+test('a match after a character whose lower case is longer keeps its place', () => {
+  expect(findMatches(['İstanbul Tea'], 'tea')).toEqual([{ row: 0, start: 9, end: 12 }])
+})
+
+test('a search finds every match in a row, ignoring case', () => {
+  expect(findMatches(['Bash and bash', 'none', 'BASH'], 'bash')).toEqual([
+    { row: 0, start: 0, end: 4 },
+    { row: 0, start: 9, end: 13 },
+    { row: 2, start: 0, end: 4 },
+  ])
+  expect(findMatches(['anything'], '   ')).toEqual([])
+})
+
+test('searching the reader marks each match and brings it to the middle of the rows', async ($, on) => {
+  tracedEngine(on, longRequest(30_000))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
+  await pane.press({ key: 'read-0' })
+  const { total } = await readerPosition(pane)
+
+  await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'change' })
+  expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
+  expect(await readerHit(pane)).toBe('line 1999')
+  expect((await readerText(pane)).indexOf('line 1999')).toBe(17)
+  const first = (await readerPosition(pane)).first
+  expect(await readerPosition(pane)).toEqual({ first, last: first + 34, total })
+
+  await pane.press({ key: 'reader-next' })
+  expect(await pane.find({ type: 'Text', text: '2 of 11' })).toBeDefined()
+  expect(await readerHit(pane)).toBe('line 19990')
+  const shown = await readerText(pane)
+  expect(shown.indexOf('line 19990')).toBe(17)
+  expect(shown.slice(17, 27)).toEqual(
+    Array.from({ length: 10 }, (_, index) => `line ${19990 + index}`),
+  )
+  await pane.press({ key: 'reader-previous' })
+  await pane.press({ key: 'reader-previous' })
+  expect(await pane.find({ type: 'Text', text: '11 of 11' })).toBeDefined()
+  expect(await readerHit(pane)).toBe('line 19999')
+  expect((await readerText(pane)).indexOf('line 19999')).toBe(17)
+  await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'submit' })
+  expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
+  expect(await readerHit(pane)).toBe('line 1999')
+
+  await pane.input({ key: 'reader-search', text: 'nowhere', kind: 'change' })
+  expect(await pane.find({ type: 'Text', text: 'No match' })).toBeDefined()
+  expect(await pane.find({ key: 'reader-next' })).toBeUndefined()
+
+  await pane.unmount()
+})
+
+test('a request that goes on from the one before adds its messages, and keeps the prompt sent before', () => {
+  const files: Record<string, string> = {}
+  const store = new TraceStore((name: string, text: string) => {
+    files[name] = text
+  })
+  const first = [{ role: 'user', content: 'hello' }]
+  store.take(record('api_request_body', { body: requestBody(first), query_source: 'sdk' }))
+  store.take(
+    record('api_request_body', {
+      query_source: 'sdk',
+      body: JSON.stringify({
+        model: 'claude-opus-5-5',
+        system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2' }],
+        tools: [],
+        messages: [{ role: 'user', content: 'how are you' }],
+      }),
+    }),
+  )
+  const records = [0, 1].map(
+    seq => JSON.parse(files[`${SESSION}/00000${seq}.json`]!) as TraceRecord,
+  )
+  expect(records[1]).toMatchObject({ continues: true, from: 1, toolCount: 0 })
+  expect(fullMessages(records, 1)).toEqual([
+    { role: 'user', content: 'hello' },
+    { role: 'user', content: 'how are you' },
+  ])
+  expect(promptRecord(records, 1)?.seq).toBe(0)
+  expect(tracePromptRecord(records, 1)?.seq).toBe(0)
+
+  const unmarked = records.map(({ continues: _continues, ...one }) =>
+    one.seq === 1 ? { ...one, from: 0 } : one,
+  )
+  expect(fullMessages(unmarked, 1)).toHaveLength(2)
+})
+
+type KeptRecord = TraceRecord & { after?: number | null }
+
+function memoryStore(files: Record<string, string>, firstSeq = () => 0, readsBack = true) {
+  return new TraceStore(
+    (name: string, text: string) => {
+      files[name] = text
+    },
+    firstSeq,
+    () => true,
+    readsBack ? () => keptRecords(files) : () => [],
+  )
+}
+
+function keptRecords(files: Record<string, string>): KeptRecord[] {
+  return Object.entries(files)
+    .filter(([name]) => /\/\d{6}\.json$/.test(name))
+    .map(([, text]) => JSON.parse(text) as KeptRecord)
+    .sort((a, b) => a.seq - b.seq)
+}
+
+function continuationBody(messages: unknown[], previous?: string) {
+  return JSON.stringify({
+    model: 'claude-opus-5-5',
+    system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_version=2' }],
+    tools: [],
+    messages,
+    ...(previous ? { thread: { type: 'continue', previous_message_id: previous } } : {}),
+  })
+}
+
+function answer(bodyId: string, id: string, text = 'ok') {
+  return record('api_response_body', {
+    request_body_id: bodyId,
+    body: JSON.stringify({ id, content: [{ type: 'text', text }], stop_reason: 'end_turn' }),
+  })
+}
+
+const user = (content: string) => ({ role: 'user', content })
+const assistant = (text: string) => ({ role: 'assistant', content: [{ type: 'text', text }] })
+
+test('a receiver started mid-conversation goes on from the requests already on disk', () => {
+  const before: Record<string, string> = {}
+  const first = memoryStore(before)
+  first.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  first.take(answer('b0', 'msg_0'))
+
+  const shaped = { ...before }
+  memoryStore(shaped, () => 1, false).take(
+    record('api_request_body', {
+      body: continuationBody([user('how are you')]),
+      query_source: 'sdk',
+    }),
+  )
+  const shapedRecords = keptRecords(shaped)
+  expect(shapedRecords[1]).toMatchObject({ continues: true, after: null })
+  expect(fullMessages(shapedRecords, 1)).toEqual([user('hello'), user('how are you')])
+
+  const named = { ...before }
+  memoryStore(named, () => 1).take(
+    record('api_request_body', {
+      body: continuationBody([user('how are you')], 'msg_0'),
+      query_source: 'sdk',
+    }),
+  )
+  const namedRecords = keptRecords(named)
+  expect(namedRecords[1]).toMatchObject({ continues: true, after: 0, from: 2, messageCount: 3 })
+  expect(fullMessages(namedRecords, 1)).toEqual([
+    user('hello'),
+    assistant('ok'),
+    user('how are you'),
+  ])
+  expect(promptRecord(namedRecords, 1)?.seq).toBe(0)
+})
+
+test('switching the output style mid-session keeps the main conversation and its prompt', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'repl_main_thread:outputStyle:default',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(answer('b0', 'msg_0', 'hi'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user('explain')], 'msg_0'),
+      query_source: 'repl_main_thread:outputStyle:Explanatory',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('hi'), user('explain'), user('more')]),
+      query_source: 'repl_main_thread:outputStyle:Explanatory',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({
+    source: 'repl_main_thread:outputStyle:Explanatory',
+    continues: true,
+    after: 0,
+  })
+  expect(fullMessages(records, 1)).toEqual([user('hello'), assistant('hi'), user('explain')])
+  expect(promptRecord(records, 1)?.seq).toBe(0)
+  expect(tracePromptRecord(records, 1)?.seq).toBe(0)
+  expect(records[2]).toMatchObject({ from: 3 })
+  expect(fullMessages(records, 2)).toEqual([
+    user('hello'),
+    assistant('hi'),
+    user('explain'),
+    user('more'),
+  ])
+})
+
+test('a body sent twice adds its messages once', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', { body: requestBody([user('hello')]), query_source: 'sdk' }),
+  )
+  for (let times = 0; times < 2; times += 1)
+    store.take(
+      record('api_request_body', { body: continuationBody([user('again')]), query_source: 'sdk' }),
+    )
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), user('again'), user('next')]),
+      query_source: 'sdk',
+      request_body_id: 'b3',
+    }),
+  )
+  store.take(answer('b3', 'msg_3'))
+  for (let times = 0; times < 2; times += 1)
+    store.take(
+      record('api_request_body', {
+        body: continuationBody([user('last')], 'msg_3'),
+        query_source: 'sdk',
+      }),
+    )
+  const records = keptRecords(files)
+  expect(records[2]).toMatchObject({ continues: false, from: 1, messageCount: 2 })
+  expect(fullMessages(records, 1)).toEqual([user('hello'), user('again')])
+  expect(fullMessages(records, 2)).toEqual([user('hello'), user('again')])
+  expect(records[3]).toMatchObject({ from: 2 })
+  const whole = [user('hello'), user('again'), user('next'), assistant('ok'), user('last')]
+  expect(records[4]).toMatchObject({ continues: true, after: 3, messageCount: 5 })
+  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 5 })
+  expect(fullMessages(records, 4)).toEqual(whole)
+  expect(fullMessages(records, 5)).toEqual(whole)
+})
+
+test('a receiver started mid-conversation keeps a conversation sent whole from where the disk ends', () => {
+  const before: Record<string, string> = {}
+  const first = memoryStore(before)
+  first.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  first.take(answer('b0', 'msg_0'))
+
+  const files = { ...before }
+  memoryStore(files, () => 1).take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('ok'), user('next')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ continues: false, from: 2, messageCount: 3 })
+  expect(records[1]!.added).toEqual([user('next')])
+  expect(fullMessages(records, 1)).toEqual([user('hello'), assistant('ok'), user('next')])
+})
+
+test('a message whose cache marker moved is not counted as new', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const said = (text: string, isMarked = false) => ({
+    role: 'user',
+    content: [
+      { type: 'text', text, ...(isMarked ? { cache_control: { type: 'ephemeral' } } : {}) },
+    ],
+  })
+  store.take(
+    record('api_request_body', {
+      body: requestBody([said('a'), said('b', true)]),
+      query_source: 'sdk',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: requestBody([said('a'), said('b'), said('c', true)]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ from: 2, messageCount: 3 })
+  expect(records[1]!.added).toEqual([said('c', true)])
+  expect(fullMessages(records, 1)).toEqual([said('a'), said('b', true), said('c', true)])
+})
+
+test('the billing header is the request’s own: the prompt’s file is one for every request', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const body = (messages: unknown[], header: string) =>
+    JSON.stringify({
+      model: 'm',
+      system: [
+        { type: 'text', text: `x-anthropic-billing-header: ${header}` },
+        { type: 'text', text: 'You are Claude Code.' },
+      ],
+      tools: [{ name: 'Bash' }],
+      messages,
+    })
+  store.take(
+    record('api_request_body', {
+      body: body([user('hello')], 'cc_prev_req=none'),
+      query_source: 'sdk',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: body([user('hello'), user('more')], 'cc_prev_req=req_1'),
+      query_source: 'sdk',
+    }),
+  )
+  const names = Object.keys(files).filter(name => name.includes('/system-'))
+  expect(names).toHaveLength(1)
+  const prompt = JSON.parse(files[names[0]!]!) as { type: string; text: string }[]
+  expect(prompt).toEqual([{ type: 'text', text: 'You are Claude Code.' }])
+  const records = keptRecords(files)
+  expect(records[1]!.system).toBe(records[0]!.system)
+  expect(records[0]!.billing).toEqual(['x-anthropic-billing-header: cc_prev_req=none'])
+  expect(records[1]!.billing).toEqual(['x-anthropic-billing-header: cc_prev_req=req_1'])
+  expect(withBilling(records[1], prompt)).toEqual([
+    { type: 'text', text: 'x-anthropic-billing-header: cc_prev_req=req_1' },
+    { type: 'text', text: 'You are Claude Code.' },
+  ])
+  expect(withBilling({ seq: 0 } as never, prompt)).toEqual(prompt)
+  store.take(
+    record('api_request_body', {
+      body: JSON.stringify({
+        model: 'm',
+        system: [{ type: 'text', text: 'x-anthropic-billing-header: cc_prev_req=req_2' }],
+        tools: [],
+        messages: [user('on')],
+      }),
+      query_source: 'sdk',
+    }),
+  )
+  expect(keptRecords(files)[2]).toMatchObject({ continues: true, after: 1 })
+})
+
+test('the receiver drops what it holds of a session once idle, and goes on from its folder', () => {
+  const files: Record<string, string> = {}
+  let now = 0
+  const store = new TraceStore(
+    (name: string, text: string) => {
+      files[name] = text
+    },
+    () => keptRecords(files).length,
+    () => true,
+    () => keptRecords(files),
+    () => now,
+  )
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(answer('b0', 'msg_0'))
+  now = 4_000
+  store.prune(5_000)
+  expect(store.sessions.size).toBe(1)
+  now = 10_000
+  store.prune(5_000)
+  expect(store.sessions.size).toBe(0)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('ok'), user('next')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records).toHaveLength(2)
+  expect(records[1]).toMatchObject({ seq: 1, from: 2, messageCount: 3 })
+})
+
+test('parallel subagents of one type are each rebuilt whole', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const source = 'agent:builtin:general-purpose'
+  const bodies = [
+    [user('a: task')],
+    [user('b: task')],
+    [user('a: task'), assistant('a: one'), user('a: more')],
+    [user('b: task'), assistant('b: one'), user('b: more')],
+    [user('a: task'), assistant('a: one'), user('a: more'), assistant('a: two'), user('a: end')],
+  ]
+  bodies.forEach((messages, index) =>
+    store.take(
+      record('api_request_body', {
+        body: requestBody(messages),
+        query_source: source,
+        request_body_id: `b${index}`,
+      }),
+    ),
+  )
+  store.take(answer('b3', 'msg_b'))
+  store.take(answer('b4', 'msg_a'))
+  for (const [text, previous] of [
+    ['b: end', 'msg_b'],
+    ['a: after', 'msg_a'],
+    ['c: lost', 'msg_c'],
+  ] as const)
+    store.take(
+      record('api_request_body', {
+        body: continuationBody([user(text)], previous),
+        query_source: source,
+      }),
+    )
+  store.take(record('api_request_body', { body: requestBody([user('main')]), query_source: 'sdk' }))
+  const records = keptRecords(files)
+  bodies.forEach((messages, index) => expect(fullMessages(records, index)).toEqual(messages))
+  expect(records[5]).toMatchObject({ continues: true, after: 3, messageCount: 5 })
+  expect(fullMessages(records, 5)).toEqual([...bodies[3]!, assistant('ok'), user('b: end')])
+  expect(records[6]).toMatchObject({ continues: true, after: 4, messageCount: 7 })
+  expect(fullMessages(records, 6)).toEqual([...bodies[4]!, assistant('ok'), user('a: after')])
+  expect(records[7]).toMatchObject({ continues: false, after: null, messageCount: 1 })
+  expect(fullMessages(records, 7)).toEqual([user('c: lost')])
+  expect(fullMessages(records, 8)).toEqual([user('main')])
+})
+
+test('a request that goes on counts the whole conversation, not only its new messages', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('one'), assistant('two'), user('three')]),
+      query_source: 'sdk',
+    }),
+  )
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([assistant('four'), user('five')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ continues: true, messageCount: 5 })
+  expect(records[1]!.added).toHaveLength(2)
+  expect(summarize(records[1]!).messageCount).toBe(5)
+})
+
+test('a request that could not be read leaves the conversation as it was', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(record('api_request_body', { body: requestBody([user('one')]), query_source: 'sdk' }))
+  store.take(record('api_request_body', { body: '{"messages": [', query_source: 'sdk' }))
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('one'), assistant('two'), user('three')]),
+      query_source: 'sdk',
+    }),
+  )
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ unreadable: 14 })
+  expect(fullMessages(records, 1)).toEqual([])
+  expect(records[2]).toMatchObject({ from: 1 })
+  expect(fullMessages(records, 2)).toEqual([user('one'), assistant('two'), user('three')])
+})
+
+function usage(input: number, costUsd: number) {
+  return record('api_request', {
+    query_source: 'sdk',
+    input_tokens: input,
+    output_tokens: 30,
+    cost_usd: costUsd,
+    duration_ms: 2500,
+  })
+}
+
+const huge = (size: number) => `BIG${'x'.repeat(size)}`
+
+test('the store keeps a head beside a large request, in step as its answer lands', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(usage(10, 0.01))
+  store.take(answer('b0', 'msg_0', 'hi'))
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello'), assistant('hi'), user(huge(HEAD_AFTER_BYTES))]),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+  )
+  expect(Object.keys(files).filter(name => name.endsWith('.head.json'))).toEqual([
+    `${SESSION}/000001.head.json`,
+  ])
+  const head = () => JSON.parse(files[`${SESSION}/000001.head.json`]!) as KeptRecord
+  expect(head()).toMatchObject({
+    seq: 1,
+    isHead: true,
+    added: [],
+    roles: ['user'],
+    from: 2,
+    messageCount: 3,
+    usage: null,
+    response: null,
+  })
+  store.take(usage(1200, 0.3))
+  store.take(answer('b1', 'msg_1', 'done'))
+  expect(head()).toMatchObject({
+    usage: { input: 1200, costUsd: 0.3 },
+    response: { id: 'msg_1', content: [{ type: 'text', text: 'done' }] },
+  })
+  const { added: _added, ...whole } = JSON.parse(files[`${SESSION}/000001.json`]!) as KeptRecord
+  const {
+    added: _none,
+    isHead: _isHead,
+    roles: _roles,
+    ...rest
+  } = head() as KeptRecord & {
+    isHead: boolean
+    roles: string[]
+  }
+  expect(rest).toEqual(whole)
+
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user(huge(HEAD_AFTER_BYTES - 2_000))], 'msg_1'),
+      query_source: 'sdk',
+      request_body_id: 'b2',
+    }),
+  )
+  expect(files[`${SESSION}/000002.head.json`]).toBeUndefined()
+  store.take(answer('b2', 'msg_2', 'y'.repeat(3_000)))
+  expect(JSON.parse(files[`${SESSION}/000002.head.json`]!)).toMatchObject({
+    isHead: true,
+    continues: true,
+    after: 1,
+    response: { id: 'msg_2' },
+  })
+})
+
+function sessionFiles(files: Record<string, string>): Record<string, string> {
+  return Object.fromEntries(
+    Object.entries(files).map(([name, text]) => [name.slice(SESSION.length + 1), text]),
+  )
+}
+
+function largeSession() {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  const big = user(huge(4.2 * 1024 * 1024))
+  const bodies = [
+    [user('hello')],
+    [user('hello'), assistant('hi'), big],
+    [user('hello'), assistant('hi'), big, assistant('done'), user('next')],
+  ]
+  const answers = ['hi', 'done', 'bye']
+  bodies.forEach((messages, index) => {
+    store.take(
+      record('api_request_body', {
+        body: requestBody(messages),
+        query_source: 'sdk',
+        request_body_id: `b${index}`,
+      }),
+    )
+    store.take(usage(1000 * (index + 1), 0.1 * (index + 1)))
+    store.take(answer(`b${index}`, `msg_${index}`, answers[index]))
+  })
+
+  return files
+}
+
+test('a request too large to read is listed from its head, and the ones after keep their place', async ($, on) => {
+  const folder = sessionFiles(largeSession())
+  expect(folder['000001.json']!.length).toBeGreaterThan(4 * 1024 * 1024)
+  expect(Object.keys(folder)).toContain('000001.head.json')
+  tracedEngine(on, folder)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(await traceRows(pane)).toEqual(['#3', '#2', '#1'])
+  const row = (await pane.find({ type: 'Client', key: 'disclose-trace-1' }))?.props.props
+  expect(row).toMatchObject({
+    figure: '2k in · 30 out · $0.20 · 2.5s',
+    lines: ['+ 1 message too large to read here: open it in your browser', '→ "done"'],
+  })
+
+  const drawnText = async () => (await readerText(pane)).join('\n')
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
+  expect(String((await pane.find({ type: 'Code' }))?.props.source)).toMatch(
+    /^This request is too large to read here: open it in your browser to read it whole\.\n\n── Sent: 1 new message \(3 in all\)/,
+  )
+  await pane.press({ key: 'read-1' })
+  expect(await drawnText()).toMatch(/^This request is too large to read here/)
+  expect(await drawnText()).toMatch(/── #3 user \(new\)\n\(Not shown: request #2 is too large/)
+  await pane.post({ back: true }, { in: 'reader' })
+
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-2' })
+  await pane.press({ key: 'read-2' })
+  const text = await drawnText()
+  expect(text).toMatch(/══ Messages: 5, the last 1 new in this request/)
+  expect(text).toMatch(
+    /── #1 user\nhello\n \n── #2 assistant\nhi\n \n── #3 user\n\(Not shown: request #2/,
+  )
+  expect(text).toMatch(/── #4 assistant\ndone\n \n── #5 user \(new\)\nnext/)
+
+  await pane.unmount()
+})
+
+test('a request too large to read with no head, from an older receiver, is listed as before', async ($, on) => {
+  const folder = sessionFiles(largeSession())
+  delete folder['000001.head.json']
+  tracedEngine(on, folder)
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+
+  expect(await traceRows(pane)).toEqual(['#3', '#1', '#2 unknown'])
+  const row = (await pane.find({ type: 'Client', key: 'disclose-trace-1' }))?.props.props
+  expect((row as { lines: string[] }).lines).toEqual([
+    '+ too large to read here: open it in your browser',
+  ])
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
+  expect(String((await pane.find({ type: 'Code' }))?.props.source)).toBe(
+    'This request is too large to read here: open it in your browser to read it whole.',
+  )
+
+  await pane.unmount()
+})
+
+test('a head stands in for its request’s messages, and the prompt is found through it', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(answer('b0', 'msg_0', 'hi'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user(huge(HEAD_AFTER_BYTES))], 'msg_0'),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+  )
+  store.take(answer('b1', 'msg_1', 'done'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user('more')], 'msg_1'),
+      query_source: 'sdk',
+    }),
+  )
+  const whole = keptRecords(files)
+  const read = whole.map(one =>
+    one.seq === 1 ? fromHead(JSON.parse(files[`${SESSION}/000001.head.json`]!)) : one,
+  )
+  expect(read[1]).toMatchObject({ source: 'sdk', continues: true, after: 0, toolCount: 0 })
+  expect(promptRecord(read, 2)?.seq).toBe(0)
+  expect(tracePromptRecord(read, 2)?.seq).toBe(0)
+  const messages = fullMessages(read, 2)!
+  expect(messages).toHaveLength(whole[2]!.messageCount)
+  expect(messages).toHaveLength(fullMessages(whole, 2)!.length)
+  expect(messages.at(-1)).toEqual(user('more'))
+  expect(messages.filter(one => JSON.stringify(one).includes('Not shown'))).toHaveLength(1)
+})
+
+test('the browser pages read a large request whole, with no head', () => {
+  const records = keptRecords(largeSession())
+  expect(records.map(one => one.seq)).toEqual([0, 1, 2])
+  expect(records.some(one => (one as { isHead?: boolean }).isHead)).toBe(false)
+  const html = requestPage({
+    session: SESSION,
+    records,
+    seq: 2,
+    system: null,
+    tools: null,
+    link: () => '#',
+  })!
+  expect(html).toContain('BIGxxxx')
+  expect(html).not.toContain('Not shown')
+  expect(fullMessages(records, 2)).toHaveLength(5)
+})
+
+function toolAnswer(bodyId: string, id: string) {
+  return record('api_response_body', {
+    request_body_id: bodyId,
+    body: JSON.stringify({
+      id,
+      content: [
+        { type: 'text', text: 'Running ls.' },
+        { type: 'tool_use', id: 'tu_1', name: 'Bash', input: { command: 'ls' } },
+      ],
+      stop_reason: 'tool_use',
+    }),
+  })
+}
+
+const toolTurn = {
+  role: 'assistant',
+  content: [
+    { type: 'text', text: 'Running ls.' },
+    { type: 'tool_use', id: 'tu_1', name: 'Bash', input: { command: 'ls' } },
+  ],
+}
+const toolResult = {
+  role: 'user',
+  content: [{ type: 'tool_result', tool_use_id: 'tu_1', content: 'a.txt' }],
+}
+
+test('a request that goes on has the answer it goes on from in its conversation, and counts it', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('list the files')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(toolAnswer('b0', 'msg_0'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([toolResult], 'msg_0'),
+      query_source: 'sdk',
+      request_body_id: 'b1',
+    }),
+  )
+  store.take(answer('b1', 'msg_1', 'There is a.txt.'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([user('thanks')]),
+      query_source: 'sdk',
+      request_body_id: 'b2',
+    }),
+  )
+  store.take(answer('b2', 'msg_2'))
+  const records = keptRecords(files)
+  expect(records[1]).toMatchObject({ continues: true, after: 0, from: 2, messageCount: 3 })
+  expect(records[1]!.added).toEqual([toolResult])
+  expect(fullMessages(records, 1)).toEqual([user('list the files'), toolTurn, toolResult])
+  expect(records[2]).toMatchObject({ continues: true, after: 1, from: 4, messageCount: 5 })
+  expect(fullMessages(records, 2)).toEqual([
+    user('list the files'),
+    toolTurn,
+    toolResult,
+    assistant('There is a.txt.'),
+    user('thanks'),
+  ])
+  for (const one of records) expect(fullMessages(records, one.seq)).toHaveLength(one.messageCount)
+
+  const later = { ...files }
+  memoryStore(later, () => 3).take(
+    record('api_request_body', { body: continuationBody([user('more')]), query_source: 'sdk' }),
+  )
+  const read = keptRecords(later)
+  expect(read[3]).toMatchObject({ continues: true, after: 2, from: 6, messageCount: 7 })
+  expect(fullMessages(read, 3)).toHaveLength(7)
+  expect(fullMessages(read, 3)!.at(-2)).toEqual(assistant('ok'))
+})
+
+test('an answer that lands after the request that goes on from it is not put before it', () => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('hello')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(
+    record('api_request_body', { body: continuationBody([user('more')]), query_source: 'sdk' }),
+  )
+  store.take(answer('b0', 'msg_0', 'hi'))
+  const records = keptRecords(files)
+  expect(records[0]!.response).not.toBeNull()
+  expect(records[1]).toMatchObject({ continues: true, from: 1, messageCount: 2 })
+  expect(fullMessages(records, 1)).toEqual([user('hello'), user('more')])
+})
+
+test('a whole body sent again after a request that went on rebuilds as sent', () => {
+  const sent = (answerBlock: Record<string, unknown>) => {
+    const files: Record<string, string> = {}
+    const store = memoryStore(files)
+    store.take(
+      record('api_request_body', {
+        body: requestBody([user('hello')]),
+        query_source: 'sdk',
+        request_body_id: 'b0',
+      }),
+    )
+    store.take(answer('b0', 'msg_0', 'hi'))
+    store.take(
+      record('api_request_body', {
+        body: continuationBody([user('more')], 'msg_0'),
+        query_source: 'sdk',
+      }),
+    )
+    const whole = [user('hello'), { role: 'assistant', content: [answerBlock] }, user('more')]
+    store.take(record('api_request_body', { body: requestBody(whole), query_source: 'sdk' }))
+
+    return { records: keptRecords(files), whole }
+  }
+
+  const same = sent({ type: 'text', text: 'hi' })
+  expect(same.records[2]).toMatchObject({ continues: false, from: 3, messageCount: 3, added: [] })
+  expect(fullMessages(same.records, 2)).toEqual(same.whole)
+
+  const other = sent({ type: 'text', text: 'hi', citations: null })
+  expect(other.records[2]).toMatchObject({ continues: false, from: 1, messageCount: 3 })
+  expect(other.records[2]!.added).toEqual(other.whole.slice(1))
+  expect(fullMessages(other.records, 2)).toEqual(other.whole)
+})
+
+test('the pane’s reader and the browser page show the answer a request goes on from', async ($, on) => {
+  const files: Record<string, string> = {}
+  const store = memoryStore(files)
+  store.take(
+    record('api_request_body', {
+      body: requestBody([user('list the files')]),
+      query_source: 'sdk',
+      request_body_id: 'b0',
+    }),
+  )
+  store.take(toolAnswer('b0', 'msg_0'))
+  store.take(
+    record('api_request_body', {
+      body: continuationBody([toolResult], 'msg_0'),
+      query_source: 'sdk',
+    }),
+  )
+
+  const html = requestPage({
+    session: SESSION,
+    records: keptRecords(files),
+    seq: 1,
+    system: null,
+    tools: null,
+    link: () => '#',
+  })!
+  const roles = [
+    ...html.matchAll(/<span class="seq">#(\d)<\/span><span class="pill tone-\w+">(\w+)</g),
+  ]
+  expect(roles.map(match => `${match[1]} ${match[2]}`)).toEqual(['1 user', '2 assistant', '3 user'])
+
+  tracedEngine(on, sessionFiles(files))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
+  await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
+  await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
+  await pane.press({ key: 'read-1' })
+  const text = (await readerText(pane)).join('\n')
+  expect(text).toMatch(/══ Messages: 3, the last 1 new in this request/)
+  expect(text).toMatch(
+    /── #1 user\nlist the files\n \n── #2 assistant\nRunning ls\.\n→ Bash \{[\s\S]*── #3 user \(new\)\n← tool result\na\.txt/,
+  )
+
+  await pane.unmount()
+})

@@ -2,8 +2,10 @@ name: ci
 
 on:
   push:
-    branches: [main]
+    branches: [main, dev]
   pull_request:
+  # release-please.yml runs these checks on a release before publishing it to npm.
+  workflow_call:
 
 jobs:
   format:
@@ -33,9 +35,11 @@ jobs:
       - uses: actions/setup-node@v7
         with:
           node-version: 22
-      # Function hooks are early access, so the engine is pinned and bumped on purpose.
+      # The latest release, the engine people run the plugins on.
       - name: Install Claude Code
-        run: npm install -g @anthropic-ai/claude-code@2.1.302
+        run: |
+          npm install -g @anthropic-ai/claude-code@latest
+          claude --version
       - name: Validate marketplace
         run: claude plugin validate --strict .
       - name: Validate and test each plugin
@@ -46,3 +50,25 @@ jobs:
             claude plugin validate --strict "$dir"
             claude plugin test "$dir"
           done
+      # The npm package's installer, packed and run as a person runs it, each time
+      # against a Claude configuration of its own: a fresh one, the same one again,
+      # and one where the desktop app added the marketplace by its URL. It installs
+      # the plugin from the marketplace on GitHub; this checks the installer.
+      - name: Install with npx
+        run: |
+          set -euo pipefail
+          tgz="$RUNNER_TEMP/$(cd desktop-statusline && npm pack --pack-destination "$RUNNER_TEMP" | tail -n 1)"
+          install() { npx --yes --package "file:$tgz" desktop-statusline; }
+          installed() { claude plugin list --json | grep '"desktop-statusline@claude-mods"' >/dev/null; }
+
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-fresh"
+          mkdir -p "$CLAUDE_CONFIG_DIR"
+          install
+          installed
+          install
+
+          export CLAUDE_CONFIG_DIR="$RUNNER_TEMP/claude-desktop"
+          mkdir -p "$CLAUDE_CONFIG_DIR"
+          claude plugin marketplace add https://github.com/jiroamato/claude-mods.git
+          install
+          installed

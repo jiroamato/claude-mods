@@ -3,7 +3,7 @@ name: Guard generated files
 on:
   pull_request:
     types: [opened, synchronize, reopened]
-    branches: [main]
+    branches: [main, dev]
     # Never create a run for a release PR. The job-level author exemption below
     # cannot do this: it is evaluated inside a run, and a GITHUB_TOKEN PR's run
     # is created in action_required and never starts.
@@ -12,6 +12,7 @@ on:
       - .claude-plugin/marketplace.json
       - '*/CHANGELOG.md'
       - '*/.claude-plugin/plugin.json'
+      - '*/package.json'
 
 permissions:
   contents: read

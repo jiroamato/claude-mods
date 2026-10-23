@@ -2,48 +2,95 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export type GitInfo = { branch: string; isDirty: boolean } | null
 
-/** What one tile of the context map stands for. */
-export type BlockKind =
-  'system' | 'tools' | 'mcp' | 'agents' | 'memory' | 'skills' | 'conversation' | 'result'
-
-/** One tile of the context map: a category, or one tool result within the messages. */
-export type ContextBlock = { label: string; kind: BlockKind; tokens: number }
-
-/** The context window broken down, as the hover card and the pane draw it. */
-export type ContextSnapshot = {
-  /** Tokens in use, as /context counts them. */
-  used: number
-  /** The window measured against. */
-  window: number
-  /** Used over window, a whole percentage. */
-  percent: number
-  /** Every used category, the messages split into their largest tool results. */
-  blocks: ContextBlock[]
-  /** Each listed skill with its listing's tokens. */
-  skills: { name: string; tokens: number; source: string; description: string }[]
+export type ContextRow = {
+  name: string
+  tokens: number
 }
 
-/** A built-in tool as the engine described it to the model this session. */
+export type ContextItem = { name: string; tokens: number; detail: string }
+
+export type PromptSection = {
+  id: string
+  title: string
+  tokens: number
+  text: string
+  isAdded?: boolean
+}
+
+export type SkillOrigin = 'yours' | 'anthropic' | 'organization'
+
+export type PaneTab = 'tools' | 'prompt' | 'skills' | 'trace'
+
+export type TraceItem = {
+  seq: number
+  at: string
+  source: string
+  model: string
+  promptId: string | null
+  added: string[]
+  reply: string | null
+  usage: {
+    input?: number
+    output?: number
+    cacheRead?: number
+    cacheWrite?: number
+    costUsd?: number
+    durationMs?: number
+    effort?: string | null
+  } | null
+  messageCount: number
+  toolCount: number
+}
+
+export type TraceStatus =
+  'off' | 'next-session' | 'emptied' | 'no-node' | 'unreachable' | 'elsewhere' | 'on'
+
+export type TraceState = {
+  status: TraceStatus
+  items: TraceItem[]
+  prompt: PromptSection[] | null
+  view: { session: string; token: string } | null
+  replaced: string[]
+  differing: string[]
+}
+
+export type TracePlaces = { settings: string; traces: string }
+
+export type ContextSnapshot = {
+  window: number
+  rows: ContextRow[]
+  skills: {
+    name: string
+    tokens: number
+    source: string
+    description: string
+    origin: SkillOrigin
+  }[]
+  prompt: PromptSection[]
+}
+
 export type SeenTool = { description: string; isDeferred: boolean }
 
 declare module 'claude-code' {
   interface PluginState {
     'desktop-statusline': {
-      /** Bumped once a second so the band redraws its live figures. */
-      tick: number
-      /** The working copy's branch and whether it has uncommitted changes. */
+      steps: number
       git: GitInfo
-      /** The reasoning effort of the last main-loop request, or the configured one. */
       effort: Effort | null
-      /** The context window broken down, refreshed after every turn; null until read. */
       context: ContextSnapshot | null
-      /** The built-in tools of this session, by name, as `tool.describe` saw them. */
+      expanded: string[]
+      collapsed: string[]
+      tab: PaneTab
+      page: number
+      reader: number | null
+      readerSearch: { query: string; index: number }
+      readerOffset: number
+      trace: TraceState
+      traceError: string | null
+      folderError: string | null
       tools: Record<string, SeenTool>
-      /** Built-in tools denied by bare name in the user settings, read from the file. */
       removed: string[]
-      /** Tools put back during this session that it started without. */
       putBack: string[]
-      /** Why the last Remove or Put back failed, until the next one succeeds. */
       toolError: string | null
     }
   }

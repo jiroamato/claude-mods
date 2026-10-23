@@ -1,3 +1,9 @@
 # Written by the Claude Code engine each time it loads a mod: this build's
 # API typings for the editor. Regenerated on load, never committed.
 **/.claude-plugin/types/
+# Only there while npm packs the installer (desktop-statusline/pack-docs.mjs):
+# the LICENSE copied in, and the README as committed, set aside.
+desktop-statusline/LICENSE
+desktop-statusline/.README.committed.md
+# What `npm pack` writes.
+*.tgz

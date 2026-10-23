@@ -1,7 +1,7 @@
 {
   "name": "desktop-statusline",
   "version": "0.1.0",
-  "description": "Status bar above the prompt on the desktop surface: model, effort, folder, git branch, context usage, cost and elapsed time, with a hover map of the context window and a pane to remove built-in tools from it",
+  "description": "Status bar above the prompt on the desktop surface: model, effort, folder, git branch, context usage, cost and elapsed time, with a pane to remove built-in tools, read the system prompt as sent, and trace every request to the model",
   "author": {
     "name": "Jiro Amato",
     "email": "amato.miguel@gmail.com"
@@ -16,7 +16,7 @@
     "context",
     "cost",
     "git",
-    "context-map",
+    "tracing",
     "tools"
   ],
   "types": "./types/index.d.ts"
