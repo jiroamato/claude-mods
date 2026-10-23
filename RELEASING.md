@@ -57,11 +57,14 @@ A release that fails to publish can be published by re-running the workflow's fa
 npm only lets a trusted publisher be configured on a package that already exists, so the
 first version is published by hand, once:
 
-1. From an up-to-date `main` checkout, run `npm login`, then `npm publish` in
+1. From an up-to-date checkout of a branch that has `desktop-statusline/package.json` (`dev`,
+   until it is promoted to `main`), run `npm login`, then `npm publish` in
    `desktop-statusline/`.
 2. On npmjs.com, open the package's **Settings > Trusted Publisher > GitHub Actions** and set
    user `jiroamato`, repository `claude-mods`, workflow `release-please.yml`, environment
-   empty.
+   empty. Under **Allowed actions**, check **Allow npm publish**: without it the workflow's
+   `npm publish` only stages the version and never makes it live. Leave **Allow npm
+   dist-tag** unchecked, since the workflow never changes dist-tags.
 3. Under **Settings > Publishing access**, choose **Require two-factor authentication and
    disallow tokens**, so that only the workflow, or the maintainer with 2FA, can publish.
 
