@@ -14,6 +14,8 @@
 A [Claude Code](https://code.claude.com) plugin from the
 [claude-mods](https://github.com/jiroamato/claude-mods) marketplace, built on function hooks.
 
+![A Code session in the Claude desktop app with the status bar above the prompt. Clicking its ⓘ opens the Context details pane: built-in tools are removed and put back in the Tools tab, the system prompt is read section by section in the Prompt tab, the installed skills are listed in the Skills tab, and the Trace tab shows the session's request, expands it, and opens the whole trace in the browser](docs/demo.gif)
+
 A status bar above the prompt in the Claude desktop app's Code tab. It mirrors
 the figures a terminal status line shows, its text in the app's own theme colours:
 
@@ -211,7 +213,7 @@ desktop-statusline/
   trace/*.d.mts                their types, for the hooks and the tests
   types/index.d.ts             its state contract
   tests/                       run with `claude plugin test`
-  docs/                        this README's screenshots
+  docs/                        this README's screenshots and demo
   package.json                 the npm package, @jiroamato/desktop-statusline
   install.mjs                  its installer, what `npx` runs
   pack-docs.mjs                readies this README and the LICENSE while npm packs it
