@@ -14,9 +14,11 @@
 A [Claude Code](https://code.claude.com) plugin from the
 [claude-mods](https://github.com/jiroamato/claude-mods) marketplace, built on function hooks.
 
-Keep the model, effort, branch, context use, cost and session time in view while you
-work. Open the pane behind its ⓘ to see every request Claude Code sends the model, or
-remove built-in tools you don't use so your conversation gets more of the context window.
+> **Why use it**
+>
+> Keep the model, effort, branch, context use, cost and session time in view while you
+> work. Open the pane behind its ⓘ to see every request Claude Code sends the model, or
+> remove built-in tools you don't use so your conversation gets more of the context window.
 
 ![A Code session in the Claude desktop app with the status bar above the prompt. Clicking its ⓘ opens the Context details pane: built-in tools are removed and put back in the Tools tab, the system prompt is read section by section in the Prompt tab, the installed skills are listed in the Skills tab, and the Trace tab shows the session's request, expands it, and opens the whole trace in the browser](docs/demo.gif)
 
