@@ -76,13 +76,14 @@ start after that is traced, in the terminal and in the desktop app.
 | `CLAUDE_CODE_OTEL_CONTENT_MAX_LENGTH` | `20000000`                       |
 
 **Turn off tracing** puts back what you had under those names, and removes the ones
-you never set.
+you never set. A value you changed while tracing was on stays as you left it.
 
 A local receiver, run with [Node.js](https://nodejs.org) from your `PATH`, saves the
 requests to `~/.claude/desktop-statusline/traces/`. Delete that folder to clear them.
 
 A trace holds the whole conversation, file contents and command output included. It
-stays on your machine unless your organization's settings send telemetry elsewhere.
+stays on your machine unless your organization's settings, or a variable of your own,
+send telemetry elsewhere.
 On a machine shared with other users, another user could feed the receiver records
 or take its port.
 

@@ -23,10 +23,13 @@ Read the matching file before you act:
   its tests `<plugin>/tests/`. The engine's API typings land in `<plugin>/.claude-plugin/types/` when a
   session loads the plugin; grep them for any `$` call or event before using it. They are generated,
   never committed.
-- In `desktop-statusline/`, `register.tsx` draws the band; the other `hooks/` files are the Context
-  details pane (`panel.tsx` and its parts) and what it reads (`context.ts`, `tools.ts`, `trace.ts`).
-  `trace/` is the receiver Node runs for tracing, with its browser pages. `package.json`, `install.mjs`
-  and `pack-docs.mjs` are the npm installer, which `RELEASING.md` covers.
+- In `desktop-statusline/hooks/`, `register.tsx` registers every hook and draws the band, its timer in
+  `elapsed.tsx` and `duration.ts`. `panel.tsx` and the components it mounts (`tabs.tsx`,
+  `disclosure.tsx`, `reader.tsx`, `text.tsx`) are the Context details pane. `context.ts` reads the
+  breakdown, `tools.ts` the tools and the deny edit, `trace.ts` tracing's settings and traces, and
+  `folder.ts` opens the traces folder. `trace/` is the receiver Node runs for tracing, its browser
+  pages, and the record code `hooks/trace.ts` shares. `package.json`, `install.mjs` and
+  `pack-docs.mjs` are the npm installer, which `RELEASING.md` covers.
 - Checks, all of which CI runs on Ubuntu, macOS and Windows:
   `claude plugin validate --strict .`, `claude plugin validate --strict <plugin>`,
   `claude plugin test <plugin>`, `npx --yes prettier@3.9.10 --check .`. Type-check with

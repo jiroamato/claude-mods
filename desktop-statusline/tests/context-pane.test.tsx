@@ -384,6 +384,9 @@ test('the ⓘ opens the pane on its Tools tab, and the meter is no control', asy
   const boxes = await band.findAll({ type: 'Box' })
   expect(boxes.filter(one => one.props.position === 'absolute')).toEqual([])
   expect(boxes.filter(one => one.props.hover !== undefined)).toEqual([])
+  const buttons = await band.findAll({ type: 'Button' })
+  expect(buttons).toHaveLength(1)
+  expect(await band.find({ type: 'Button', key: 'open-details' })).toBeDefined()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await openTab(pane, 'skills')
