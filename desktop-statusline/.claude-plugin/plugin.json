@@ -1,6 +1,6 @@
 {
   "name": "desktop-statusline",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Status bar above the prompt on the desktop surface: model, effort, folder, git branch, context usage, cost and elapsed time, with a pane to remove built-in tools, read the system prompt as sent, and trace every request to the model",
   "author": {
     "name": "Jiro Amato",

@@ -1,5 +1,18 @@
 # Changelog
 
+## [0.1.1](https://github.com/jiroamato/claude-mods/compare/v0.1.0...v0.1.1) (2026-10-23)
+
+
+### Features
+
+* **desktop-statusline:** a Context details pane: remove tools, read the system prompt as sent, trace every request ([faf845d](https://github.com/jiroamato/claude-mods/commit/faf845d987d6b3275a1676f2fcad5580e7c942a6))
+* **desktop-statusline:** install with npx ([#11](https://github.com/jiroamato/claude-mods/issues/11)) ([8923be2](https://github.com/jiroamato/claude-mods/commit/8923be22c99ea3f446ee9b0a8fb5b0e9c0e71f43))
+
+
+### Bug Fixes
+
+* **desktop-statusline:** count the context map as /context does ([#8](https://github.com/jiroamato/claude-mods/issues/8)) ([58ef703](https://github.com/jiroamato/claude-mods/commit/58ef703d33002421d97a634529634968f6ff6c95))
+
 ## 0.1.0 (2026-10-17)
 
 

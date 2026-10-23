@@ -1,6 +1,6 @@
 {
   "name": "@jiroamato/desktop-statusline",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "description": "Installs desktop-statusline, a Claude Code plugin: a status bar above the prompt in the Claude desktop app with model, effort, folder, git branch, context meter, cost and elapsed time",
   "keywords": [
     "claude",
