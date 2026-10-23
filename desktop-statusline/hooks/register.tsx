@@ -65,17 +65,6 @@ import {
   toolRows,
 } from './tools'
 
-// Mirrors a terminal status line on the desktop
-// surface, drawn as one band above the prompt. Colours are theme keys, so
-// the band follows the app's light and dark palettes and its accent:
-//
-//   Fable 5.1 │ high │ construct-land | main •        [▮▮▮▮      ] 33% │ $1.23 │ 12m 4s │ ⓘ
-//
-// The ⓘ at its end opens the Context details pane, for what the desktop's own
-// Context card cannot show: the built-in tools, which can be removed from the
-// window and put back, the system prompt's text, the skills' listings and the
-// conversation's trace.
-
 const steps = atom({ plugin: 'desktop-statusline', key: 'steps' } as const, 0)
 const git = atom({ plugin: 'desktop-statusline', key: 'git' } as const, null)
 const effort = atom({ plugin: 'desktop-statusline', key: 'effort' } as const, null)
@@ -102,9 +91,7 @@ const NO_TRACE: TraceState = {
 const trace = atom({ plugin: 'desktop-statusline', key: 'trace' } as const, NO_TRACE)
 const traceError = atom({ plugin: 'desktop-statusline', key: 'traceError' } as const, null)
 const folderError = atom({ plugin: 'desktop-statusline', key: 'folderError' } as const, null)
-/** The store key under which what tracing found under its names is kept, to give back. */
 const TRACE_ENV_BEFORE = 'trace-env-before'
-/** Said when off had nothing noted to give back, so took tracing's values out alone. */
 const TRACE_ENV_LOST =
   'Tracing is off, but what you had under its settings before it was turned on was not found ' +
   '(the plugin’s store was cleared, or another copy of the plugin turned it on), so its values ' +
@@ -113,7 +100,6 @@ const tools = atom({ plugin: 'desktop-statusline', key: 'tools' } as const, {})
 const removed = atom({ plugin: 'desktop-statusline', key: 'removed' } as const, [])
 const putBack = atom({ plugin: 'desktop-statusline', key: 'putBack' } as const, [])
 const toolError = atom({ plugin: 'desktop-statusline', key: 'toolError' } as const, null)
-/** The store key under which a built-in tool's description is kept across sessions. */
 const KNOWN_TOOL_PREFIX = 'tool-description:'
 
 const EFFORTS: readonly Effort[] = ['low', 'medium', 'high', 'xhigh', 'max']
@@ -124,8 +110,6 @@ const EFFORT_LABEL: Record<Effort, string> = {
   xhigh: 'x-high',
   max: 'max',
 }
-// Quiet for cheap, through the text colour, to the warning and error tones
-// for the two top levels, so the intensity reads at a glance.
 const EFFORT_COLOR: Record<Effort, string> = {
   low: 'inactive',
   medium: 'secondaryText',
@@ -134,15 +118,11 @@ const EFFORT_COLOR: Record<Effort, string> = {
   max: 'error',
 }
 
-// The context meter: a hollow rounded rectangle, filled from the left.
 const METER_WIDTH = 64
 const METER_HEIGHT = 10
 const METER_STROKE = 1
 const METER_OUTLINE = '#8a8a8a'
 const METER_FILL = '#c19c00'
-// The hairline between the band's figures: two pixels wide, a solid dark
-// grey a few shades off the dark band's background, so it sits back as a
-// faint seam rather than a drawn line.
 const DIVIDER_WIDTH = 2
 const DIVIDER_HEIGHT = 14
 const DIVIDER_COLOR = '#333333'
@@ -151,14 +131,9 @@ const DIVIDER_SVG =
   `<rect width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" fill="${DIVIDER_COLOR}"/>` +
   `</svg>`
 const GIT_REFRESH_EVERY_TICKS = 15
-// The widest reading the timer draws (`59m 59s`, `23h 59m`), so the slot
-// holds its width as the digits change and nothing beside it shifts.
 const ELAPSED_COLUMNS = 7
 
-// The band's own way into the pane: a circled i, as the Tools tab marks its
-// tip, a figure space either side so the desktop's pill around it has room.
 const INFO_GLYPH = ' ⓘ '
-// How long the pane takes to redraw after a change, before scrolling it.
 const PANE_SETTLE_MS = 300
 
 function asEffort(value: unknown): Effort | null {
@@ -175,7 +150,6 @@ function basename(path: string): string {
   return index === -1 ? trimmed : trimmed.slice(index + 1)
 }
 
-/** `claude-fable-5-1` -> `Fable 5.1`; a name already spelled for display is kept. */
 function prettyModel(model: string): string {
   if (/\s/.test(model) || /[A-Z]/.test(model)) return model
   const parts = model
@@ -194,7 +168,6 @@ function prettyModel(model: string): string {
   return digits.length > 0 ? `${name} ${digits.join('.')}` : name
 }
 
-/** The meter's markup: a grey rounded outline, the fill clipped to its inside. */
 function meterSvg(percent: number | undefined): string {
   const w = METER_WIDTH
   const h = METER_HEIGHT
@@ -213,11 +186,6 @@ function meterSvg(percent: number | undefined): string {
   )
 }
 
-/**
- * Reads the branch and whether the tree is dirty, and writes them when they
- * changed: a write draws the band again, and a drawing of the band repaints
- * every element of the plugin's, a focused field in the pane blinking at each.
- */
 async function refreshGit($: EngineInterface): Promise<void> {
   try {
     let next: GitInfo = null
@@ -238,25 +206,19 @@ async function refreshGit($: EngineInterface): Promise<void> {
     const was = await read($, git)
     if (was?.branch === next?.branch && was?.isDirty === next?.isDirty) return
     await update($, git, () => next)
-  } catch {
-    // Unreadable, or unloaded while it ran: the last reading stays.
-  }
+  } catch {}
 }
 
-/** Starts work nothing waits for; a rejection (unloaded while it ran) is let go. */
 function attempt(work: Promise<unknown>): void {
   void work.catch(() => undefined)
 }
 
-/** The effort the session is configured with, when no request has told us yet. */
 async function configuredEffort($: EngineInterface): Promise<Effort | null> {
   try {
     const row = (await $.config.list()).find(one => /effort/i.test(one.key))
     const fromConfig = asEffort(row?.value)
     if (fromConfig) return fromConfig
-  } catch {
-    // the menu may not be listable here; fall through to settings
-  }
+  } catch {}
   try {
     const settings = await $.settings.read()
     const model = (await $.session.model()).toLowerCase()
@@ -278,11 +240,6 @@ async function configuredEffort($: EngineInterface): Promise<Effort | null> {
   }
 }
 
-/**
- * The person's home folder: the profile on Windows, `HOME` elsewhere. WSL can
- * be given the Windows profile's variable too (WSLENV), and its Claude Code
- * keeps its settings in the Linux home, not there.
- */
 async function homeDir($: EngineInterface): Promise<string> {
   const [profile, unixHome] = [await $.env.get('USERPROFILE'), await $.env.get('HOME')]
   const home =
@@ -292,7 +249,6 @@ async function homeDir($: EngineInterface): Promise<string> {
   return home
 }
 
-/** The user's Claude configuration folder: `$CLAUDE_CONFIG_DIR`, else `~/.claude`. */
 async function configDir($: EngineInterface): Promise<string> {
   const configured = await $.env.get('CLAUDE_CONFIG_DIR')
   if (configured) return configured
@@ -300,13 +256,10 @@ async function configDir($: EngineInterface): Promise<string> {
   return `${await homeDir($)}/.claude`
 }
 
-/** The user settings file, which `/permissions` and the settings UI also write. */
 async function settingsPath($: EngineInterface): Promise<string> {
   return `${await configDir($)}/settings.json`
 }
 
-// Reads and writes of the settings file run one at a time, so two quick presses
-// cannot both read the file before either writes it.
 let settingsQueue: Promise<unknown> = Promise.resolve()
 
 function serially<T>(task: () => Promise<T>): Promise<T> {
@@ -322,10 +275,6 @@ async function readSettingsText($: EngineInterface): Promise<string> {
   return (await $.fs.exists(path)) ? String(await $.fs.read(path)) : ''
 }
 
-/**
- * Re-reads which tools the user settings deny, from the file itself, and
- * re-describes the tools when that changed, so a hand edit applies here too.
- */
 function refreshRemoved($: EngineInterface): Promise<void> {
   return serially(async () => {
     try {
@@ -334,13 +283,10 @@ function refreshRemoved($: EngineInterface): Promise<void> {
       if (names.length === before.length && names.every(one => before.includes(one))) return
       await update($, removed, () => names)
       $.ui.invalidate('tool.describe')
-    } catch {
-      // An unreadable settings file leaves the last reading in place.
-    }
+    } catch {}
   })
 }
 
-/** The system prompt's sections as the session composes them; none when it cannot be read. */
 async function composedPrompt($: EngineInterface): Promise<readonly PromptComposeSection[]> {
   try {
     return (await $.prompt.compose()).sections
@@ -349,10 +295,6 @@ async function composedPrompt($: EngineInterface): Promise<readonly PromptCompos
   }
 }
 
-/**
- * Reads the context window broken down, for the pane, counted with the
- * token-count API as /context counts it so the two agree.
- */
 async function refreshContext($: EngineInterface): Promise<void> {
   try {
     const usage = await $.session.usage({ breakdown: 'full' })
@@ -361,16 +303,9 @@ async function refreshContext($: EngineInterface): Promise<void> {
     const [commands, sections] = await Promise.all([$.command.list(), composedPrompt($)])
     const snapshot = buildSnapshot(breakdown, commands, sections)
     await update($, context, () => snapshot)
-  } catch {
-    // The session could not be read just now; the next turn tries again.
-  }
+  } catch {}
 }
 
-/**
- * Removes a built-in tool, or puts it back: the deny rule in the user settings
- * for new sessions, and the tool's schema moved out of (or back into) this
- * session's context at once.
- */
 async function setRemoved($: EngineInterface, name: string, shouldRemove: boolean): Promise<void> {
   const isWritten = await serially(async () => {
     try {
@@ -410,17 +345,10 @@ async function setRemoved($: EngineInterface, name: string, shouldRemove: boolea
   await refreshContext($)
 }
 
-/**
- * Where the trace receiver keeps each session's requests: always
- * `~/.claude/desktop-statusline/traces`, whatever `$CLAUDE_CONFIG_DIR` says.
- * One receiver serves every session on the machine, so its folder is one
- * too, and the person always knows where to find it, or delete it.
- */
 async function traceRoot($: EngineInterface): Promise<string> {
   return `${await homeDir($)}/.claude/desktop-statusline/traces`
 }
 
-/** What the traces folder says it is, to whoever comes across it. */
 const TRACES_README =
   'Traces of desktop-statusline, a plugin for Claude Code.\n' +
   '\n' +
@@ -431,21 +359,11 @@ const TRACES_README =
   '\n' +
   'Delete this folder to remove every trace. The next session makes it again, empty.\n'
 
-/**
- * Makes the traces folder if it is missing, so the path the Trace tab names
- * leads somewhere from the first session after install, tracing on or off.
- * The engine makes a folder only for a file written in it: the folder's one
- * is a note on what it holds.
- */
 async function ensureTraceFolder($: EngineInterface): Promise<void> {
   const root = await traceRoot($)
   if (!(await $.fs.exists(root))) await $.fs.write(`${root}/README.txt`, TRACES_README)
 }
 
-/**
- * Opens the traces folder in the system's file manager (./folder.ts). The
- * folder is made first, so there is always one to open.
- */
 async function showTraceFolder($: EngineInterface): Promise<void> {
   try {
     await ensureTraceFolder($)
@@ -457,7 +375,6 @@ async function showTraceFolder($: EngineInterface): Promise<void> {
   }
 }
 
-/** The files tracing touches, as the Trace tab names them; null where no home folder is set. */
 async function tracePlaces($: EngineInterface): Promise<TracePlaces | null> {
   try {
     return { settings: await settingsPath($), traces: await traceRoot($) }
@@ -466,18 +383,10 @@ async function tracePlaces($: EngineInterface): Promise<TracePlaces | null> {
   }
 }
 
-/** How long the receiver gets to answer once started, before it counts as failed. */
 const RECEIVER_START_MS = 3000
 const RECEIVER_POLL_MS = 150
-/** How long after a turn its last answer has surely been exported. */
 const TRACE_SETTLE_MS = 2500
 
-/**
- * Which receiver answers on the port: this plugin's, an older or a newer one
- * of it, another server, or none. A newer one, from a plugin updated in
- * another session, is left to serve: the two would otherwise take turns
- * replacing each other.
- */
 async function receiverOnPort(
   $: EngineInterface,
 ): Promise<'current' | 'older' | 'newer' | 'other' | 'none'> {
@@ -495,14 +404,12 @@ async function receiverOnPort(
   return theirs < ours ? 'older' : 'newer'
 }
 
-/** The version a receiver's health text names, or null for another server's. */
 function receiverVersion(text: string): number | null {
   const match = new RegExp(`^${RECEIVER_NAME} (\\d+)$`).exec(text.trim())
 
   return match ? Number(match[1]) : null
 }
 
-/** The token the running receiver's pages answer to, which it writes beside the traces. */
 async function viewToken($: EngineInterface): Promise<string | null> {
   try {
     const token = String(await $.fs.read(`${await traceRoot($)}/.view-token`)).trim()
@@ -519,18 +426,11 @@ async function isReceiverUp($: EngineInterface): Promise<boolean> {
   return found === 'current' || found === 'newer'
 }
 
-/**
- * Makes sure a trace receiver listens: one serves every session on the
- * machine, so one already up is used. Else this session starts one with Node,
- * which runs for the session's life; when that session ends, the next one to
- * check starts another.
- */
 async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
   const found = await receiverOnPort($)
   if (found === 'current' || found === 'newer') return 'on'
   if (found === 'other') return 'unreachable'
   if (found === 'older') {
-    // An older receiver serves the trace as it was: asked to leave, it frees the port.
     const token = await viewToken($)
     if (token) {
       await $.http
@@ -550,7 +450,6 @@ async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
     void (async () => {
       try {
         for await (const _piece of child) {
-          // Its output is not read; the loop holds the child for the session.
         }
       } catch {
         hasFailed = true
@@ -565,29 +464,15 @@ async function ensureReceiver($: EngineInterface): Promise<TraceStatus> {
     if (await isReceiverUp($)) return 'on'
   }
 
-  // Node ran, but nothing answers: the port is another program's, or the
-  // receiver stopped (it could not make its folder).
   return hasFailed ? 'no-node' : 'unreachable'
 }
 
-/**
- * Requests read from this session's trace folder, by file name, with what
- * each was read at: its file's time, and its head's for one read from that.
- * A `/clear` or a resume goes on in the same process under a new session id,
- * so the cache is the session's it was read for.
- */
 const traceCache = new Map<string, { stamp: string; item: TraceItem; record: TraceRecord }>()
 let traceSession: string | null = null
 const systemCache = new Map<string, { type: string; text: string }[]>()
 let traceQueue: Promise<unknown> = Promise.resolve()
-/**
- * The largest file `$.fs.read` reads: a larger request is read from its head
- * (`<seq>.head.json`, which the receiver writes for a large one), or listed by
- * its number alone when it has none.
- */
 const MAX_READ_BYTES = 4 * 1024 * 1024
 
-/** A request too large to read here, with no head: listed for the browser, where it opens. */
 function unreadRecord(name: string, at: number): TraceRecord {
   return {
     seq: Number(name.slice(0, 6)),
@@ -607,7 +492,6 @@ function unreadRecord(name: string, at: number): TraceRecord {
   }
 }
 
-/** Starts the caches afresh when the session they were read for is not this one. */
 async function traceFolder($: EngineInterface): Promise<{ session: string; folder: string }> {
   const session = await $.session.id()
   if (session !== traceSession) {
@@ -620,17 +504,9 @@ async function traceFolder($: EngineInterface): Promise<{ session: string; folde
   return { session, folder: `${await traceRoot($)}/${session}` }
 }
 
-/**
- * Whether this process's telemetry started sending its log events to the
- * receiver, read from its environment at the module's first `session.start`,
- * which fires before the first prompt: the settings' `env` as the process
- * started, since a later change to the settings reaches its environment but
- * not its telemetry. Null before it is read, or when it could not be.
- */
 let startedTraced: Promise<boolean | null> = Promise.resolve(null)
 let hasReadStart = false
 
-/** Reads whether telemetry was sent here as this process started; once, at the first `session.start`. */
 function readStartedTraced($: EngineInterface): void {
   if (hasReadStart) return
   hasReadStart = true
@@ -642,27 +518,16 @@ function readStartedTraced($: EngineInterface): void {
     }))().catch(() => null)
 }
 
-/**
- * Reads this session's trace from the receiver's folder: what tracing's
- * switch says, every request recorded, and the system prompt the last main
- * request sent. One reading at a time; a request already read is read again
- * only when its file changed (its answer arrived).
- */
 function refreshTrace($: EngineInterface): Promise<void> {
   const run = traceQueue.then(async () => {
     try {
       const settings = parseSettings(await readSettingsText($))
       let status: TraceStatus = isTraceOn(settings) ? await ensureReceiver($) : 'off'
-      // Another endpoint wins over the one tracing sets (managed settings, a
-      // variable of the person's own): the requests go there, not here.
       const endpoint = await $.env.get('OTEL_EXPORTER_OTLP_LOGS_ENDPOINT')
       if (status === 'on' && endpoint && endpoint !== TRACE_ENV.OTEL_EXPORTER_OTLP_LOGS_ENDPOINT) {
         status = 'elsewhere'
       }
-      // Tracing's names the settings hold otherwise, changed by hand while it is on.
       const differing = status === 'off' ? [] : differingNames(settings)
-      // The person's own values tracing holds in place of while it is on: one
-      // changed by hand since is no longer tracing's, and off leaves it be.
       const replaced =
         status === 'off'
           ? []
@@ -670,9 +535,7 @@ function refreshTrace($: EngineInterface): Promise<void> {
               name => !differing.includes(name),
             )
       if (status !== 'on') {
-        // Off, the list goes: what it held is no longer this tab's to show.
         await update($, trace, kept => {
-          // What is kept may be an earlier version's: read in this one's shape.
           const current = currentTrace(kept)
 
           return {
@@ -687,19 +550,12 @@ function refreshTrace($: EngineInterface): Promise<void> {
       }
       const { session, folder } = await traceFolder($)
       const entries = (await $.fs.exists(folder)) ? await $.fs.list(folder) : []
-      // Telemetry starts with the process: one already running when tracing was
-      // turned on exports nothing, though its environment says otherwise once
-      // the settings change. A session that has taken a turn and has no trace
-      // is such a one, unless its telemetry started pointed here: then its
-      // folder was deleted meanwhile, or its requests were not recorded.
       const turns = await $.session.turns().catch(() => 0)
       if (entries.length === 0 && turns > 0) {
         status = (await startedTraced) ? 'emptied' : 'next-session'
       }
       const byName = new Map(entries.map(entry => [entry.name, entry]))
-      // A request the person deleted goes from the list too.
       for (const name of traceCache.keys()) if (!byName.has(name)) traceCache.delete(name)
-      // A request's file, not a head beside it: those are read in its place.
       for (const entry of entries) {
         if (!/^\d{6}\.json$/.test(entry.name)) continue
         const isLarge = entry.size > MAX_READ_BYTES
@@ -719,13 +575,9 @@ function refreshTrace($: EngineInterface): Promise<void> {
             record = unreadRecord(entry.name, entry.mtimeMs)
           }
           traceCache.set(entry.name, { stamp, item: summarize(record), record })
-        } catch {
-          // Being written: the next reading tries again.
-        }
+        } catch {}
       }
       const records = [...traceCache.values()].sort((a, b) => a.item.seq - b.item.seq)
-      // The last main request's prompt: a request that went on from the one
-      // before carried none of its own, only the billing header.
       const last = records.findLast(one => isMainSource(one.record.source))?.record
       const main = last
         ? promptRecord(
@@ -745,9 +597,7 @@ function refreshTrace($: EngineInterface): Promise<void> {
               text: string
             }[]
             systemCache.set(main.system, blocks)
-          } catch {
-            // Deleted, or not written yet: the Prompt tab shows the composed sections.
-          }
+          } catch {}
         }
         if (blocks) {
           const snapshot = currentSnapshot(await read($, context))
@@ -758,19 +608,15 @@ function refreshTrace($: EngineInterface): Promise<void> {
       const view = token ? { session, token } : null
       const items = records.map(one => one.item)
       await update($, trace, () => ({ status, items, prompt, view, replaced, differing }))
-    } catch {
-      // The folder could not be read just now; the next turn tries again.
-    }
+    } catch {}
   })
   traceQueue = run.catch(() => undefined)
 
   return run
 }
 
-/** The request the reader last laid out, as rows at a width: kept while the person scrolls. */
 let readerCache: { key: string; title: string; detail: string; rows: string[] } | null = null
 
-/** A request whole as rows `columns` wide, for the reader; null when it cannot be read. */
 async function readerRows(
   $: EngineInterface,
   seq: number,
@@ -779,8 +625,6 @@ async function readerRows(
   const { session, folder } = await traceFolder($)
   const cached = [...traceCache.values()].find(one => one.item.seq === seq)
   if (!cached) return null
-  // Read again once its answer lands, which changes its file, or one before
-  // it changes, which it is rebuilt from.
   const stamps = [...traceCache.values()]
     .filter(one => one.item.seq <= seq)
     .map(one => `${one.item.seq}@${one.stamp}`)
@@ -821,7 +665,6 @@ async function readerRows(
   return readerCache
 }
 
-/** Matches of the reader's search, kept while neither the rows nor the query change. */
 let matchCache: { key: string; query: string; matches: RowMatch[] } | null = null
 
 function readerMatches(laid: { key: string; rows: string[] }, query: string): RowMatch[] {
@@ -831,19 +674,12 @@ function readerMatches(laid: { key: string; rows: string[] }, query: string): Ro
   return matchCache.matches
 }
 
-/** How many rows the window showed at the reader's last drawing; a guess until it is drawn. */
 let readerBodyRows = 40
 
-/** The reader's first row in view, kept so the rows in view are all text. */
 function clampOffset(offset: number, total: number, visible: number): number {
   return Math.max(0, Math.min(offset, total - visible))
 }
 
-/**
- * Moves the reader's rows so the current match is in the middle of those in
- * view. The reader draws its own rows under its top (./panel.tsx), so this is
- * a change of state, which redraws it, not a scroll of the pane.
- */
 async function revealHit($: EngineInterface): Promise<void> {
   const laid = readerCache
   if (!laid) return
@@ -857,13 +693,11 @@ async function revealHit($: EngineInterface): Promise<void> {
   )
 }
 
-/** A new search in the reader: its first match current. */
 async function searchReader($: EngineInterface, query: string): Promise<void> {
   await update($, readerSearch, () => ({ query, index: 0 }))
   if (query.trim() !== '') await revealHit($)
 }
 
-/** Steps the reader's current match on or back, round the ends. */
 async function stepReader($: EngineInterface, by: number): Promise<void> {
   const count = matchCache?.matches.length ?? 0
   if (count === 0) return
@@ -871,12 +705,6 @@ async function stepReader($: EngineInterface, by: number): Promise<void> {
   await revealHit($)
 }
 
-/**
- * What the reader's text draws (./text.tsx) for the rows laid out, from the
- * row first in view: the rows a screen either side of the view, for the
- * glide to cross, each with its matches; where they start; the view's
- * height; and the request's length, for the scrollbar.
- */
 function textProps(
   laid: { rows: string[] },
   offset: number,
@@ -890,7 +718,6 @@ function textProps(
   const matches = readerMatches(laid as { key: string; rows: string[] }, searching.query)
   const current =
     matches.length > 0 ? matches[Math.min(searching.index, matches.length - 1)]! : null
-  // The matches by row, for the rows handed over.
   const byRow = new Map<number, RowMatch[]>()
   for (const match of matches) {
     if (match.row < base || match.row >= last) continue
@@ -913,18 +740,11 @@ function textProps(
   }
 }
 
-/**
- * Moves the reader's rows: by `by` rows, to an end, or to a first row. What
- * its text posts for a key, or for a press or a drag on its scrollbar
- * (./text.tsx).
- */
 async function scrollReader($: EngineInterface, pick: TextPick): Promise<void> {
   const laid = readerCache
   if (!laid) return
   const visible = readerVisibleRows(readerBodyRows)
   const total = laid.rows.length
-  // The offset kept was clamped to the window as it was: a taller window
-  // since leaves it past the last first row, and a key would move nothing.
   await update($, readerOffset, now =>
     clampOffset(
       'first' in pick
@@ -940,13 +760,7 @@ async function scrollReader($: EngineInterface, pick: TextPick): Promise<void> {
   )
 }
 
-/**
- * Opens a request whole in the pane's reader, at its top. The reader is never
- * taller than the pane's window (./panel.tsx), so the window, put at the top
- * once, has nothing to scroll from then on.
- */
 async function openReader($: EngineInterface, seq: number): Promise<void> {
-  // Laid out afresh for this request.
   readerCache = null
   await update($, readerSearch, () => ({ query: '', index: 0 }))
   await update($, readerOffset, () => 0)
@@ -954,14 +768,12 @@ async function openReader($: EngineInterface, seq: number): Promise<void> {
   await $.ui.scroll({ in: PANE_ID, to: 'start' }).catch(() => undefined)
 }
 
-/** One recorded request as text, for the Trace tab's open row; null when it is not read. */
 function traceRequestText(seq: number): string | null {
   const cached = [...traceCache.values()].find(one => one.item.seq === seq)
 
   return cached ? requestText(cached.record) : null
 }
 
-/** Turns tracing on or off in the user settings; new sessions follow it. */
 async function setTracing($: EngineInterface, isOn: boolean): Promise<void> {
   await serially(async () => {
     try {
@@ -969,8 +781,6 @@ async function setTracing($: EngineInterface, isOn: boolean): Promise<void> {
       const text = await readSettingsText($)
       const kept = await $.store.get(TRACE_ENV_BEFORE).catch(() => undefined)
       const next = editTraceEnv(text, isOn, isPlainObject(kept) ? kept : undefined)
-      // What on found is kept before the file changes, so tracing is never on
-      // with nothing to give back; off forgets it once it is given back.
       if (isOn && next.before) await $.store.set(TRACE_ENV_BEFORE, next.before)
       if (next.text !== text) await $.fs.write(path, next.text)
       if (!isOn) await $.store.delete(TRACE_ENV_BEFORE).catch(() => undefined)
@@ -986,23 +796,11 @@ async function setTracing($: EngineInterface, isOn: boolean): Promise<void> {
   await refreshTrace($)
 }
 
-/**
- * Opens or closes one of the system prompt's sections. A section opens alone,
- * so the pane never draws more than one at a time.
- */
 async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
   await update($, page, () => 0)
   await update($, expanded, keys => (keys.includes(key) ? [] : [key]))
 }
 
-/**
- * Opens the Context details pane at its top, on its Tools tab, with the deny
- * list and the breakdown read afresh: the settings may have been edited by hand
- * since the session began, and the window may have moved since the last turn
- * (a /compact). A pane already open is left as the person has it, its figures
- * read afresh. One an earlier version left up under its old ID is closed: the
- * engine keeps it through an update, and nothing draws it now.
- */
 async function openPane($: EngineInterface): Promise<void> {
   try {
     const panes = await $.ui.panes()
@@ -1015,20 +813,15 @@ async function openPane($: EngineInterface): Promise<void> {
       await update($, reader, () => null)
       readerCache = null
     }
-    // Focused, so the first click in the pane presses its button: an
-    // unfocused pane spends that click on taking the focus.
     await $.ui.open({ id: PANE_ID, title: PANE_TITLE, focus: true })
     await Promise.all([refreshRemoved($), refreshContext($).then(() => refreshTrace($))])
     if (isOpen) return
     await $.clock.sleep(PANE_SETTLE_MS)
     await $.ui.scroll({ in: PANE_ID, to: 'start' })
-  } catch {
-    // Unloaded or closed meanwhile; the next press opens it again.
-  }
+  } catch {}
 }
 
 export const register: Register = on => {
-  /** Descriptions of built-in tools seen in any session, read from the store at start. */
   const knownTools: Record<string, string> = {}
 
   on('session.start', async ($, e, next) => {
@@ -1043,14 +836,10 @@ export const register: Register = on => {
         await refreshRemoved($)
         await refreshContext($)
         await refreshTrace($)
-        // The band drawn while this ran may have read before a write landed:
-        // drawn once more, with everything read at the start.
         await update($, steps, n => n + 1)
       })(),
     )
-    void ensureTraceFolder($).catch(() => {
-      // No home folder, or it could not be written: the receiver makes the folder when it starts.
-    })
+    void ensureTraceFolder($).catch(() => {})
     void (async () => {
       for (const key of await $.store.keys()) {
         if (!key.startsWith(KNOWN_TOOL_PREFIX)) continue
@@ -1059,9 +848,7 @@ export const register: Register = on => {
           knownTools[key.slice(KNOWN_TOOL_PREFIX.length)] = description
         }
       }
-    })().catch(() => {
-      // No store here: tools removed in earlier sessions fall back to the catalog.
-    })
+    })().catch(() => {})
 
     let ticks = 0
     $.clock.every(1000, () => {
@@ -1072,9 +859,6 @@ export const register: Register = on => {
     return started
   })
 
-  // A /clear or a resume goes on under another session id, and no
-  // session.start fires: what the reader and the trace list showed was that
-  // session's, and the next one's request of the same number is another.
   on('session.end', async ($, e, next) => {
     if (e.reason === 'clear' || e.reason === 'resume') {
       readerCache = null
@@ -1090,48 +874,36 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // The live effort of each main-loop request, as the engine sends it.
   on('turn.step', async function* ($, e, next) {
     if (e.agentId === undefined) {
       const level = asEffort(e.effort)
       if (level) attempt(update($, effort, () => level))
-      // A step may have cost, and filled the window: the band draws its figures again.
       attempt(update($, steps, n => n + 1))
     }
 
     return yield* next(e)
   })
 
-  // The receiver lives as long as the session that started it. When that one
-  // ends, the requests of the others would go nowhere until their turn ended:
-  // each prompt makes sure one listens, before the turn's requests are sent.
   on('prompt.submit', async ($, e, next) => {
     attempt(refreshTrace($))
 
     return next(e)
   })
 
-  // A turn may have committed, switched branch or touched files: re-read git.
   on('turn.complete', async ($, e, next) => {
     if (e.agentId === undefined) {
       attempt(refreshGit($))
       attempt(update($, steps, n => n + 1))
-      // The last request's answer reaches the receiver a moment after the turn
-      // ends (the export runs every second), so the trace is read twice.
       void refreshContext($)
         .then(() => refreshTrace($))
         .then(() => $.clock.sleep(TRACE_SETTLE_MS))
         .then(() => refreshTrace($))
-        .catch(() => {
-          // Unloaded while it waited (a reload, the session's end): the next load reads afresh.
-        })
+        .catch(() => {})
     }
 
     return next(e)
   })
 
-  // Every built-in tool's description, as the model reads it; a tool removed
-  // in the pane is moved behind ToolSearch, out of the context window.
   on('tool.describe', async ($, e, next) => {
     const described = await next(e)
     if (e.provider.plugin !== 'engine') return described
@@ -1150,9 +922,6 @@ export const register: Register = on => {
     return isRemoved ? { ...described, isDeferred: true } : described
   })
 
-  // A removed tool the model loads through ToolSearch anyway is refused. When
-  // the state cannot be read the call goes ahead: this guard never blocks work
-  // the person did not ask to block.
   on('tool.call', async ($, e, next) => {
     const names = await read($, removed)
     if (names.includes(e.tool) && !KEPT_TOOLS.includes(e.tool)) {
@@ -1164,14 +933,12 @@ export const register: Register = on => {
     return next(e)
   }).catch(($, e, next) => next(e))
 
-  // A tab picked in the pane's strip, posted by its region.
   on('ui.message', { requestId: PANE_ID }, async ($, e, next) => {
     const isTab = (value: unknown): value is PaneTab => PANE_TABS.includes(value as PaneTab)
     if (e.element.startsWith(TAB_PREFIX)) {
       const pick = e.data as Partial<{ tab: unknown; step: unknown }> | null
       const picked = pick?.tab
       if (isTab(picked)) await update($, tab, () => picked)
-      // Left and right step from the open tab: the keyboard stays with the tab pressed.
       const step = pick?.step
       if (step === -1 || step === 1) {
         await update($, tab, now => PANE_TABS[PANE_TABS.indexOf(now) + step] ?? now)
@@ -1179,7 +946,6 @@ export const register: Register = on => {
     }
     const toggled = (e.data as Partial<DisclosurePick> | null)?.toggle
     if (e.element.startsWith(DISCLOSURE_PREFIX) && typeof toggled === 'string') {
-      // A group opens and closes on its own; a section opens alone.
       if (toggled.startsWith(GROUP_PREFIX)) {
         await update($, collapsed, keys =>
           keys.includes(toggled) ? keys.filter(key => key !== toggled) : [...keys, toggled],
@@ -1192,11 +958,6 @@ export const register: Register = on => {
       await update($, reader, () => null)
       readerCache = null
     }
-    // The reader's text: a key (a row or a page either way, an end), or a
-    // press or a drag on its scrollbar (the row to put first in view). The
-    // text is answered its next props at once: the desktop paints nothing of
-    // the pane's tree while a pointer is held, so a drag reaches the text by
-    // this answer alone, and a key by it first.
     if (e.element === READER_TEXT_KEY) {
       const pick = e.data as Partial<TextPick> | null
       if (pick && 'to' in pick && (pick.to === 'start' || pick.to === 'end')) {
@@ -1252,7 +1013,6 @@ export const register: Register = on => {
       read($, removed),
       read($, putBack),
       read($, toolError),
-      // In this version's shape: a reload keeps what an earlier one wrote.
       read($, trace).then(currentTrace),
       read($, traceError),
       read($, folderError),
@@ -1262,9 +1022,6 @@ export const register: Register = on => {
       read($, readerOffset),
     ])
     const openSeq = open.map(key => /^trace-(\d+)$/.exec(key)?.[1]).find(Boolean)
-    // The reader draws the rows that fit under its top, from the first the
-    // person scrolled to, and hands its text a screen either side of them
-    // to glide across (./text.tsx): the rest of the request is not drawn.
     const readerView = async (): Promise<ReaderView | null> => {
       const laid = await readerRows(
         $,
@@ -1322,16 +1079,11 @@ export const register: Register = on => {
   })
 
   on('ui.render', { component: 'AbovePrompt' }, async ($, e, next) => {
-    // The CLI already has its own status line; this band is for the desktop.
     if (e.surface !== 'desktop' || e.props.hasSurvey) return next(e)
 
     const ui = $.ui.resolve(e)
     const { Box, Button, Client, Svg, Text } = ui
 
-    // Drawn again after each step of a turn, for the cost and the window; the
-    // seconds are the timer's own (./elapsed.tsx), so the band is not drawn
-    // each second: the desktop paints every element of the plugin's again at
-    // a drawing of the band, and a focused field in the pane blinks at each.
     await read($, steps)
     const [model, cwd, usage, repo, level, now] = await Promise.all([
       $.session.model(),
@@ -1354,9 +1106,6 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="row" alignItems="center" paddingX={1} columnGap={3}>
-        {/* Identity: what is answering, how hard, and where, a hairline between each.
-            It gives way first: a long branch name is cut short rather than pushing
-            the figures onto a second line. */}
         <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={1} minWidth={0}>
           <Box flexShrink={0}>
             <Text color="claude" bold>
@@ -1390,10 +1139,7 @@ export const register: Register = on => {
 
         <Box flexGrow={1} />
 
-        {/* Live figures: context, cost, elapsed, a hairline between each. */}
         <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={0}>
-          {/* The meter and its percentage: figures, as the cost and the time
-              are; the band's button at its end opens the pane. */}
           <Box flexDirection="row" alignItems="center" columnGap={1}>
             <Svg
               source={meterSvg(percent)}
@@ -1410,8 +1156,6 @@ export const register: Register = on => {
           {usd !== undefined && <Text color="text">${usd.toFixed(2)}</Text>}
 
           {divider()}
-          {/* Centred in a slot as wide as its widest reading, so the figures
-              beside it keep their place as it counts. */}
           <Box width={ELAPSED_COLUMNS} justifyContent="center">
             <Client
               key="elapsed"
@@ -1420,9 +1164,6 @@ export const register: Register = on => {
             />
           </Box>
 
-          {/* The pane's own button, at the end: a Button holds text alone, so
-              the glyph stands in for the icon the Tools tab's tip draws. The
-              desktop draws a label over a child, so the glyph is the label. */}
           {divider()}
           <Button
             key="open-details"

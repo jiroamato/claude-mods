@@ -1,10 +1,4 @@
 #!/usr/bin/env node
-// The npm package's installer: `npx @jiroamato/desktop-statusline` adds the
-// claude-mods marketplace and installs the plugin for the person, through the
-// `claude` CLI, as the README's terminal steps do. The desktop app shares that
-// configuration, so the plugin then shows on its Plugins page like any other.
-// Running it again is safe: what is already there is kept, and a disabled
-// plugin is enabled again.
 
 import { spawnSync } from 'node:child_process'
 
@@ -14,11 +8,6 @@ const PLUGIN = `desktop-statusline@${MARKETPLACE}`
 const README =
   'https://github.com/jiroamato/claude-mods/tree/main/desktop-statusline#in-the-claude-desktop-app'
 
-/**
- * Runs `claude <args>`. The args are fixed words, so one command line through
- * the shell finds claude however it was installed: a native binary, npm's
- * `claude.cmd` shim on Windows, or a script.
- */
 function claude(args, { show = false } = {}) {
   return spawnSync(`claude ${args}`, {
     shell: true,
@@ -32,10 +21,8 @@ function fail(message) {
   process.exit(1)
 }
 
-/** Whether a configured marketplace is this repository, however it was added. */
 function isThisRepo(marketplace) {
   if (marketplace.source === 'github') return marketplace.repo?.toLowerCase() === REPO
-  // The desktop app adds a repository by its URL: https, or ssh as git@github.com:owner/repo.
   return /github\.com[/:]jiroamato\/claude-mods(\.git)?\/?$/i.test(marketplace.url ?? '')
 }
 
@@ -59,8 +46,6 @@ try {
   )
 }
 
-// Added again from another source, an added marketplace is refused, so one
-// already there is used as it is.
 const existing = marketplaces.find(marketplace => marketplace.name === MARKETPLACE)
 if (!existing) {
   const added = claude(`plugin marketplace add ${REPO}`, { show: true })

@@ -13,7 +13,6 @@ import { deniedTools, editDeny, summarize, toolRows } from '../hooks/tools'
 import { RECEIVER_HEALTH } from '../hooks/trace'
 
 const ENGINE = { plugin: 'engine', tier: 'core' } as const
-// The engine resolves the path for the platform, so compare its tail.
 const SETTINGS_PATH = /[\\/]home[\\/]me[\\/]\.claude[\\/]settings\.json$/
 
 const BAND = {
@@ -123,19 +122,15 @@ const DEPLOY = {
   isFullscreen: false,
 } as const
 
-/** The engine around the plugin: a settings file in memory, the usage and the transcript. */
 type SettingsFile = {
   text: string
   isLocked?: boolean
   path?: RegExp
   writes?: number
-  /** Whether the engine lists the pane as open and shown, as `$.ui.panes()` reports it. */
   isPaneShown?: boolean
-  /** Whether a pane an earlier version opened is still up, under its old ID. */
   hasOldPane?: boolean
 }
 
-/** Files under the trace folder, by name, as the receiver writes them. */
 type TraceFiles = Record<string, string>
 
 function engine(
@@ -270,7 +265,6 @@ test('toolRows orders the tools by status, then by size', () => {
     ['Write', 'EnterPlanMode', 'Unknown'],
     [],
   )
-  // In the window first, largest first; then loaded on demand; then removed.
   expect(rows.map(one => [one.name, one.status])).toEqual([
     ['Grep', 'in'],
     ['Bash', 'in'],
@@ -278,11 +272,9 @@ test('toolRows orders the tools by status, then by size', () => {
     ['EnterPlanMode', 'removed'],
     ['Write', 'removed'],
   ])
-  // Name, description and Grep's measured schema at 3.6 characters a token.
   expect(rows.find(one => one.name === 'Grep')?.tokens).toBe(
     Math.round((4 + 400 + 2776 + 40) / 3.6),
   )
-  // Loaded on demand, its size is what it would take once loaded.
   expect(rows.find(one => one.name === 'Monitor')?.tokens).toBeGreaterThan(0)
 })
 
@@ -314,7 +306,6 @@ test('the snapshot keeps each /context row that holds tokens, and what the pane 
       'System tools (deferred)',
     ].sort(),
   )
-  // An empty section is not sent, so it is not listed.
   expect(snapshot.prompt.map(one => [one.id, one.title, one.text])).toEqual([
     ['intro', 'Introduction', 'You are Claude Code, an interactive CLI tool.'],
     ['env_info_simple', 'Environment', '# Environment\n - Platform: linux'],
@@ -351,10 +342,8 @@ test('sizes and shares read as /context prints them', () => {
   expect(sectionTitle({ id: 'acme:house_rules', text: 'Be kind.' })).toBe('House rules')
 })
 
-/** The pane's tabs in their order, as the strip lays them out. */
 const TAB_IDS = ['tools', 'prompt', 'skills', 'trace'] as const
 
-/** Clicks a tab in the pane's strip, in its own region. */
 async function openTab(
   pane: {
     pointer: (event: {
@@ -381,8 +370,6 @@ test('the ⓘ opens the pane on its Tools tab, and the meter is no control', asy
   })
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
 
-  // The desktop's own Context card lists the rows; the band adds nothing over
-  // the meter, and the meter is no control.
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const boxes = await band.findAll({ type: 'Box' })
   expect(boxes.filter(one => one.props.position === 'absolute')).toEqual([])
@@ -395,17 +382,13 @@ test('the ⓘ opens the pane on its Tools tab, and the meter is no control', asy
   await openTab(pane, 'skills')
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
-  // The band's ⓘ, at its end, opens the pane.
   const pressed = band.press({ key: 'open-details' })
-  // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed
-  // Focused, or the desktop spends the first click in it on the focus.
   expect(opened).toMatchObject({ id: 'context-details', title: 'Context details', focus: true })
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: 'Built-in tools' })).toBeDefined()
 
-  // Open already, with another tab picked, a press leaves it as it is.
   settings.isPaneShown = true
   await openTab(pane, 'skills')
   const again = band.press({ key: 'open-details' })
@@ -436,7 +419,6 @@ test('the ⓘ closes a pane an earlier version left up under its old ID', async 
   await pressed
   expect(closed).toEqual(['context-map'])
 
-  // With it gone, a press closes nothing.
   const again = band.press({ key: 'open-details' })
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await again
@@ -450,7 +432,6 @@ test('the pane opens on its tabs, each naming what /context counts for it', asyn
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
-  // No bar of the window over them: the tabs lead.
   expect(await pane.find({ type: 'Text', text: 'Context window' })).toBeUndefined()
   const tabs = (await pane.findAll({ type: 'Client' })).filter(one =>
     String(one.props.key).startsWith('tab-'),
@@ -476,21 +457,17 @@ test('a tab takes the press anywhere on its pill, and the arrow keys move betwee
       .map(one => one.props.props as { id: string; isOpen: boolean })
       .find(one => one.isOpen)?.id
 
-  // The far edge of the last pill, well clear of its label.
   await pane.resize({ columns: 12, rows: 1, in: 'tab-trace' })
   await pane.pointer({ type: 'down', x: 11, y: 0, button: 'left', in: 'tab-trace' })
   expect(await open()).toBe('trace')
   expect(await pane.find({ type: 'Button', key: 'tracing' })).toBeDefined()
-  // The near edge of the second.
   await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'tab-prompt' })
   expect(await open()).toBe('prompt')
 
-  // The keys stay with the tab pressed, and step from the open one.
   await pane.key({ key: 'right', in: 'tab-prompt' })
   expect(await open()).toBe('skills')
   await pane.key({ key: 'right', in: 'tab-prompt' })
   expect(await open()).toBe('trace')
-  // No tab right of the last, nor left of the first.
   await pane.key({ key: 'right', in: 'tab-prompt' })
   expect(await open()).toBe('trace')
   await pane.key({ key: 'left', in: 'tab-prompt' })
@@ -513,7 +490,6 @@ test('the pane opens the system prompt section by section, one at a time', async
   expect(
     (await pane.find({ type: 'Client', key: 'disclose-prompt-intro' }))?.props.props,
   ).toMatchObject({ label: 'Introduction' })
-  // /context counts 8k; the sections hold a few tokens, the rest no plugin can read.
   expect((await pane.find({ type: 'Box', text: /^Not readable by plugins.*~8k$/ }))?.text).toMatch(
     /output style/,
   )
@@ -534,7 +510,6 @@ test('the pane opens the system prompt section by section, one at a time', async
     '# Environment\n - Platform: linux',
   ])
 
-  // Pressing the open section again closes it.
   await pane.pointer({
     type: 'down',
     x: 5,
@@ -571,7 +546,6 @@ test('the Skills tab lists each skill, yours apart from the ones Anthropic ships
   expect((await pane.find({ key: 'group-skills-anthropic' }))?.text).toMatch(/plugin-authoring/)
   expect(await pane.find({ key: 'group-skills-organization' })).toBeUndefined()
 
-  // Each group closes on its own, and opens again.
   await pane.pointer({
     type: 'down',
     x: 5,
@@ -613,14 +587,12 @@ test('removing a tool denies it in the settings and moves it out of the window a
     provider: ENGINE,
   })
 
-  // The pane opens on the Tools tab.
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   expect((await pane.find({ key: 'tool-Bash' }))?.text).toMatch(/Runs a shell command/)
   expect((await pane.find({ key: 'toggle-Bash' }))?.props).toMatchObject({ label: 'Remove' })
   expect((await pane.find({ key: 'toggle-EnterPlanMode' }))?.props).toMatchObject({
     label: 'Put back',
   })
-  // Grouped: the removed tool under its own heading.
   const group = async (id: string) =>
     (await pane.find({ type: 'Client', key: `disclose-group-${id}` }))?.props.props
   expect(await group('removed')).toMatchObject({
@@ -630,8 +602,6 @@ test('removing a tool denies it in the settings and moves it out of the window a
     isHeading: true,
   })
   expect((await pane.find({ key: 'group-removed' }))?.text).toMatch(/^EnterPlanMode/)
-  // What loads on demand is sized by its own estimate, not by /context's
-  // deferred row: that row counts a tool removed this session too.
   expect(await group('deferred-loaded-on-demand')).toMatchObject({
     figure: '1 tool · ~320 when loaded',
   })
@@ -656,8 +626,6 @@ test('removing a tool denies it in the settings and moves it out of the window a
   expect(JSON.parse(settings.text).permissions.deny).toEqual(['EnterPlanMode'])
   expect(await $.tool.describe(bash)).toEqual({ description: 'Executes a command.' })
 
-  // A tool put back that this session started without is not in its context:
-  // it waits in a group of its own, counted in no other.
   await pane.press({ key: 'toggle-EnterPlanMode' })
   expect(JSON.parse(settings.text).permissions.deny).toEqual([])
   expect(await group('back-in-a-new-session')).toMatchObject({
@@ -766,7 +734,6 @@ test('a deny added by hand is picked up when the pane opens', async ($, on) => {
   settings.text = '{"permissions": {"deny": ["Grep"]}}'
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const pressed = band.press({ key: 'open-details' })
-  // The press reads the settings and the breakdown before it waits; let the time pass.
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed
   expect(invalidated).toBe(1)
@@ -776,7 +743,6 @@ test('a deny added by hand is picked up when the pane opens', async ($, on) => {
 })
 
 test('with no breakdown yet, the pane still lists the tools, its tabs without sizes', async ($, on) => {
-  // No session has started, so no breakdown has been read.
   engine(on, { text: '{}' })
   await $.tool.describe({ tool: 'Bash', description: 'Executes a command.', provider: ENGINE })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -797,7 +763,6 @@ test('with no breakdown yet, the pane still lists the tools, its tabs without si
 })
 
 test('a breakdown an earlier version kept in the state is read as none', () => {
-  // What the treemap version wrote, still in the state after a reload.
   expect(currentSnapshot({ used: 1, window: 2, percent: 50, blocks: [], skills: [] })).toBeNull()
   expect(currentSnapshot(null)).toBeNull()
   const snapshot = buildSnapshot(breakdown(), [DEPLOY], SECTIONS)
@@ -825,21 +790,18 @@ test('each group of tools opens and closes on its own, and starts open', async (
       { label: string; isOpen: boolean } | undefined
 
   expect(await heading('group-in-context')).toMatchObject({ label: 'In context', isOpen: true })
-  // A change to the tools mid-session clears the prompt cache: the tab says so.
   expect(
     await pane.find({
       type: 'Text',
       text: /^Changing tools at the start of a session is recommended\. A mid-session change/,
     }),
   ).toBeDefined()
-  // Set apart by an info icon.
   expect((await pane.findAll({ type: 'Svg' })).some(one => one.props.alt === 'tip')).toBe(true)
   expect(await pane.find({ key: 'tool-Bash' })).toBeDefined()
 
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-group-in-context' })
   expect((await heading('group-in-context'))?.isOpen).toBe(false)
   expect(await pane.find({ key: 'tool-Bash' })).toBeUndefined()
-  // The other groups stay as they were, and so does an open prompt section.
   expect((await heading('group-removed'))?.isOpen).toBe(true)
   await openTab(pane, 'prompt')
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-prompt-intro' })

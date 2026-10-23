@@ -92,19 +92,6 @@ command keeps working.
 
 ## Install
 
-### With npx
-
-With [Node.js](https://nodejs.org), one command adds the claude-mods marketplace and
-installs the plugin for you:
-
-```bash
-npx @jiroamato/desktop-statusline
-```
-
-Running it again is safe: it keeps what is already there, and turns the plugin
-back on if you disabled it. It needs the `claude` command on your `PATH`; without
-it, install from the desktop app instead.
-
 ### In the Claude desktop app
 
 Everything happens inside the app. No terminal needed.
@@ -137,10 +124,23 @@ above the prompt. Running sessions keep what they had until they end.
 the menu at the end of its row. Marketplaces are managed under **Add >
 Manage marketplaces**, and new versions published here arrive through a sync.
 
+### With npx
+
+With [Node.js](https://nodejs.org), one command adds the claude-mods marketplace and
+installs the plugin for you:
+
+```bash
+npx @jiroamato/desktop-statusline
+```
+
+Running it again is safe: it keeps what is already there, and turns the plugin
+back on if you disabled it. It needs the `claude` command on your `PATH`; without
+it, install from the desktop app instead.
+
 ### With the claude CLI
 
 The terminal and the desktop app share one plugin configuration, so these two
-commands give the same result as the steps above:
+commands give the same result as the desktop app steps:
 
 ```bash
 claude plugin marketplace add jiroamato/claude-mods

@@ -1,19 +1,7 @@
-// The trace receiver's pages: a session's requests, and each request whole,
-// as the model received it, for a browser on this machine. Plain JavaScript,
-// importing only store.mjs, so Node runs it and the tests load it.
-//
-// The pages draw like the plugin's pane in the desktop app: a warm neutral
-// surface, bordered cards of rows with hairline dividers, semibold headings
-// with a muted figure at the right, tabular numbers. Everything from a trace
-// goes through `escapeHtml`; nothing it holds becomes markup. The one script,
-// which expands and collapses sections and copies blocks, runs only with the
-// nonce the receiver gives each response, and the pages work without it.
-
 import { fullMessages, goesOn, isMain, promptRecord } from './store.mjs'
 
 export { fullMessages, promptRecord }
 
-/** Text safe inside HTML. */
 function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
@@ -22,16 +10,13 @@ function escapeHtml(text) {
     .replace(/"/g, '&quot;')
 }
 
-/** Characters per token, as the pane assumes (hooks/tools.ts, CHARS_PER_TOKEN). */
 const CHARS_PER_TOKEN = 3.6
-/** The most messages a request's page opens by itself. */
 const OPEN_AT_MOST = 50
 
 function count(value) {
   return Number(value ?? 0).toLocaleString('en-US')
 }
 
-/** `21k`, `18.2k`, `1M`: a count as the pane prints it (hooks/context.ts, formatTokens). */
 function short(value) {
   const number = Number(value ?? 0)
   const round = one => one.toFixed(1).replace(/\.0$/, '')
@@ -49,7 +34,6 @@ function seconds(ms) {
   return `${(Number(ms) / 1000).toFixed(1)}s`
 }
 
-/** `42.1s`, `3m 12s`, `1h 10m`: a span of time, as the status line prints one. */
 function duration(ms) {
   const whole = Math.max(0, Math.floor(Number(ms) / 1000))
   if (whole < 60) return seconds(ms)
@@ -59,7 +43,6 @@ function duration(ms) {
   return `${Math.floor(minutes / 60)}h ${minutes % 60}m`
 }
 
-/** A record's time of day and its date, in this machine's own time zone. */
 function when(at) {
   const date = new Date(at)
   if (Number.isNaN(date.getTime())) return { clock: String(at ?? ''), date: '' }
@@ -71,7 +54,6 @@ function when(at) {
   }
 }
 
-/** A text's size, and about how many tokens it takes. */
 function sizeOf(chars) {
   return `${short(chars)} chars · ~${short(chars / CHARS_PER_TOKEN)} tokens`
 }
@@ -80,7 +62,6 @@ function read(usage) {
   return (usage.input ?? 0) + (usage.cacheRead ?? 0) + (usage.cacheWrite ?? 0)
 }
 
-/** A request's figures: tokens read, how much of that came from the cache, tokens written, cost, time. */
 function usageParts(usage) {
   if (!usage) return []
   const total = read(usage)
@@ -95,7 +76,6 @@ function usageParts(usage) {
   return parts
 }
 
-/** Where a side request came from, in a word, and the tone of its pill. */
 function sourceTag(source) {
   if (isMain(source)) return null
   if (source === 'generate_session_title') return { label: 'Title', tone: 'amber' }
@@ -111,10 +91,6 @@ function pill(label, tone, title) {
 
 const ROLE_TONE = { user: 'blue', assistant: 'orange', system: 'amber' }
 
-/**
- * A message's content as blocks, whatever shape a record holds: a string is
- * one text block, and anything that is not a block is shown as its JSON.
- */
 function blocksOf(content) {
   if (typeof content === 'string') return [{ type: 'text', text: content }]
   if (content === null || content === undefined) return []
@@ -126,7 +102,6 @@ function blocksOf(content) {
   )
 }
 
-/** A field as text, whatever it holds. */
 function textOf(value) {
   return typeof value === 'string'
     ? value
@@ -150,7 +125,6 @@ function oneLine(text, max) {
   return line.length > max ? `${line.slice(0, max - 1)}…` : line
 }
 
-/** What a text block is, when it is not the person's or the model's own words. */
 function textNote(text) {
   if (/^\s*<system-reminder>/.test(text)) return 'system reminder'
   if (/^\s*<task-notification>/.test(text)) return 'notification'
@@ -158,7 +132,6 @@ function textNote(text) {
   return null
 }
 
-/** What one block is, in a few words, for a message's row. */
 function blockLabel(one) {
   switch (one.type) {
     case 'text':
@@ -175,10 +148,6 @@ function blockLabel(one) {
   }
 }
 
-/**
- * How much text a block carries, as the page shows it: an image or a document
- * carries none, its encoded bytes being nothing the model reads as text.
- */
 function blockChars(one) {
   switch (one.type) {
     case 'text':
@@ -201,10 +170,6 @@ function pre(text) {
   return `<pre>${escapeHtml(text)}</pre>`
 }
 
-/**
- * A tool call's input as its fields: a string as it is, anything else as
- * JSON, so a command or an edit reads as written rather than escaped.
- */
 function fields(input) {
   if (input === null || typeof input !== 'object' || Array.isArray(input)) {
     return pre(JSON.stringify(input ?? {}, null, 2))
@@ -220,7 +185,6 @@ function fields(input) {
     .join('')}</dl>`
 }
 
-/** One block of a message: its kind above, where it has one, its text below, a copy button beside. */
 function block(one) {
   const kind = (label, tone, name) =>
     `<div class="block-head"><span class="dot tone-${tone}"></span><span class="kind">${escapeHtml(label)}</span>${name ? `<code class="name">${escapeHtml(name)}</code>` : ''}</div>`
@@ -257,7 +221,6 @@ function block(one) {
   }
 }
 
-/** A card's heading row: its name, its figure, and the buttons the script gives it. */
 function cardHead(id, title, figure, hasRows) {
   const actions = hasRows
     ? `<span class="actions js-only"><button type="button" data-for="${id}" data-open="1">Expand all</button><button type="button" data-for="${id}" data-open="0">Collapse all</button></span>`
@@ -266,7 +229,6 @@ function cardHead(id, title, figure, hasRows) {
   return `<div class="card-head"><h2>${escapeHtml(title)}</h2><span class="figure">${figure}</span>${actions}</div>`
 }
 
-/** One row of a card that opens onto its text. */
 function row({ cls, id, open, label, tag, preview, figure, body }) {
   return `<details class="row${cls ? ` ${cls}` : ''}"${open ? ' open' : ''}${id ? ` id="${id}"` : ''}><summary><span class="chev"></span><span class="label">${label}</span>${tag ?? ''}<span class="preview">${preview ?? ''}</span><span class="figure">${figure}</span></summary><div class="content">${body}</div></details>`
 }
@@ -321,8 +283,6 @@ h2 { font-size: 14px; }
 .note { padding: 12px 14px; color: var(--muted); }
 
 .row { scroll-margin-top: 140px; }
-/* A closed row is one line; the browser lays the lines of a long list out as they come into view. An
-   open one is laid out whole, so a jump to an anchor below it lands where it should. */
 .row:not([open]) { content-visibility: auto; contain-intrinsic-size: auto 40px; }
 .row + .row { border-top: 1px solid var(--hair); }
 .row > summary { display: flex; align-items: center; gap: 10px; padding: 9px 14px; cursor: pointer; list-style: none; user-select: none; }
@@ -422,8 +382,6 @@ document.addEventListener('click', event => {
   const button = event.target.closest('button')
   if (!button) return
   if (button.dataset.open !== undefined) {
-    // Every row of a section open is more than a browser lays out at once:
-    // such a section lays its blocks out as they come into view.
     const section = document.getElementById(button.dataset.for)
     const open = button.dataset.open === '1'
     section.classList.toggle('lazy', open)
@@ -444,14 +402,12 @@ function page(title, body, nonce) {
   return `<!doctype html><html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1"><title>${escapeHtml(title)}</title><style>${STYLE}</style></head><body>${body}${script}</body></html>`
 }
 
-/** One request whole: its system prompt, its tools, every message, and the answer. */
 export function requestPage({ session, records, seq, system, tools, link, nonce }) {
   const record = records.find(one => one.seq === seq)
   if (!record) return null
   const messages = (fullMessages(records, seq) ?? []).filter(
     one => one !== null && typeof one === 'object',
   )
-  // What this request added comes last, however it was sent.
   const firstNew = Math.max(0, messages.length - record.added.length)
   const newCount = messages.length - firstNew
   const tag = sourceTag(record.source)
@@ -489,9 +445,6 @@ export function requestPage({ session, records, seq, system, tools, link, nonce 
     )
     .join('')
 
-  // A request that sends the conversation afresh adds it whole: every message
-  // is new, and all open would be more than a browser lays out. The last of
-  // them open; the rest are marked and stay closed.
   const firstOpen = Math.max(firstNew, messages.length - OPEN_AT_MOST)
   let messageChars = 0
   const messageRows = messages
@@ -568,7 +521,6 @@ ${newCount > 0 ? `<a class="new-link" href="#new">New <b>${newCount}</b></a>` : 
   )
 }
 
-/** A session's requests, newest first, each linking to its page. */
 export function sessionPage({ session, records, link, nonce }) {
   const sorted = [...records].sort((a, b) => b.seq - a.seq)
   const used = records.filter(one => one.usage)

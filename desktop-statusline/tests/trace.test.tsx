@@ -19,7 +19,6 @@ import {
   wrapRows,
 } from '../hooks/trace'
 import type { TraceRecord } from '../hooks/trace'
-// The receiver's own logic, as Node runs it.
 import { HEAD_AFTER_BYTES, HEALTH, logRecords, TraceStore, withBilling } from '../trace/store.mjs'
 import { fullMessages, promptRecord, requestPage, sessionPage } from '../trace/view.mjs'
 
@@ -73,13 +72,11 @@ test('the store keeps each request once: what it added, its usage and its answer
       query_source: 'sdk',
       request_body_id: 'b2',
     }),
-    // Another plugin's or kind's events are left unread.
     record('tool_result', { tool_name: 'Bash' }),
   ]) {
     store.take(one)
   }
 
-  // The system prompt and the tools once, by hash; one file per request.
   const names = Object.keys(files).sort()
   expect(names.filter(name => name.includes('/system-'))).toHaveLength(1)
   expect(names.filter(name => name.includes('/tools-'))).toHaveLength(1)
@@ -87,7 +84,6 @@ test('the store keeps each request once: what it added, its usage and its answer
   expect(one).toMatchObject({ seq: 0, source: 'sdk', from: 0, messageCount: 1 })
   expect(one.usage).toMatchObject({ input: 5, output: 7, costUsd: 0.01 })
   expect(one.response).toMatchObject({ stop_reason: 'end_turn' })
-  // The second carries only what follows the first and its answer.
   const two = JSON.parse(files[`${SESSION}/000001.json`]!) as TraceRecord
   expect(two).toMatchObject({ seq: 1, from: 2, messageCount: 3, usage: null, response: null })
   expect(two.added).toEqual([{ role: 'user', content: 'list the files' }])
@@ -109,13 +105,11 @@ test('usage lands on its own request by the API request id, whichever comes firs
   const usage = (requestId: string, input: number) =>
     record('api_request', { query_source: 'sdk', request_id: requestId, input_tokens: input })
   for (const one of [
-    // The first is interrupted: no usage, no answer.
     record('api_request_body', {
       body: requestBody([]),
       query_source: 'sdk',
       request_body_id: 'b1',
     }),
-    // The second's answer comes before its usage, the third's after.
     record('api_request_body', {
       body: requestBody([]),
       query_source: 'sdk',
@@ -156,7 +150,6 @@ test('a body Claude Code withheld is kept as one not recorded', () => {
   const store = new TraceStore((name: string, text: string) => {
     files[name] = text
   })
-  // A memory operation's: the export carries a note in the body's place.
   const body = '{"not_recorded":"<not recorded: extract_memories>"}'
   store.take(
     record('api_request_body', {
@@ -236,9 +229,7 @@ test('tracing’s switch adds its env values, and off gives back the person’s 
   const settings = JSON.parse(on.text) as { env: Record<string, string> }
   expect(isTraceOn(settings)).toBe(true)
   expect(settings.env.MINE).toBe('1')
-  // The file's own indentation stays.
   expect(on.text).toMatch(/^\{\n {4}"env"/)
-  // Every name is noted, null where the person had nothing.
   expect(on.before).toEqual({
     ...Object.fromEntries(Object.keys(TRACE_ENV).map(key => [key, null])),
     OTEL_LOGS_EXPORTER: 'console',
@@ -251,7 +242,6 @@ test('tracing’s switch adds its env values, and off gives back the person’s 
   expect(offSettings.env).toEqual({ MINE: '1', OTEL_LOGS_EXPORTER: 'console' })
   expect(off).toMatchObject({ before: null, isLost: false })
 
-  // A value the person changed while tracing was on is theirs, and stays.
   const changed = editTraceEnv(
     JSON.stringify({ env: { ...TRACE_ENV, OTEL_LOGS_EXPORTER: 'none' } }),
     false,
@@ -264,7 +254,6 @@ test('a value of the person’s equal to tracing’s is noted, and stays when tr
   const text = JSON.stringify({ env: { CLAUDE_CODE_ENABLE_TELEMETRY: '1' } })
   const on = editTraceEnv(text, true)
   expect(on.before?.CLAUDE_CODE_ENABLE_TELEMETRY).toBe('1')
-  // Not a replacement: the Trace tab does not list it.
   expect(replacedNames(on.before)).toEqual([])
 
   const off = editTraceEnv(on.text, false, on.before!)
@@ -273,13 +262,10 @@ test('a value of the person’s equal to tracing’s is noted, and stays when tr
 
 test('turning tracing on again keeps what it noted the first time', () => {
   const on = editTraceEnv(JSON.stringify({ env: { OTEL_LOGS_EXPORTER: 'console' } }), true)
-  // Pressed again while on: nothing changes, and what was noted stays.
   const again = editTraceEnv(on.text, true, on.before!)
   expect(again.text).toBe(on.text)
   expect(again.before).toEqual(on.before)
 
-  // Turned on again after a hand edit took one value out: tracing's values
-  // still in place keep what was noted, the edited one is noted afresh.
   const edited = JSON.stringify({
     env: { ...JSON.parse(on.text).env, OTEL_LOG_RAW_API_BODIES: '0' },
   })
@@ -297,7 +283,6 @@ test('off with nothing noted takes tracing’s values out, and says yours were n
   expect(JSON.parse(lost.text).env).toEqual({ MINE: '1' })
   expect(lost.isLost).toBe(true)
 
-  // Nothing of tracing's left to take out: nothing was lost.
   expect(editTraceEnv(JSON.stringify({ env: { MINE: '1' } }), false).isLost).toBe(false)
 })
 
@@ -368,7 +353,6 @@ const PANE = {
   },
 } as const
 
-/** A traced session's engine: tracing on in the settings and in the session's env. */
 function tracedEngine(
   on: On,
   files: Record<string, string>,
@@ -378,24 +362,15 @@ function tracedEngine(
   const settings = {
     text: JSON.stringify({ env: TRACE_ENV }),
     written: [] as string[],
-    /** Paths `fs.exists` denies, as the engine resolves them; every other one exists. */
     missing: [] as RegExp[],
-    /** Every command run, and what `uname -s` answers. */
     ran: [] as string[][],
-    /** The variables each command was given. */
     env: [] as Record<string, string>[],
     system: 'Linux',
-    /** Programs that are not installed: running one rejects. */
     absent: [] as string[],
-    /** Whether the Explorer script says it could not show the folder. */
     explorerFails: false,
-    /** The session's id: a `/clear` goes on under a new one. */
     session: SESSION,
-    /** Each session's trace folder, its files by name. */
     folders: { [SESSION]: files } as Record<string, Record<string, string>>,
-    /** Sizes the folder's listing gives instead of a file's own. */
     sizes: {} as Record<string, number>,
-    /** What the receiver's health answers, and how often it was asked to leave. */
     health: RECEIVER_HEALTH,
     quits: 0,
     clock: mock.clock(on, { now: 1_000 }),
@@ -423,7 +398,6 @@ function tracedEngine(
         name,
         kind: 'file' as const,
         size: settings.sizes[name] ?? folder[name]!.length,
-        // A file grows only by being written again, which changes its time.
         mtimeMs: settings.sizes[name] ?? 1,
         isLink: false,
       })),
@@ -513,7 +487,6 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
 
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
-  // A card of the main loop's requests, as the Tools and Skills tabs group theirs.
   expect(
     await pane.find({ key: 'trace-main', text: /^Conversation1 request · \$0\.25/ }),
   ).toBeDefined()
@@ -525,7 +498,6 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
       isOpen: false,
     },
   )
-  // What it added and what came back, in the row's own region, so they light with it.
   const row = await pane.find({ type: 'Client', key: 'disclose-trace-0' })
   expect(row?.props.props).toMatchObject({ lines: ['+ "list the files"', '→ "Here they are."'] })
   expect(Math.abs(Number(row?.props.height) - 4.05)).toBeLessThan(1e-9)
@@ -540,7 +512,6 @@ test('the Trace tab lists each request, opening onto it, and the Prompt tab show
   )
 
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-prompt' })
-  // What came from outside Claude Code's own prompt is a card of its own.
   const added = await pane.find({ key: 'prompt-added' })
   expect(added?.text).toMatch(/^Added at send time\d+ sections · ~\d+/)
   expect(
@@ -584,7 +555,6 @@ test('the Trace tab says what turning tracing on changes, and where the traces a
     await pane.find({ type: 'Text', text: '/home/me/.claude/desktop-statusline/traces' }),
   ).toBeDefined()
 
-  // On, the list says where its traces are kept.
   await pane.press({ key: 'tracing' })
   expect(
     await pane.find({
@@ -647,8 +617,6 @@ test('the traces folder opens in the system’s file manager', async ($, on) => 
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   const opened = () => settings.ran.filter(argv => argv[0] !== 'git')
 
-  // Windows: the script that opens Explorer shown and in front, encoded as
-  // PowerShell takes it, the folder as Windows writes it beside it.
   await pane.press({ key: 'trace-folder' })
   expect(opened()).toEqual([
     [
@@ -664,7 +632,6 @@ test('the traces folder opens in the system’s file manager', async ($, on) => 
   expect(folder).not.toContain('/')
   expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
 
-  // A folder that does not show says why, in words: the script's own line.
   settings.explorerFails = true
   await pane.press({ key: 'trace-folder' })
   expect(
@@ -681,10 +648,7 @@ test('a script is encoded as PowerShell takes it, UTF-16LE in base64', () => {
   expect(encodedCommand('dir')).toBe('ZABpAHIA')
   expect(encodedCommand('é!')).toBe('6QAhAA==')
   expect(encodedCommand('ab')).toBe('YQBiAA==')
-  // The script reads the folder from its variable, never from its own text.
   expect(SHOW_FOLDER_SCRIPT).toContain(`$env:${FOLDER_VARIABLE}`)
-  // Explorer starts through the shell, the folder its one argument: no command
-  // line (cmd's `&`, `%VAR%`) ever parses the path.
   expect(SHOW_FOLDER_SCRIPT).toContain("ProcessStartInfo 'explorer.exe'")
   expect(SHOW_FOLDER_SCRIPT).not.toContain('cmd.exe')
 })
@@ -700,7 +664,6 @@ test('the traces folder opens in Finder on macOS and through xdg-open elsewhere'
   await pane.press({ key: 'trace-folder' })
   expect(opened()).toEqual([['open', expect.stringMatching(/traces$/)]])
 
-  // A file manager that fails says why.
   settings.system = 'Linux 6.8.0-45-generic'
   await pane.press({ key: 'trace-folder' })
   expect(opened()[1]).toEqual(['xdg-open', expect.stringMatching(/traces$/)])
@@ -711,7 +674,6 @@ test('the traces folder opens in Finder on macOS and through xdg-open elsewhere'
     }),
   ).toBeDefined()
 
-  // So does a desktop with no opener at all.
   settings.absent = ['xdg-open']
   await pane.press({ key: 'trace-folder' })
   expect(
@@ -743,14 +705,12 @@ test('under WSL the traces folder opens in Windows Explorer, as Windows reaches 
     ['wslpath', '-w', expect.stringMatching(/\/home\/me\/\.claude\/desktop-statusline\/traces$/)],
     ['powershell.exe', ...script],
   ])
-  // The folder crosses to Windows only as WSLENV names it, beside what it named before.
   expect(settings.env.at(-1)).toEqual({
     [FOLDER_VARIABLE]: '\\\\wsl.localhost\\Ubuntu\\home\\me\\.claude\\desktop-statusline\\traces',
     WSLENV: `USERPROFILE/p:${FOLDER_VARIABLE}`,
   })
   expect(await pane.find({ type: 'Text', text: /^Could not open/ })).toBeUndefined()
 
-  // With Windows left out of the PATH, PowerShell is found where WSL mounts it.
   settings.absent = ['powershell.exe']
   await pane.press({ key: 'trace-folder' })
   expect(opened().slice(-2)).toEqual([
@@ -775,7 +735,6 @@ const BAND = {
   },
 } as const
 
-/** One request as the receiver keeps it, saying `text`. */
 function kept(seq: number, text: string): string {
   return JSON.stringify({
     seq,
@@ -794,7 +753,6 @@ function kept(seq: number, text: string): string {
   } satisfies TraceRecord)
 }
 
-/** Opens the pane from the band, as a person does, which reads the trace afresh. */
 async function reopen($: Parameters<TestBody>[0], settings: ReturnType<typeof tracedEngine>) {
   const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
   const pressed = band.press({ key: 'open-details' })
@@ -803,7 +761,6 @@ async function reopen($: Parameters<TestBody>[0], settings: ReturnType<typeof tr
   await band.unmount()
 }
 
-/** The Trace tab's rows, by label. */
 async function traceRows(pane: {
   findAll: (query: { type: 'Client' }) => Promise<{ props: Record<string, unknown> }[]>
 }) {
@@ -823,7 +780,6 @@ test('after a /clear the Trace tab lists the new session’s requests alone', as
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
   expect(await traceRows(pane)).toEqual(['#2', '#1'])
 
-  // A /clear goes on in the same process, under a new session id.
   settings.session = 'session-2'
   settings.folders['session-2'] = { 'system-a.json': '[]', '000000.json': kept(0, 'fresh') }
   await reopen($, settings)
@@ -833,9 +789,6 @@ test('after a /clear the Trace tab lists the new session’s requests alone', as
   const row = await pane.find({ type: 'Client', key: 'disclose-trace-0' })
   expect((row?.props.props as { lines: string[] }).lines[0]).toBe('+ "fresh"')
 
-  // A request open in the reader, with a search, and another opened in the
-  // list, are that session's: the /clear closes them, before the new session
-  // records requests of the same numbers.
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   await pane.press({ key: 'read-0' })
   await pane.input({ key: 'reader-search', text: 'fresh', kind: 'change' })
@@ -925,7 +878,6 @@ test('turning tracing off gives back the telemetry values it replaced', async ($
 
   await pane.press({ key: 'tracing' })
   expect(JSON.parse(settings.text).env.OTEL_LOGS_EXPORTER).toBe('otlp')
-  // The tab says whose place tracing holds, the same value not counted.
   const note = await pane.find({ type: 'Text', text: /^Tracing set its own values in place/ })
   expect(note?.text).toMatch(/your +OTEL_LOGS_EXPORTER +; turning it off puts yours back/)
   expect(note?.text).not.toMatch(/CLAUDE_CODE_ENABLE_TELEMETRY/)
@@ -939,7 +891,6 @@ test('turning tracing off gives back the telemetry values it replaced', async ($
 })
 
 test('turning tracing off with nothing noted says your own values were not put back', async ($, on) => {
-  // Tracing on in the settings, and an empty store: what on noted is gone.
   const settings = tracedEngine(on, {})
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -970,7 +921,6 @@ test('under WSL the traces are kept in the Linux home, not the Windows profile',
 })
 
 test('a session that started before tracing was on says so', async ($, on) => {
-  // Tracing on in the settings and the env, but three turns and no trace.
   tracedEngine(on, {}, 3)
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -1024,9 +974,7 @@ test('an open request shows a short preview, and opens whole here or in the brow
   expect(links).toContain(
     'http://localhost:43180/view/session-1/0?t=0123456789abcdef0123456789abcdef',
   )
-  // No pages in the pane: its opening, and where the rest is.
   expect(await pane.find({ key: 'page-next' })).toBeUndefined()
-  // A dozen lines: Expand shows the rest.
   const preview = String((await pane.find({ type: 'Code' }))?.props.source)
   expect(preview.split('\n')).toHaveLength(12)
   expect(await pane.find({ type: 'Text', text: /^4,9\d\d more lines$/ })).toBeDefined()
@@ -1083,7 +1031,6 @@ test('the browser page counts no text for an image, in a message or a tool resul
     link: () => '#',
     nonce: 'n',
   })!
-  // The twelve characters of the question: the encoded bytes are no text the model reads.
   expect(html).toContain('12 chars · ~3 tokens')
 })
 
@@ -1145,14 +1092,11 @@ test('the browser pages show every message, escaped, and link to each other', ()
   expect(html).not.toContain('<b>three</b>')
   expect(html).toContain('You are &lt;Claude&gt;.')
   expect(html).toContain('href="/view/s?t=x"')
-  // The two new in this request open, the first of them the anchor the page's
-  // nav jumps to; the one before stays closed.
   expect(html.match(/<details class="row new" open/g)).toHaveLength(2)
   expect(html).toContain(
     '<details class="row"><summary><span class="chev"></span><span class="label"><span class="seq">#1</span>',
   )
   expect(html).toContain('<details class="row new" open id="new">')
-  // No script without a nonce; with one, only that nonce's script.
   expect(html).not.toContain('<script')
   expect(
     requestPage({
@@ -1184,7 +1128,6 @@ test('wrapped rows are each one line, cut at a space where one fits', () => {
   expect(wrapRows('x'.repeat(25), 10)).toEqual(['x'.repeat(10), 'x'.repeat(10), 'x'.repeat(5)])
 })
 
-/** A request of `lines` numbered lines, as the reader tests read it. */
 function longRequest(lines: number): Record<string, string> {
   const long = Array.from({ length: lines }, (_, index) => `line ${index}`).join('\n')
 
@@ -1211,24 +1154,20 @@ function longRequest(lines: number): Record<string, string> {
 
 type ReaderPane = Pick<Mounted<'desktop', 'Pane'>, 'find' | 'findAll' | 'advance'>
 
-/** How long the text's glide takes at most, for a reading after a move: a second of frames. */
 const GLIDE_SETTLE_MS = 1000
 
-/** The reader's text rows as its region draws them, top to bottom, once its glide has settled. */
 async function readerText(pane: ReaderPane): Promise<string[]> {
   await pane.advance(GLIDE_SETTLE_MS)
 
   return readerTextNow(pane)
 }
 
-/** The reader's text rows as its region draws them this frame, mid-glide or not. */
 async function readerTextNow(pane: ReaderPane): Promise<string[]> {
   return (await pane.findAll({ type: 'Text', in: 'reader-text' }))
     .filter(one => one.props.mono === true)
     .map(one => one.text)
 }
 
-/** The row of the reader's text holding the current match, as its region draws it once settled. */
 async function readerHit(pane: ReaderPane): Promise<string | undefined> {
   await pane.advance(GLIDE_SETTLE_MS)
   const rows = (await pane.findAll({ type: 'Text', in: 'reader-text' })).filter(
@@ -1245,7 +1184,6 @@ async function readerHit(pane: ReaderPane): Promise<string | undefined> {
   )?.text
 }
 
-/** Where the reader says its rows are: the first and last in view, and how many in all. */
 async function readerPosition(pane: ReaderPane) {
   const text = (await pane.find({ type: 'Text', text: /^rows / }))?.text ?? ''
   const match = /^rows ([\d,]+) to ([\d,]+) of ([\d,]+)$/.exec(text)
@@ -1262,7 +1200,6 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-0' })
   await pane.press({ key: 'read-0' })
 
-  // The way back and the search, then the window's 40 rows less the top's 4.
   expect((await pane.find({ type: 'Client', key: 'reader' }))?.props).toMatchObject({ height: 1 })
   expect(await pane.find({ key: 'reader-search' })).toBeDefined()
   const atTop = await readerText(pane)
@@ -1273,13 +1210,9 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   expect(
     await pane.find({ type: 'Text', text: `rows 1 to 35 of ${total.toLocaleString('en-US')}` }),
   ).toBeDefined()
-  // Nothing stands in for the rest: the tree is never taller than the window,
-  // so the pane has nothing to scroll and nothing in it ever moves. The text
-  // is handed a screen either side of the view, to glide across.
   const heights = (await pane.findAll({ type: 'Box' }))
     .map(one => one.props.height)
     .filter((height): height is number => typeof height === 'number')
-  // The tallest is the frame round the text: its 35 rows and the border.
   expect(Math.max(...heights)).toBe(37)
   const region = await pane.find({ type: 'Client', key: 'reader-text' })
   expect(region?.props).toMatchObject({ height: 35 })
@@ -1287,13 +1220,11 @@ test('the reader keeps its top and draws only the rows that fit under it', async
   expect((region?.props.props as { base: number; total: number }).base).toBe(0)
   expect((region?.props.props as { total: number }).total).toBe(total)
 
-  // A shorter window draws fewer rows, one at the least.
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 20 } })
   expect(await readerText(pane)).toHaveLength(15)
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 3 } })
   expect(await readerText(pane)).toHaveLength(1)
 
-  // Back to the trace.
   await pane.post({ back: true }, { in: 'reader' })
   expect(await pane.find({ type: 'Client', key: 'reader' })).toBeUndefined()
   expect(await pane.find({ type: 'Client', key: 'disclose-trace-0' })).toBeDefined()
@@ -1303,7 +1234,6 @@ test('the reader keeps its top and draws only the rows that fit under it', async
 
 test('the keys in the reader’s text and its scrollbar move the rows, never the pane', async ($, on) => {
   tracedEngine(on, longRequest(20_000))
-  // Whether any move reaches the pane's window: none should, with the reader open.
   let windowMoves = 0
   on('ui.scroll', async () => {
     windowMoves += 1
@@ -1320,11 +1250,8 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   const { total } = await readerPosition(pane)
   const text = { in: 'reader-text' }
 
-  // Page Down and Page Up move by the rows in view; the arrows by one. The
-  // text glides there: a frame in, it is part of the way, then it arrives.
   await pane.key({ key: 'pagedown', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 36, last: 70, total })
-  // Row 35 of the text is `line 20`: the request's heading lines come first.
   expect((await readerTextNow(pane))[0]).toBe(atTop[0])
   await pane.advance(16)
   const midway = (await readerTextNow(pane))[0]
@@ -1338,7 +1265,6 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   expect(await readerPosition(pane)).toEqual({ first: 37, last: 71, total })
   await pane.key({ key: 'pageup', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 2, last: 36, total })
-  // End and Home go to the ends; a move past either stops at it.
   await pane.key({ key: 'end', ...text })
   expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
   expect(await readerText(pane)).toHaveLength(35)
@@ -1349,11 +1275,8 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   expect(await readerText(pane)).toEqual(atTop)
   await pane.key({ key: 'up', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
-  // A key the text does not know moves nothing.
   await pane.key({ key: 'x', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
-  // At the end, then in a taller window: the first row kept is past the last
-  // that can be, and Up moves from that last one, not from the row kept.
   await pane.key({ key: 'end', ...text })
   await pane.redraw({ ...PANE.props, scroll: { offset: 0, bodyRows: 60 } })
   await pane.key({ key: 'up', ...text })
@@ -1362,10 +1285,6 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   await pane.key({ key: 'home', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
 
-  // The reader's own scrollbar, the two columns at the text's right edge, 35
-  // rows tall: a press beside the thumb brings the thumb's middle under the
-  // pointer, and the rows with it, as a share of the track; a drag follows
-  // it. A press on the text itself moves nothing.
   await pane.resize({ columns: 68, rows: 35, ...text })
   await pane.pointer({ type: 'down', x: 10, y: 34, button: 'left', ...text })
   await pane.pointer({ type: 'up', x: 10, y: 34, button: 'left', ...text })
@@ -1374,7 +1293,6 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
     (await pane.findAll({ type: 'Box', ...text })).find(
       one => one.props.backgroundColor === '#80808066' || one.props.backgroundColor === '#808080aa',
     )
-  // The thumb's row in the track: the rows of the track above it.
   const thumbTop = async () => {
     const track = (await pane.findAll({ type: 'Box', ...text })).find(
       one => one.props.backgroundColor === '#80808018',
@@ -1384,32 +1302,21 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   }
   await pane.pointer({ type: 'down', x: 67, y: 34, button: 'left', ...text })
   expect(await readerPosition(pane)).toEqual({ first: total - 34, last: total, total })
-  // Held, the thumb and the rows follow the pointer at once, by the region's
-  // own state: the thumb is lit and at the foot of the track.
   expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
   expect(await thumbTop()).toBe(33)
   await pane.pointer({ type: 'move', x: 67, y: 0, button: 'left', ...text })
   expect(await readerPosition(pane)).toEqual({ first: 1, last: 35, total })
   expect(await thumbTop()).toBe(0)
-  // The thumb is two rows (as tall as 35 rows are of the request, two at
-  // least), so its top has 33 rows to be on; grabbed by its middle, it is a
-  // row above the pointer.
   await pane.pointer({ type: 'move', x: 60, y: 7, button: 'left', ...text })
   const fifth = Math.round((6 / 33) * (total - 35)) + 1
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
   expect(await thumbTop()).toBe(6)
-  // Let go past the track's foot, where a held pointer still reports: not lit.
   await pane.pointer({ type: 'up', x: 67, y: 40, button: 'left', ...text })
   expect((await thumb())?.props.backgroundColor).toBe('#80808066')
-  // A move with no button held moves nothing.
   await pane.pointer({ type: 'move', x: 67, y: 30, ...text })
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
   expect((await thumb())?.props.height).toBe(2)
-  // Let go, the rows asked for are the rows drawn: row 35 of the text is `line 20`.
   expect((await readerText(pane))[0]).toBe(`line ${fifth - 16}`)
-  // A press on the thumb itself, in the track's other column, grabs it where
-  // it is: nothing moves until the pointer does, and then the thumb keeps the
-  // pointer on the row of it pressed.
   await pane.pointer({ type: 'down', x: 66, y: 7, button: 'left', ...text })
   expect(await readerPosition(pane)).toEqual({ first: fifth, last: fifth + 34, total })
   expect(await thumbTop()).toBe(6)
@@ -1420,14 +1327,12 @@ test('the keys in the reader’s text and its scrollbar move the rows, never the
   await pane.pointer({ type: 'up', x: 66, y: 8, button: 'left', ...text })
   expect((await thumb())?.props.backgroundColor).toBe('#808080aa')
 
-  // None of it scrolled the pane: its tree fits its window.
   expect(windowMoves).toBe(0)
 
   await pane.unmount()
 })
 
 test('a match after a character whose lower case is longer keeps its place', () => {
-  // 'İ' lowers to two characters; the match after it is at its own index.
   expect(findMatches(['İstanbul Tea'], 'tea')).toEqual([{ row: 0, start: 9, end: 12 }])
 })
 
@@ -1441,7 +1346,6 @@ test('a search finds every match in a row, ignoring case', () => {
 })
 
 test('searching the reader marks each match and brings it to the middle of the rows', async ($, on) => {
-  // Long enough that every match sits clear of the end.
   tracedEngine(on, longRequest(30_000))
   await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
@@ -1451,14 +1355,12 @@ test('searching the reader marks each match and brings it to the middle of the r
   const { total } = await readerPosition(pane)
 
   await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'change' })
-  // line 1999, 19990 to 19999: eleven, the first current, in the middle of the 35 rows.
   expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
   expect(await readerHit(pane)).toBe('line 1999')
   expect((await readerText(pane)).indexOf('line 1999')).toBe(17)
   const first = (await readerPosition(pane)).first
   expect(await readerPosition(pane)).toEqual({ first, last: first + 34, total })
 
-  // Thousands of rows down.
   await pane.press({ key: 'reader-next' })
   expect(await pane.find({ type: 'Text', text: '2 of 11' })).toBeDefined()
   expect(await readerHit(pane)).toBe('line 19990')
@@ -1467,13 +1369,11 @@ test('searching the reader marks each match and brings it to the middle of the r
   expect(shown.slice(17, 27)).toEqual(
     Array.from({ length: 10 }, (_, index) => `line ${19990 + index}`),
   )
-  // Back round the start to the last.
   await pane.press({ key: 'reader-previous' })
   await pane.press({ key: 'reader-previous' })
   expect(await pane.find({ type: 'Text', text: '11 of 11' })).toBeDefined()
   expect(await readerHit(pane)).toBe('line 19999')
   expect((await readerText(pane)).indexOf('line 19999')).toBe(17)
-  // Enter in the field steps on, round the end to the first.
   await pane.input({ key: 'reader-search', text: 'line 1999', kind: 'submit' })
   expect(await pane.find({ type: 'Text', text: '1 of 11' })).toBeDefined()
   expect(await readerHit(pane)).toBe('line 1999')
@@ -1492,7 +1392,6 @@ test('a request that goes on from the one before adds its messages, and keeps th
   })
   const first = [{ role: 'user', content: 'hello' }]
   store.take(record('api_request_body', { body: requestBody(first), query_source: 'sdk' }))
-  // Newer Claude Code: the billing header alone, no tools, the new messages only.
   store.take(
     record('api_request_body', {
       query_source: 'sdk',
@@ -1512,21 +1411,17 @@ test('a request that goes on from the one before adds its messages, and keeps th
     { role: 'user', content: 'hello' },
     { role: 'user', content: 'how are you' },
   ])
-  // Its prompt and tools are the first request's.
   expect(promptRecord(records, 1)?.seq).toBe(0)
   expect(tracePromptRecord(records, 1)?.seq).toBe(0)
 
-  // One kept before the receiver marked such requests reads the same.
   const unmarked = records.map(({ continues: _continues, ...one }) =>
     one.seq === 1 ? { ...one, from: 0 } : one,
   )
   expect(fullMessages(unmarked, 1)).toHaveLength(2)
 })
 
-/** What the receiver writes for a request: a TraceRecord, and the one it goes on from. */
 type KeptRecord = TraceRecord & { after?: number | null }
 
-/** A store over files in memory, reading them back as the receiver reads its folder. */
 function memoryStore(files: Record<string, string>, firstSeq = () => 0, readsBack = true) {
   return new TraceStore(
     (name: string, text: string) => {
@@ -1545,7 +1440,6 @@ function keptRecords(files: Record<string, string>): KeptRecord[] {
     .sort((a, b) => a.seq - b.seq)
 }
 
-/** A body that goes on from an earlier request: the billing header alone, no tools. */
 function continuationBody(messages: unknown[], previous?: string) {
   return JSON.stringify({
     model: 'claude-opus-5-5',
@@ -1556,7 +1450,6 @@ function continuationBody(messages: unknown[], previous?: string) {
   })
 }
 
-/** The answer to a request, under the API's id for it. */
 function answer(bodyId: string, id: string, text = 'ok') {
   return record('api_response_body', {
     request_body_id: bodyId,
@@ -1579,7 +1472,6 @@ test('a receiver started mid-conversation goes on from the requests already on d
   )
   first.take(answer('b0', 'msg_0'))
 
-  // Told by its shape alone, with nothing read back: it still goes on.
   const shaped = { ...before }
   memoryStore(shaped, () => 1, false).take(
     record('api_request_body', {
@@ -1591,7 +1483,6 @@ test('a receiver started mid-conversation goes on from the requests already on d
   expect(shapedRecords[1]).toMatchObject({ continues: true, after: null })
   expect(fullMessages(shapedRecords, 1)).toEqual([user('hello'), user('how are you')])
 
-  // Naming the answer it goes on from, found in the folder.
   const named = { ...before }
   memoryStore(named, () => 1).take(
     record('api_request_body', {
@@ -1656,12 +1547,10 @@ test('a body sent twice adds its messages once', () => {
   store.take(
     record('api_request_body', { body: requestBody([user('hello')]), query_source: 'sdk' }),
   )
-  // Told by its shape: the second time, the conversation already ends with it.
   for (let times = 0; times < 2; times += 1)
     store.take(
       record('api_request_body', { body: continuationBody([user('again')]), query_source: 'sdk' }),
     )
-  // Naming its answer: each time, it goes on from that one.
   store.take(
     record('api_request_body', {
       body: requestBody([user('hello'), user('again'), user('next')]),
@@ -1701,8 +1590,6 @@ test('a receiver started mid-conversation keeps a conversation sent whole from w
   )
   first.take(answer('b0', 'msg_0'))
 
-  // Sent whole (an SDK session, a retry) to a receiver that took nothing yet:
-  // what the disk holds, its answer counted, is not kept again.
   const files = { ...before }
   memoryStore(files, () => 1).take(
     record('api_request_body', {
@@ -1725,8 +1612,6 @@ test('a message whose cache marker moved is not counted as new', () => {
       { type: 'text', text, ...(isMarked ? { cache_control: { type: 'ephemeral' } } : {}) },
     ],
   })
-  // Claude Code marks the newest messages at each request, so the marker
-  // moves on: the messages are the same ones.
   store.take(
     record('api_request_body', {
       body: requestBody([said('a'), said('b', true)]),
@@ -1742,7 +1627,6 @@ test('a message whose cache marker moved is not counted as new', () => {
   const records = keptRecords(files)
   expect(records[1]).toMatchObject({ from: 2, messageCount: 3 })
   expect(records[1]!.added).toEqual([said('c', true)])
-  // Rebuilt, a message carries the marker as the request that added it sent it.
   expect(fullMessages(records, 1)).toEqual([said('a'), said('b', true), said('c', true)])
 })
 
@@ -1759,7 +1643,6 @@ test('the billing header is the request’s own: the prompt’s file is one for 
       tools: [{ name: 'Bash' }],
       messages,
     })
-  // The header names the request before, so it differs at every request.
   store.take(
     record('api_request_body', {
       body: body([user('hello')], 'cc_prev_req=none'),
@@ -1780,14 +1663,11 @@ test('the billing header is the request’s own: the prompt’s file is one for 
   expect(records[1]!.system).toBe(records[0]!.system)
   expect(records[0]!.billing).toEqual(['x-anthropic-billing-header: cc_prev_req=none'])
   expect(records[1]!.billing).toEqual(['x-anthropic-billing-header: cc_prev_req=req_1'])
-  // Read back with the header first, as sent; a request kept before the
-  // header was set apart has it in the file, and reads as it was.
   expect(withBilling(records[1], prompt)).toEqual([
     { type: 'text', text: 'x-anthropic-billing-header: cc_prev_req=req_1' },
     { type: 'text', text: 'You are Claude Code.' },
   ])
   expect(withBilling({ seq: 0 } as never, prompt)).toEqual(prompt)
-  // One that goes on, told by its shape: the header alone, no tools.
   store.take(
     record('api_request_body', {
       body: JSON.stringify({
@@ -1822,7 +1702,6 @@ test('the receiver drops what it holds of a session once idle, and goes on from 
     }),
   )
   store.take(answer('b0', 'msg_0'))
-  // Heard from within the idle time, it is kept; past it, dropped.
   now = 4_000
   store.prune(5_000)
   expect(store.sessions.size).toBe(1)
@@ -1862,11 +1741,9 @@ test('parallel subagents of one type are each rebuilt whole', () => {
   )
   store.take(answer('b3', 'msg_b'))
   store.take(answer('b4', 'msg_a'))
-  // Going on, each from the answer it names, whichever came last.
   for (const [text, previous] of [
     ['b: end', 'msg_b'],
     ['a: after', 'msg_a'],
-    // One whose answer is nowhere is not joined to another subagent's.
     ['c: lost', 'msg_c'],
   ] as const)
     store.take(
@@ -1875,7 +1752,6 @@ test('parallel subagents of one type are each rebuilt whole', () => {
         query_source: source,
       }),
     )
-  // The main conversation, meanwhile, is apart.
   store.take(record('api_request_body', { body: requestBody([user('main')]), query_source: 'sdk' }))
   const records = keptRecords(files)
   bodies.forEach((messages, index) => expect(fullMessages(records, index)).toEqual(messages))
@@ -1927,7 +1803,6 @@ test('a request that could not be read leaves the conversation as it was', () =>
   expect(fullMessages(records, 2)).toEqual([user('one'), assistant('two'), user('three')])
 })
 
-/** Usage for the oldest request of the main loop still without it. */
 function usage(input: number, costUsd: number) {
   return record('api_request', {
     query_source: 'sdk',
@@ -1938,7 +1813,6 @@ function usage(input: number, costUsd: number) {
   })
 }
 
-/** Text that makes a request's file too large for the pane to read. */
 const huge = (size: number) => `BIG${'x'.repeat(size)}`
 
 test('the store keeps a head beside a large request, in step as its answer lands', () => {
@@ -1980,7 +1854,6 @@ test('the store keeps a head beside a large request, in step as its answer lands
     usage: { input: 1200, costUsd: 0.3 },
     response: { id: 'msg_1', content: [{ type: 'text', text: 'done' }] },
   })
-  // The head is the request without its messages.
   const { added: _added, ...whole } = JSON.parse(files[`${SESSION}/000001.json`]!) as KeptRecord
   const {
     added: _none,
@@ -1993,7 +1866,6 @@ test('the store keeps a head beside a large request, in step as its answer lands
   }
   expect(rest).toEqual(whole)
 
-  // One just under the limit has none until its answer takes it past.
   store.take(
     record('api_request_body', {
       body: continuationBody([user(huge(HEAD_AFTER_BYTES - 2_000))], 'msg_1'),
@@ -2011,14 +1883,12 @@ test('the store keeps a head beside a large request, in step as its answer lands
   })
 })
 
-/** A session's files as the store wrote them, by name within its folder. */
 function sessionFiles(files: Record<string, string>): Record<string, string> {
   return Object.fromEntries(
     Object.entries(files).map(([name, text]) => [name.slice(SESSION.length + 1), text]),
   )
 }
 
-/** Three main requests, the second too large for the pane, each answered. */
 function largeSession() {
   const files: Record<string, string> = {}
   const store = memoryStore(files)
@@ -2053,7 +1923,6 @@ test('a request too large to read is listed from its head, and the ones after ke
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
 
-  // Its own source, usage and answer; a head is not a request of its own.
   expect(await traceRows(pane)).toEqual(['#3', '#2', '#1'])
   const row = (await pane.find({ type: 'Client', key: 'disclose-trace-1' }))?.props.props
   expect(row).toMatchObject({
@@ -2061,7 +1930,6 @@ test('a request too large to read is listed from its head, and the ones after ke
     lines: ['+ 1 message too large to read here: open it in your browser', '→ "done"'],
   })
 
-  // Expand on it says so, and still shows what it was sent with.
   const drawnText = async () => (await readerText(pane)).join('\n')
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-1' })
   expect(String((await pane.find({ type: 'Code' }))?.props.source)).toMatch(
@@ -2072,11 +1940,8 @@ test('a request too large to read is listed from its head, and the ones after ke
   expect(await drawnText()).toMatch(/── #3 user \(new\)\n\(Not shown: request #2 is too large/)
   await pane.post({ back: true }, { in: 'reader' })
 
-  // The request after it: every message in its place, the answers between
-  // them included, its own whole.
   await pane.pointer({ type: 'down', x: 5, y: 0, button: 'left', in: 'disclose-trace-2' })
   await pane.press({ key: 'read-2' })
-  // An empty row is drawn as a space.
   const text = await drawnText()
   expect(text).toMatch(/══ Messages: 5, the last 1 new in this request/)
   expect(text).toMatch(
@@ -2095,7 +1960,6 @@ test('a request too large to read with no head, from an older receiver, is liste
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: 'tab-trace' })
 
-  // Known by its number alone, it is not counted in the conversation.
   expect(await traceRows(pane)).toEqual(['#3', '#1', '#2 unknown'])
   const row = (await pane.find({ type: 'Client', key: 'disclose-trace-1' }))?.props.props
   expect((row as { lines: string[] }).lines).toEqual([
@@ -2135,7 +1999,6 @@ test('a head stands in for its request’s messages, and the prompt is found thr
     }),
   )
   const whole = keptRecords(files)
-  // As the pane reads them: the large one from its head.
   const read = whole.map(one =>
     one.seq === 1 ? fromHead(JSON.parse(files[`${SESSION}/000001.head.json`]!)) : one,
   )
@@ -2166,7 +2029,6 @@ test('the browser pages read a large request whole, with no head', () => {
   expect(fullMessages(records, 2)).toHaveLength(5)
 })
 
-/** A main request's answer: what it said, and a tool it called. */
 function toolAnswer(bodyId: string, id: string) {
   return record('api_response_body', {
     request_body_id: bodyId,
@@ -2204,7 +2066,6 @@ test('a request that goes on has the answer it goes on from in its conversation,
     }),
   )
   store.take(toolAnswer('b0', 'msg_0'))
-  // Naming the answer, and told by its shape alone.
   store.take(
     record('api_request_body', {
       body: continuationBody([toolResult], 'msg_0'),
@@ -2233,10 +2094,8 @@ test('a request that goes on has the answer it goes on from in its conversation,
     assistant('There is a.txt.'),
     user('thanks'),
   ])
-  // Each rebuilt conversation is as long as the store counted it.
   for (const one of records) expect(fullMessages(records, one.seq)).toHaveLength(one.messageCount)
 
-  // A receiver started after it counts the answer the same, read from the folder.
   const later = { ...files }
   memoryStore(later, () => 3).take(
     record('api_request_body', { body: continuationBody([user('more')]), query_source: 'sdk' }),
@@ -2261,8 +2120,6 @@ test('an answer that lands after the request that goes on from it is not put bef
     record('api_request_body', { body: continuationBody([user('more')]), query_source: 'sdk' }),
   )
   store.take(answer('b0', 'msg_0', 'hi'))
-  // As a request an older receiver kept reads, which counted no answer:
-  // the answer is on disk, and the request starts before it.
   const records = keptRecords(files)
   expect(records[0]!.response).not.toBeNull()
   expect(records[1]).toMatchObject({ continues: true, from: 1, messageCount: 2 })
@@ -2281,7 +2138,6 @@ test('a whole body sent again after a request that went on rebuilds as sent', ()
       }),
     )
     store.take(answer('b0', 'msg_0', 'hi'))
-    // Goes on, and is never answered: Claude Code sends the conversation whole.
     store.take(
       record('api_request_body', {
         body: continuationBody([user('more')], 'msg_0'),
@@ -2294,12 +2150,10 @@ test('a whole body sent again after a request that went on rebuilds as sent', ()
     return { records: keptRecords(files), whole }
   }
 
-  // The answer as Claude Code keeps it is the response's: the diff goes past it.
   const same = sent({ type: 'text', text: 'hi' })
   expect(same.records[2]).toMatchObject({ continues: false, from: 3, messageCount: 3, added: [] })
   expect(fullMessages(same.records, 2)).toEqual(same.whole)
 
-  // Kept otherwise (a field added): the diff stops before it, and the body's own is kept.
   const other = sent({ type: 'text', text: 'hi', citations: null })
   expect(other.records[2]).toMatchObject({ continues: false, from: 1, messageCount: 3 })
   expect(other.records[2]!.added).toEqual(other.whole.slice(1))

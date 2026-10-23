@@ -41,6 +41,7 @@ for `feat` and `fix` it becomes the line in the release notes once `dev` is prom
   in `.claude-plugin/marketplace.json` and a section in the root README's Plugins list.
 - Function hooks are an early-access API that can change between Claude Code releases. CI
   runs the latest release, so write against that one.
+- Let names, types and test names say what the code does; the code itself stays comment-free.
 - Add or update tests under `<plugin>/tests/` for the behaviour you change.
 - For UI changes, attach a screenshot of the plugin as it draws.
 - Do not commit the engine's generated typings (`<plugin>/.claude-plugin/types/`).
