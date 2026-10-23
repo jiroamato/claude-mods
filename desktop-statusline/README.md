@@ -35,8 +35,9 @@ app's own theme colours:
 
 ## Context details
 
-Click the ⓘ to open the Context details pane. Its four tabs show what the app's own
-Context card leaves out.
+Click the ⓘ to open the Context details pane. Use it to see exactly what Claude Code
+sends the model on every turn, and to choose which built-in tools it loads. Each tool
+you remove frees its share of the context window for your conversation.
 
 ![The Context details pane: its tabs, and the Tools tab's In context group with Remove beside each tool](docs/context-pane.png)
 
