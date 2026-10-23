@@ -151,41 +151,7 @@ claude plugin install desktop-statusline@claude-mods
 
 ## Develop
 
-Function hooks are an early-access API: the surface may change between Claude
-Code releases, and the plugin is written against the version named in each
-release's notes. Everything it needs is in this folder:
-
-```
-desktop-statusline/
-  .claude-plugin/plugin.json   manifest
-  hooks/hooks.json             names the hooks module
-  hooks/register.tsx           the mod: hooks, state and the band's tree
-  hooks/elapsed.tsx            the band's timer, a region that counts its own seconds
-  hooks/duration.ts            a duration as the band writes it
-  hooks/panel.tsx              the Context details pane
-  hooks/tabs.tsx               a tab of the pane, a region of its own
-  hooks/disclosure.tsx         a row of the pane that opens and closes
-  hooks/reader.tsx             the reader's top line: the way back
-  hooks/text.tsx               the reader's text, with its scrollbar
-  hooks/context.ts             the window broken down as /context counts it
-  hooks/tools.ts               tool summaries, sizes and the settings deny edit
-  hooks/folder.ts              opening the traces folder in the file manager
-  hooks/trace.ts               tracing's settings, and a trace read for the pane
-  trace/receiver.mjs           the trace receiver, run with Node
-  trace/store.mjs              what the receiver keeps of each request
-  trace/view.mjs               the receiver's pages for the browser
-  trace/*.d.mts                their types, for the hooks and the tests
-  types/index.d.ts             its state contract
-  tests/                       run with `claude plugin test`
-  docs/                        this README's screenshots and demo
-  package.json                 the npm package, @jiroamato/desktop-statusline
-  install.mjs                  its installer, what `npx` runs
-  pack-docs.mjs                readies this README and the LICENSE while npm packs it
-```
-
-Validate, test and type-check it, and hack on it live, as the
-[repository README](../README.md#develop) describes for every plugin. See
-[CONTRIBUTING.md](../CONTRIBUTING.md) for the contributor workflow.
+See [CONTRIBUTING.md](../CONTRIBUTING.md).
 
 ## License
 

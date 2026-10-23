@@ -16,13 +16,17 @@ Read the matching file before you act:
 
 ## Orientation
 
-- The root `README.md` is the marketplace's front page (its plugins, installing, the develop loop);
-  `<plugin>/README.md` documents that plugin's behaviour, install and files, with its screenshots in
+- The root `README.md` is the marketplace's front page (its plugins, installing);
+  `<plugin>/README.md` documents that plugin's behaviour and install for its users, with its images in
   `<plugin>/docs/`.
 - A plugin's hooks module is `<plugin>/hooks/register.tsx`, its state contract `<plugin>/types/index.d.ts`,
   its tests `<plugin>/tests/`. The engine's API typings land in `<plugin>/.claude-plugin/types/` when a
   session loads the plugin; grep them for any `$` call or event before using it. They are generated,
   never committed.
+- In `desktop-statusline/`, `register.tsx` draws the band; the other `hooks/` files are the Context
+  details pane (`panel.tsx` and its parts) and what it reads (`context.ts`, `tools.ts`, `trace.ts`).
+  `trace/` is the receiver Node runs for tracing, with its browser pages. `package.json`, `install.mjs`
+  and `pack-docs.mjs` are the npm installer, which `RELEASING.md` covers.
 - Checks, all of which CI runs on Ubuntu, macOS and Windows:
   `claude plugin validate --strict .`, `claude plugin validate --strict <plugin>`,
   `claude plugin test <plugin>`, `npx --yes prettier@3.9.10 --check .`. Type-check with
