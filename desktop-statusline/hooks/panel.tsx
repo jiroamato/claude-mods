@@ -486,7 +486,7 @@ export type ContextPaneProps = {
   tools: ToolRow[]
   /** The tab that is open. */
   tab: PaneTab
-  /** Keys of the sections that are open. */
+  /** Keys of the prompt sections and trace requests that are open. */
   expanded: readonly string[]
   /** Keys of the groups that are closed: a group is open until closed. */
   collapsed: readonly string[]
@@ -507,7 +507,7 @@ export type ContextPaneProps = {
   onTracing: (isOn: boolean) => void
   /** Opens the traces folder in the system's file manager. */
   onShowTraces: () => void
-  /** The page of the open request or section's text. */
+  /** The page of the open prompt section's text. */
   page: number
   onPage: (page: number) => void
   /** The request read whole, as the rows in view; null while the tabs show. */

@@ -131,8 +131,8 @@ test('draws a hairline between the model, the effort and the folder', async ($, 
   const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
 
   expect(await ui.find({ type: 'Text', text: 'high' })).toBeDefined()
-  // Two on the left, one on the right between the meter and the timer: no
-  // cost has been read yet, so no hairline is drawn for it.
+  // Two on the left, and on the right one before the timer and one before
+  // the ⓘ: no cost has been read yet, so no hairline is drawn for it.
   const dividers = (await ui.findAll({ type: 'Svg' })).filter(one => one.props.alt === 'divider')
   expect(dividers).toHaveLength(4)
   for (const one of dividers) {

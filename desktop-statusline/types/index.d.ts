@@ -13,7 +13,7 @@ export type ContextRow = {
   kind: RowKind
 }
 
-/** One piece of a row, listed when the row is expanded. */
+/** One line of a list in the pane: a name, its size and a line about it. */
 export type ContextItem = { name: string; tokens: number; detail: string }
 
 /** One section of the system prompt, with its text. */
@@ -131,13 +131,13 @@ declare module 'claude-code' {
       effort: Effort | null
       /** The context window broken down, refreshed after every turn; null until read. */
       context: ContextSnapshot | null
-      /** Which of the pane's system prompt sections are open, by key. */
+      /** Which of the pane's prompt sections and trace requests are open, by key. */
       expanded: string[]
       /** Which of the pane's groups are closed, by key: a group is open until closed. */
       collapsed: string[]
       /** The pane's open tab. */
       tab: PaneTab
-      /** Which page of the open request's or section's text is shown, from 0. */
+      /** Which page of the open prompt section's text is shown, from 0. */
       page: number
       /** The request the pane reads whole, by its number; null while the pane shows its tabs. */
       reader: number | null

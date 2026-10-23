@@ -116,7 +116,7 @@ export function promptSections(sections: readonly PromptComposeSection[]): Promp
     }))
 }
 
-/** The context window as the card and the pane draw it: /context's rows and what is in each. */
+/** The context window as the pane reads it: /context's rows, the skills and the system prompt. */
 export function buildSnapshot(
   breakdown: SessionContextBreakdown,
   commands: readonly CommandInfo[],

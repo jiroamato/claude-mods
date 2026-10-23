@@ -34,7 +34,7 @@ const PANE = {
   component: 'Pane',
   requestId: 'context-map',
   props: {
-    title: 'Context',
+    title: 'Context details',
     isFocused: false,
     bodyColumns: 70,
     placement: 'dock',
@@ -367,7 +367,7 @@ async function openTab(
   await pane.pointer({ type: 'down', x: 2, y: 0, button: 'left', in: `tab-${id}` })
 }
 
-test('the meter has no hover card; the ⓘ opens the pane on its Tools tab', async ($, on) => {
+test('the ⓘ opens the pane on its Tools tab, and the meter is no control', async ($, on) => {
   const settings: SettingsFile = { text: '{}' }
   const clock = engine(on, settings)
   let opened: unknown
@@ -384,7 +384,6 @@ test('the meter has no hover card; the ⓘ opens the pane on its Tools tab', asy
   const boxes = await band.findAll({ type: 'Box' })
   expect(boxes.filter(one => one.props.position === 'absolute')).toEqual([])
   expect(boxes.filter(one => one.props.hover !== undefined)).toEqual([])
-  expect(await band.find({ key: 'open-context' })).toBeUndefined()
 
   const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
   await openTab(pane, 'skills')
