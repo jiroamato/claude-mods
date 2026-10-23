@@ -78,7 +78,7 @@ function estimate(text: string): number {
 }
 
 /** /context's rows that hold tokens. */
-export function contextRows(breakdown: SessionContextBreakdown): ContextRow[] {
+function contextRows(breakdown: SessionContextBreakdown): ContextRow[] {
   return breakdown.categories
     .filter(row => row.tokens > 0)
     .map(row => ({ name: row.name, tokens: row.tokens }))
@@ -99,7 +99,7 @@ export function sectionTitle(section: Pick<PromptComposeSection, 'id' | 'text'>)
 }
 
 /** The system prompt's sections, each with a title and its estimated tokens. */
-export function promptSections(sections: readonly PromptComposeSection[]): PromptSection[] {
+function promptSections(sections: readonly PromptComposeSection[]): PromptSection[] {
   return sections
     .filter(one => one.text.trim() !== '')
     .map(one => ({

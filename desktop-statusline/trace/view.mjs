@@ -11,10 +11,10 @@
 
 import { fullMessages, goesOn, isMain, promptRecord } from './store.mjs'
 
-export { fullMessages, goesOn, promptRecord }
+export { fullMessages, promptRecord }
 
 /** Text safe inside HTML. */
-export function escapeHtml(text) {
+function escapeHtml(text) {
   return String(text)
     .replace(/&/g, '&amp;')
     .replace(/</g, '&lt;')

@@ -22,7 +22,7 @@ import type { ToolRow } from './tools'
 import { MAX_MATCHES, isMainSource, sourceLabel, viewLink } from './trace'
 
 /** The pane the band's ⓘ opens. */
-export const PANE_ID = 'context-map'
+export const PANE_ID = 'context-details'
 export const PANE_TITLE = 'Context details'
 
 type Ui = ElementTable<'desktop'>
@@ -528,9 +528,9 @@ export type ReaderView = {
 }
 
 /** The reader's top, in rows: its line back and its search. */
-export const READER_TOP_ROWS = 3
+const READER_TOP_ROWS = 3
 /** The frame round the reader's text, in rows: its border's top and bottom. */
-export const READER_FRAME_ROWS = 2
+const READER_FRAME_ROWS = 2
 /**
  * The columns the reader takes beside its text's rows: the pane's padding
  * and the frame's border, a column each side, and the scrollbar with the

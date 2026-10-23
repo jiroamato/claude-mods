@@ -32,7 +32,7 @@ const BAND = {
 const PANE = {
   plugin: 'desktop-statusline',
   component: 'Pane',
-  requestId: 'context-map',
+  requestId: 'context-details',
   props: {
     title: 'Context details',
     isFocused: false,
@@ -170,15 +170,15 @@ function engine(
     value: settings.isPaneShown
       ? [
           {
-            id: 'context-map',
+            id: 'context-details',
             title: 'Context details',
             isShown: true,
             isFocused: false,
             isPlaced: true,
             plugin: 'desktop-statusline',
-            element: 'context-map',
+            element: 'context-details',
             component: 'Pane' as const,
-            requestId: 'context-map',
+            requestId: 'context-details',
             surface: 'desktop' as const,
           },
         ]
@@ -399,7 +399,7 @@ test('the ⓘ opens the pane on its Tools tab, and the meter is no control', asy
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed
   // Focused, or the desktop spends the first click in it on the focus.
-  expect(opened).toMatchObject({ id: 'context-map', title: 'Context details', focus: true })
+  expect(opened).toMatchObject({ id: 'context-details', title: 'Context details', focus: true })
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: 'Built-in tools' })).toBeDefined()
 

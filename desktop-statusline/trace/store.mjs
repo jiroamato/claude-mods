@@ -24,10 +24,10 @@
 export const HEALTH = 'desktop-statusline trace receiver 12'
 
 /** The events the receiver keeps; the others are left unread. */
-export const KEPT_EVENTS = new Set(['api_request_body', 'api_request', 'api_response_body'])
+const KEPT_EVENTS = new Set(['api_request_body', 'api_request', 'api_response_body'])
 
 /** A string's FNV-1a hash in hex: a name for content, not a guard against anyone. */
-export function hashText(text) {
+function hashText(text) {
   let hash = 0x811c9dc5
   for (let index = 0; index < text.length; index += 1) {
     hash ^= text.charCodeAt(index)
@@ -65,7 +65,7 @@ export function logRecords(payload) {
 }
 
 /** Whether a system block is the billing header alone, which every request carries. */
-export function isBillingBlock(block) {
+function isBillingBlock(block) {
   return /^x-anthropic-billing-header:/.test(String(block?.text ?? ''))
 }
 
@@ -98,7 +98,7 @@ export function isMain(source) {
  * sources are one (the CLI's names the output style, which `/output-style`
  * changes mid-session); any other source is its own.
  */
-export function sourceKind(source) {
+function sourceKind(source) {
   return isMain(source) ? 'main' : String(source)
 }
 
@@ -189,7 +189,7 @@ export const HEAD_AFTER_BYTES = 3 * 1024 * 1024
 const MAX_HEAD_ANSWER_BYTES = 1024 * 1024
 
 /** What a placeholder message says, for a request too large to read where it is read. */
-export function tooLargeNote(seq) {
+function tooLargeNote(seq) {
   return `(Not shown: request #${seq + 1} is too large to read here. Open it in your browser.)`
 }
 
@@ -211,7 +211,7 @@ export function headMessages(record) {
 }
 
 /** A request's file without its messages, and its answer whole when that is small. */
-export function headOf(record) {
+function headOf(record) {
   const response =
     record.response && utf8Length(JSON.stringify(record.response)) > MAX_HEAD_ANSWER_BYTES
       ? {
