@@ -5,12 +5,10 @@ import type {
   SessionContextBreakdown,
 } from 'claude-code'
 
-import type { ContextRow, ContextSnapshot, PromptSection, RowKind, SkillOrigin } from '../types'
+import type { ContextRow, ContextSnapshot, PromptSection, SkillOrigin } from '../types'
 import { CHARS_PER_TOKEN, firstSentence } from './tools'
 
 const SKILL_LINE_MAX = 110
-
-const KIND_ORDER: Record<RowKind, number> = { used: 0, buffer: 1, free: 2, deferred: 3 }
 
 // Where a skill comes from, in words, by the engine's name for the source.
 const SKILL_SOURCE: Record<string, string> = {
@@ -79,15 +77,11 @@ function estimate(text: string): number {
   return text.length / CHARS_PER_TOKEN
 }
 
-/**
- * /context's rows in the order its card lists them: what is in the window
- * largest first, then the reserve, the free space and what loads on demand.
- */
+/** /context's rows that hold tokens. */
 export function contextRows(breakdown: SessionContextBreakdown): ContextRow[] {
   return breakdown.categories
     .filter(row => row.tokens > 0)
-    .map(row => ({ name: row.name, tokens: row.tokens, kind: row.kind }))
-    .sort((a, b) => KIND_ORDER[a.kind] - KIND_ORDER[b.kind] || b.tokens - a.tokens)
+    .map(row => ({ name: row.name, tokens: row.tokens }))
 }
 
 /** A section's title: its own heading, else its id in words. */
@@ -136,9 +130,7 @@ export function buildSnapshot(
     .sort((a, b) => b.tokens - a.tokens || a.name.localeCompare(b.name))
 
   return {
-    used: breakdown.totalTokens,
     window: breakdown.rawMaxTokens,
-    percent: breakdown.percentage,
     rows,
     skills,
     prompt: promptSections(sections),
