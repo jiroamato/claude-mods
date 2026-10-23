@@ -2,15 +2,11 @@ export type Effort = 'low' | 'medium' | 'high' | 'xhigh' | 'max'
 
 export type GitInfo = { branch: string; isDirty: boolean } | null
 
-/** What a /context row is: in the window, the window left, the compaction reserve, or loaded on demand. */
-export type RowKind = 'used' | 'free' | 'buffer' | 'deferred'
-
 /** One row of the breakdown, as /context lists it. */
 export type ContextRow = {
   /** The row's label as /context prints it (`System tools`, `Free space`). */
   name: string
   tokens: number
-  kind: RowKind
 }
 
 /** One line of a list in the pane: a name, its size and a line about it. */
@@ -96,13 +92,9 @@ export type TracePlaces = { settings: string; traces: string }
 
 /** The context window broken down, as the pane draws it. */
 export type ContextSnapshot = {
-  /** Tokens in use, as /context counts them. */
-  used: number
   /** The window measured against. */
   window: number
-  /** Used over window, a whole percentage. */
-  percent: number
-  /** /context's rows: in use largest first, then the reserve, the free space, what loads on demand. */
+  /** /context's rows that hold tokens. */
   rows: ContextRow[]
   /** Each listed skill with its listing's tokens. */
   skills: {

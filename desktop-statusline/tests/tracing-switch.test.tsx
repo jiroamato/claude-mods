@@ -16,7 +16,7 @@ const SESSION = 'session-1'
 const PANE = {
   plugin: 'desktop-statusline',
   component: 'Pane',
-  requestId: 'context-map',
+  requestId: 'context-details',
   props: {
     title: 'Context details',
     isFocused: false,

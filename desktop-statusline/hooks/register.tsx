@@ -17,6 +17,7 @@ import {
   ContextPane,
   DISCLOSURE_PREFIX,
   GROUP_PREFIX,
+  OLD_PANE_ID,
   PANE_ID,
   PANE_TITLE,
   READER_KEY,
@@ -999,11 +1000,16 @@ async function toggleExpanded($: EngineInterface, key: string): Promise<void> {
  * list and the breakdown read afresh: the settings may have been edited by hand
  * since the session began, and the window may have moved since the last turn
  * (a /compact). A pane already open is left as the person has it, its figures
- * read afresh.
+ * read afresh. One an earlier version left up under its old ID is closed: the
+ * engine keeps it through an update, and nothing draws it now.
  */
 async function openPane($: EngineInterface): Promise<void> {
   try {
-    const isOpen = (await $.ui.panes()).some(pane => pane.id === PANE_ID && pane.isShown)
+    const panes = await $.ui.panes()
+    if (panes.some(pane => pane.id === OLD_PANE_ID)) {
+      await $.ui.close({ id: OLD_PANE_ID }).catch(() => undefined)
+    }
+    const isOpen = panes.some(pane => pane.id === PANE_ID && pane.isShown)
     if (!isOpen) {
       await update($, tab, () => 'tools')
       await update($, reader, () => null)

@@ -67,7 +67,7 @@ export const CHARS_PER_TOKEN = 3.6
 const SUMMARY_MAX = 90
 
 /** A bare built-in tool name, as a deny rule spells a whole tool (`NotebookEdit`). */
-export function isBareToolName(rule: string): boolean {
+function isBareToolName(rule: string): boolean {
   return /^[A-Z][A-Za-z0-9_]*$/.test(rule)
 }
 
@@ -95,7 +95,7 @@ export function summarize(name: string, description: string | undefined): string
 }
 
 /** A rough size of the tool's schema in the request: name, description and input schema. */
-export function estimateTokens(name: string, description: string | undefined): number {
+function estimateTokens(name: string, description: string | undefined): number {
   const schema = CATALOG[name]?.schemaChars ?? DEFAULT_SCHEMA_CHARS
   const chars = name.length + (description?.length ?? 0) + schema + 40
 

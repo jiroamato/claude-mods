@@ -1,7 +1,7 @@
 import type { ClientSurface } from 'claude-code'
 
 /** One drawn row, as the pane hands it: its text, and the matches in it. */
-export type TextRow = {
+type TextRow = {
   text: string
   hits: { start: number; end: number; isCurrent: boolean }[]
 }
@@ -34,7 +34,7 @@ export type TextPick = { by: number } | { to: 'start' | 'end' } | { first: numbe
 export const READER_TEXT_KEY = 'reader-text'
 
 /** The columns at the text's right edge a press on reaches the track: wide enough to hit. */
-export const SCROLLBAR_COLUMNS = 2
+const SCROLLBAR_COLUMNS = 2
 /**
  * How wide the track and its thumb are drawn, in cells, at the right of those
  * columns: a native scrollbar's width. Square-ended: the desktop draws a Box

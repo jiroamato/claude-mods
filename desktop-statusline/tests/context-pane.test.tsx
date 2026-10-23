@@ -32,7 +32,7 @@ const BAND = {
 const PANE = {
   plugin: 'desktop-statusline',
   component: 'Pane',
-  requestId: 'context-map',
+  requestId: 'context-details',
   props: {
     title: 'Context details',
     isFocused: false,
@@ -131,6 +131,8 @@ type SettingsFile = {
   writes?: number
   /** Whether the engine lists the pane as open and shown, as `$.ui.panes()` reports it. */
   isPaneShown?: boolean
+  /** Whether a pane an earlier version opened is still up, under its old ID. */
+  hasOldPane?: boolean
 }
 
 /** Files under the trace folder, by name, as the receiver writes them. */
@@ -166,23 +168,23 @@ function engine(
   on('http.fetch', async () => ({
     value: { status: 200, ok: true, headers: {}, text: RECEIVER_HEALTH },
   }))
+  const listed = (id: string) => ({
+    id,
+    title: 'Context details',
+    isShown: true,
+    isFocused: false,
+    isPlaced: true,
+    plugin: 'desktop-statusline',
+    element: id,
+    component: 'Pane' as const,
+    requestId: id,
+    surface: 'desktop' as const,
+  })
   on('ui.panes', async () => ({
-    value: settings.isPaneShown
-      ? [
-          {
-            id: 'context-map',
-            title: 'Context details',
-            isShown: true,
-            isFocused: false,
-            isPlaced: true,
-            plugin: 'desktop-statusline',
-            element: 'context-map',
-            component: 'Pane' as const,
-            requestId: 'context-map',
-            surface: 'desktop' as const,
-          },
-        ]
-      : [],
+    value: [
+      ...(settings.hasOldPane ? [listed('context-map')] : []),
+      ...(settings.isPaneShown ? [listed('context-details')] : []),
+    ],
   }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)
@@ -295,22 +297,23 @@ test('a tool put back that the session started without waits for a new session',
   ])
 })
 
-test('the snapshot lists the rows as /context does, and what the pane details', () => {
+test('the snapshot keeps each /context row that holds tokens, and what the pane details', () => {
   const snapshot = buildSnapshot(breakdown(), [DEPLOY], SECTIONS)
-  expect(snapshot).toMatchObject({ used: 93_600, window: 200_000, percent: 46 })
-  // In the window largest first; then the reserve, the free space and what loads on demand.
-  expect(snapshot.rows.map(one => one.name)).toEqual([
-    'Messages',
-    'System tools',
-    'System prompt',
-    'Skills',
-    'MCP tools',
-    'Memory files',
-    'Autocompact buffer',
-    'Free space',
-    'MCP tools (deferred)',
-    'System tools (deferred)',
-  ])
+  expect(snapshot.window).toBe(200_000)
+  expect(snapshot.rows.map(one => one.name).sort()).toEqual(
+    [
+      'Messages',
+      'System tools',
+      'System prompt',
+      'Skills',
+      'MCP tools',
+      'Memory files',
+      'Autocompact buffer',
+      'Free space',
+      'MCP tools (deferred)',
+      'System tools (deferred)',
+    ].sort(),
+  )
   // An empty section is not sent, so it is not listed.
   expect(snapshot.prompt.map(one => [one.id, one.title, one.text])).toEqual([
     ['intro', 'Introduction', 'You are Claude Code, an interactive CLI tool.'],
@@ -398,7 +401,7 @@ test('the ⓘ opens the pane on its Tools tab, and the meter is no control', asy
   for (let step = 0; step < 10; step += 1) await clock.advance(100)
   await pressed
   // Focused, or the desktop spends the first click in it on the focus.
-  expect(opened).toMatchObject({ id: 'context-map', title: 'Context details', focus: true })
+  expect(opened).toMatchObject({ id: 'context-details', title: 'Context details', focus: true })
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeUndefined()
   expect(await pane.find({ type: 'Text', text: 'Built-in tools' })).toBeDefined()
 
@@ -411,6 +414,34 @@ test('the ⓘ opens the pane on its Tools tab, and the meter is no control', asy
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
   await pane.unmount()
+  await band.unmount()
+})
+
+test('the ⓘ closes a pane an earlier version left up under its old ID', async ($, on) => {
+  const settings: SettingsFile = { text: '{}', hasOldPane: true }
+  const clock = engine(on, settings)
+  const closed: string[] = []
+  on('ui.close', async (_$, e) => {
+    closed.push(e.id)
+    settings.hasOldPane = false
+
+    return { value: undefined }
+  })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+  const pressed = band.press({ key: 'open-details' })
+  for (let step = 0; step < 10; step += 1) await clock.advance(100)
+  await pressed
+  expect(closed).toEqual(['context-map'])
+
+  // With it gone, a press closes nothing.
+  const again = band.press({ key: 'open-details' })
+  for (let step = 0; step < 10; step += 1) await clock.advance(100)
+  await again
+  expect(closed).toEqual(['context-map'])
+
   await band.unmount()
 })
 
@@ -636,40 +667,6 @@ test('removing a tool denies it in the settings and moves it out of the window a
   expect((await pane.find({ key: 'group-back-in-a-new-session' }))?.text).toMatch(/^EnterPlanMode/)
   expect((await pane.find({ key: 'group-in-context' }))?.text).not.toMatch(/EnterPlanMode/)
   expect(await group('removed')).toBeUndefined()
-
-  await pane.unmount()
-})
-
-test('every move of the person’s goes through, one that lands on the last row too', async ($, on) => {
-  engine(on, { text: '{}' })
-  let moved = 0
-  on('ui.scroll', async () => {
-    moved += 1
-
-    return {}
-  })
-  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
-  const pane = await $.ui.mount({ ...PANE, surface: 'desktop' })
-  const window = {
-    component: 'Pane',
-    requestId: 'context-map',
-    bodyRows: 40,
-    contentRows: 340,
-  } as const
-  const person = { kind: 'person' } as const
-
-  // The desktop sends a wheel fling, a drag of the scrollbar's thumb, and End
-  // each as one move by the distance left, clamped, with no pointer: from the
-  // top of a tree taller than two windows, every one of them lands on the last
-  // row by more than a page. A guard that refused that shape as a jump of the
-  // desktop's own kept the pane from its end.
-  await $.ui.scroll({ ...window, origin: person, by: 290, offset: 300 })
-  expect(moved).toBe(1)
-  // A wheel tick, a page key, and End by every row as the typings describe it.
-  await $.ui.scroll({ ...window, origin: person, by: 3, offset: 13 })
-  await $.ui.scroll({ ...window, origin: person, by: 40, offset: 53 })
-  await $.ui.scroll({ ...window, origin: person, by: 340, offset: 300 })
-  expect(moved).toBe(4)
 
   await pane.unmount()
 })

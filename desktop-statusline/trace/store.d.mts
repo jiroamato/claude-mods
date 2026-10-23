@@ -1,9 +1,6 @@
 /** The receiver's logic (store.mjs), typed for the plugin's tests. */
 
 export declare const HEALTH: string
-export declare const KEPT_EVENTS: Set<string>
-export declare function hashText(text: string): string
-export declare function isBillingBlock(block: unknown): boolean
 export declare function withBilling<B>(
   record: { billing?: readonly string[] } | null | undefined,
   blocks: readonly B[] | null | undefined,
@@ -30,14 +27,8 @@ export type ChainRecord = {
   roles?: readonly string[]
 }
 export declare const HEAD_AFTER_BYTES: number
-export declare function tooLargeNote(seq: number): string
 export declare function headMessages(record: ChainRecord): { role: string; content: string }[]
-export declare function headOf<R extends ChainRecord>(
-  record: R,
-): R & { isHead: true; roles: string[] }
 export declare function isMain(source: string): boolean
-export declare function sourceKind(source: string): string
-export declare function goesOn(record: ChainRecord, hasBefore: boolean): boolean
 export declare function promptRecord<R extends ChainRecord>(
   records: readonly R[],
   seq: number,

@@ -357,7 +357,7 @@ test('a request reads in a line: what it added and what came back', () => {
 const PANE = {
   plugin: 'desktop-statusline',
   component: 'Pane',
-  requestId: 'context-map',
+  requestId: 'context-details',
   props: {
     title: 'Context details',
     isFocused: false,
