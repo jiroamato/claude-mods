@@ -131,6 +131,8 @@ type SettingsFile = {
   writes?: number
   /** Whether the engine lists the pane as open and shown, as `$.ui.panes()` reports it. */
   isPaneShown?: boolean
+  /** Whether a pane an earlier version opened is still up, under its old ID. */
+  hasOldPane?: boolean
 }
 
 /** Files under the trace folder, by name, as the receiver writes them. */
@@ -166,23 +168,23 @@ function engine(
   on('http.fetch', async () => ({
     value: { status: 200, ok: true, headers: {}, text: RECEIVER_HEALTH },
   }))
+  const listed = (id: string) => ({
+    id,
+    title: 'Context details',
+    isShown: true,
+    isFocused: false,
+    isPlaced: true,
+    plugin: 'desktop-statusline',
+    element: id,
+    component: 'Pane' as const,
+    requestId: id,
+    surface: 'desktop' as const,
+  })
   on('ui.panes', async () => ({
-    value: settings.isPaneShown
-      ? [
-          {
-            id: 'context-details',
-            title: 'Context details',
-            isShown: true,
-            isFocused: false,
-            isPlaced: true,
-            plugin: 'desktop-statusline',
-            element: 'context-details',
-            component: 'Pane' as const,
-            requestId: 'context-details',
-            surface: 'desktop' as const,
-          },
-        ]
-      : [],
+    value: [
+      ...(settings.hasOldPane ? [listed('context-map')] : []),
+      ...(settings.isPaneShown ? [listed('context-details')] : []),
+    ],
   }))
   on('fs.write', async (_$, e) => {
     expect(e.path).toMatch(settings.path ?? SETTINGS_PATH)
@@ -412,6 +414,34 @@ test('the ⓘ opens the pane on its Tools tab, and the meter is no control', asy
   expect(await pane.find({ type: 'Text', text: 'deploy' })).toBeDefined()
 
   await pane.unmount()
+  await band.unmount()
+})
+
+test('the ⓘ closes a pane an earlier version left up under its old ID', async ($, on) => {
+  const settings: SettingsFile = { text: '{}', hasOldPane: true }
+  const clock = engine(on, settings)
+  const closed: string[] = []
+  on('ui.close', async (_$, e) => {
+    closed.push(e.id)
+    settings.hasOldPane = false
+
+    return { value: undefined }
+  })
+  on('ui.open', async () => ({ value: { isPlaced: true } }))
+  await $.session.start({ cwd: '/repo', surface: 'desktop', isInteractive: true })
+  const band = await $.ui.mount({ ...BAND, surface: 'desktop' })
+
+  const pressed = band.press({ key: 'open-details' })
+  for (let step = 0; step < 10; step += 1) await clock.advance(100)
+  await pressed
+  expect(closed).toEqual(['context-map'])
+
+  // With it gone, a press closes nothing.
+  const again = band.press({ key: 'open-details' })
+  for (let step = 0; step < 10; step += 1) await clock.advance(100)
+  await again
+  expect(closed).toEqual(['context-map'])
+
   await band.unmount()
 })
 

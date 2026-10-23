@@ -23,6 +23,8 @@ import { MAX_MATCHES, isMainSource, sourceLabel, viewLink } from './trace'
 
 /** The pane the band's ⓘ opens. */
 export const PANE_ID = 'context-details'
+/** The ID earlier versions opened the pane under. */
+export const OLD_PANE_ID = 'context-map'
 export const PANE_TITLE = 'Context details'
 
 type Ui = ElementTable<'desktop'>
