@@ -151,9 +151,7 @@ const DIVIDER_SVG =
   `</svg>`
 const GIT_REFRESH_EVERY_TICKS = 15
 // The widest reading the timer draws (`59m 59s`, `23h 59m`), so the slot
-// holds its width as the digits change and nothing to its left shifts. The
-// reading sits at the slot's left, so its gap from the hairline matches the
-// other figures' and the spare width falls against the band's edge.
+// holds its width as the digits change and nothing beside it shifts.
 const ELAPSED_COLUMNS = 7
 
 // The band's own way into the pane: a circled i, as the Tools tab marks its

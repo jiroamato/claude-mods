@@ -20,6 +20,10 @@ Thanks for wanting to contribute.
 
 3. Load the plugin in a real session and check it on the surface it draws on. For
    `desktop-statusline` that means the Claude desktop app, in light and dark themes.
+   `claude --plugin-dir ./<plugin>` loads it from your checkout, or set
+   `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of `~/.claude/settings.json` for the
+   desktop app. Saving a file reloads it. Loading it also writes the engine's typings
+   beside its manifest, after which `tsc -p <plugin>` type-checks it.
 4. Open a pull request against `dev` with a [Conventional Commits](https://www.conventionalcommits.org)
    title, `type(scope): summary`. When the change is inside a plugin, the scope is its folder
    name (`fix(desktop-statusline): keep the timer from shifting the meter`). `main` is the
@@ -35,8 +39,8 @@ for `feat` and `fix` it becomes the line in the release notes once `dev` is prom
 - Each plugin lives in its own self-contained folder with its manifest, hooks module, state
   contract, tests, README and screenshots (`<plugin>/docs/`). A new plugin also gets an entry
   in `.claude-plugin/marketplace.json` and a section in the root README's Plugins list.
-- Function hooks are an early-access API. Write against the Claude Code version named in the
-  latest release notes, and say in the PR if your change needs a newer one.
+- Function hooks are an early-access API that can change between Claude Code releases. CI
+  runs the latest release, so write against that one.
 - Add or update tests under `<plugin>/tests/` for the behaviour you change.
 - For UI changes, attach a screenshot of the plugin as it draws.
 - Do not commit the engine's generated typings (`<plugin>/.claude-plugin/types/`).

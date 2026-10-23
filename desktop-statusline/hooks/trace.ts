@@ -385,7 +385,6 @@ export type RowMatch = { row: number; start: number; end: number }
 /** The most matches a search counts: past it, the person narrows the search. */
 export const MAX_MATCHES = 5_000
 
-/** Where `query` appears in `rows`, ignoring case; within a row only, as rows are drawn. */
 /**
  * Text in lower case, one character for one: a character whose lower case is
  * longer (`İ`) stays as it is, so a match's place is the same in the row.
@@ -398,6 +397,7 @@ function foldCase(text: string): string {
   })
 }
 
+/** Where `query` appears in `rows`, ignoring case; within a row only, as rows are drawn. */
 export function findMatches(rows: readonly string[], query: string): RowMatch[] {
   const needle = foldCase(query)
   if (needle.trim() === '') return []

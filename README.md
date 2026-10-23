@@ -50,31 +50,7 @@ A plugin may also have an installer of its own, such as
 
 ## Develop
 
-Function hooks are an early-access API: the surface may change between Claude
-Code releases, and each plugin is written against the version named in its
-release notes. Each plugin folder is self-contained: its manifest
-(`.claude-plugin/plugin.json`), hooks (`hooks/`), state contract
-(`types/index.d.ts`), tests (`tests/`), README and screenshots (`docs/`). Its
-README lists its files.
-
-Validate, test and type-check a plugin by passing its folder:
-
-```bash
-claude plugin validate --strict <plugin>
-```
-
-```bash
-claude plugin test <plugin>
-```
-
-Loading it in a session lays the engine's typings beside the manifest, after
-which `tsc -p <plugin>` type-checks it. Those generated files are ignored by git.
-
-To hack on a plugin live, point a session at its folder: `claude --plugin-dir
-./<plugin>`, or set `CLAUDE_CODE_PLUGIN_DIRS` in the `env` block of
-`~/.claude/settings.json`. Saving a file reloads the mod in that session.
-
-See [CONTRIBUTING.md](CONTRIBUTING.md) for the contributor workflow and
+See [CONTRIBUTING.md](CONTRIBUTING.md) to work on a plugin and
 [RELEASING.md](RELEASING.md) for how plugins are released.
 
 ## License
