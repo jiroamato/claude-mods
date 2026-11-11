@@ -131,7 +131,8 @@ const DIVIDER_SVG =
   `<rect width="${DIVIDER_WIDTH}" height="${DIVIDER_HEIGHT}" fill="${DIVIDER_COLOR}"/>` +
   `</svg>`
 const GIT_REFRESH_EVERY_TICKS = 15
-const ELAPSED_COLUMNS = 7
+const ELAPSED_COLUMNS = 9
+const GIVES_WAY_FIRST = 10_000
 
 const INFO_GLYPH = ' ⓘ '
 const PANE_SETTLE_MS = 300
@@ -1106,33 +1107,86 @@ export const register: Register = on => {
 
     return (
       <Box flexDirection="row" alignItems="center" paddingX={1} columnGap={3}>
-        <Box flexDirection="row" alignItems="center" columnGap={2} flexShrink={1} minWidth={0}>
-          <Box flexShrink={0}>
-            <Text color="claude" bold>
-              {prettyModel(model)}
-            </Text>
-          </Box>
-          {level !== null && divider()}
-          {level !== null && (
-            <Box flexShrink={0}>
-              <Text color={EFFORT_COLOR[level]}>{EFFORT_LABEL[level]}</Text>
+        <Box
+          key="identity"
+          flexDirection="row"
+          alignItems="center"
+          columnGap={2}
+          flexShrink={1}
+          minWidth={0}
+          overflow="hidden"
+        >
+          <Box
+            key="head"
+            flexDirection="row"
+            alignItems="center"
+            columnGap={2}
+            minWidth={0}
+            overflow="hidden"
+          >
+            <Box key="model" minWidth={0}>
+              <Text color="claude" bold wrap="truncate-end">
+                {prettyModel(model)}
+              </Text>
             </Box>
-          )}
-          {hasPlace && divider()}
-          {hasPlace && (
-            <Box flexDirection="row" alignItems="center" columnGap={1} flexShrink={1} minWidth={0}>
-              {folder !== '' && (
-                <Box flexShrink={0}>
-                  <Text color="text">{folder}</Text>
+            {level !== null && (
+              <Box
+                key="effort"
+                flexDirection="row"
+                alignItems="center"
+                columnGap={2}
+                flexShrink={GIVES_WAY_FIRST}
+                minWidth={0}
+                overflow="hidden"
+              >
+                {divider()}
+                <Box minWidth={0}>
+                  <Text color={EFFORT_COLOR[level]} wrap="truncate-end">
+                    {EFFORT_LABEL[level]}
+                  </Text>
                 </Box>
-              )}
-              {folder !== '' && repo !== null && <Text color="inactive">|</Text>}
-              {repo !== null && (
-                <Text color="secondaryText" wrap="truncate-end">
-                  {repo.branch}
-                </Text>
-              )}
-              {repo?.isDirty && <Text color="warning">•</Text>}
+              </Box>
+            )}
+          </Box>
+          {hasPlace && (
+            <Box
+              key="place"
+              flexDirection="row"
+              alignItems="center"
+              columnGap={2}
+              flexShrink={GIVES_WAY_FIRST}
+              minWidth={0}
+              overflow="hidden"
+            >
+              {divider()}
+              <Box flexDirection="row" alignItems="center" columnGap={1} minWidth={0}>
+                {folder !== '' && (
+                  <Box key="folder" minWidth={0}>
+                    <Text color="text" wrap="truncate-end">
+                      {folder}
+                    </Text>
+                  </Box>
+                )}
+                {repo !== null && (
+                  <Box
+                    key="branch"
+                    flexDirection="row"
+                    alignItems="center"
+                    columnGap={1}
+                    flexShrink={GIVES_WAY_FIRST}
+                    minWidth={0}
+                    overflow="hidden"
+                  >
+                    {folder !== '' && <Text color="inactive">|</Text>}
+                    <Box minWidth={0}>
+                      <Text color="secondaryText" wrap="truncate-end">
+                        {repo.branch}
+                      </Text>
+                    </Box>
+                    {repo.isDirty && <Text color="warning">•</Text>}
+                  </Box>
+                )}
+              </Box>
             </Box>
           )}
         </Box>

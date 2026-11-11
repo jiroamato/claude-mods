@@ -5,6 +5,7 @@ const BAND = {
   component: 'AbovePrompt',
   props: {
     hasSurvey: false,
+    isCollapsed: false,
     isWorking: false,
     maxRows: 6,
     bodyColumns: 120,
@@ -48,8 +49,10 @@ test('draws the CLI status line figures as a band on the desktop', async ($, on)
   expect((await ui.find({ type: 'Text', text: '1m 0s', in: 'elapsed' }))?.props).toMatchObject({
     tabular: true,
   })
-  const slot = (await ui.findAll({ type: 'Box' })).find(one => one.props.width === 7)
-  expect(slot?.props).toMatchObject({ width: 7, justifyContent: 'center' })
+  const slot = (await ui.findAll({ type: 'Box' })).find(
+    one => (one.children[0] as { props?: { key?: unknown } } | undefined)?.props?.key === 'elapsed',
+  )
+  expect(slot?.props).toMatchObject({ width: 9, justifyContent: 'center' })
   expect((slot?.children[0] as { props?: unknown } | undefined)?.props).toMatchObject({
     key: 'elapsed',
     module: 'hooks/elapsed.tsx',
@@ -157,6 +160,92 @@ test('cuts a long branch name short rather than wrapping the band', async ($, on
   for (const box of await ui.findAll({ type: 'Box' })) {
     expect(box.props.flexWrap).toBeUndefined()
   }
+
+  await ui.unmount()
+})
+
+type Drawn = { type: string; props: Record<string, unknown>; children?: unknown[] }
+
+function isDrawn(node: unknown): node is Drawn {
+  return typeof node === 'object' && node !== null && 'type' in node
+}
+
+function textsWithBoxes(node: Drawn, boxes: Drawn[] = []): { text: Drawn; boxes: Drawn[] }[] {
+  if (node.type === 'Text') return [{ text: node, boxes }]
+  const inside = node.type === 'Box' ? [...boxes, node] : boxes
+
+  return (node.children ?? []).filter(isDrawn).flatMap(child => textsWithBoxes(child, inside))
+}
+
+test('gives way part by part as the window narrows, the place first', async ($, on) => {
+  mock.clock(on, { now: 1_000 })
+  on('session.model', async () => ({ value: 'Opus 5.5' }))
+  const folder = 'scratch-2025-11-15-a-folder-name-long-enough-to-run-under-the-figures'
+  on('session.cwd', async () => ({ value: `/home/me/${folder}` }))
+  on('session.usage', async () => ({
+    value: { startedAt: 0, context: { window: 200_000 }, rateLimits: [] },
+  }))
+  on('config.list', async () => ({
+    value: [
+      {
+        key: 'effort',
+        label: 'Effort',
+        value: 'high',
+        kind: 'choice',
+        options: ['low', 'medium', 'high'],
+        provider: { plugin: 'engine', tier: 'core' },
+        isLocked: false,
+      },
+    ],
+  }))
+  on('process.run', async (_$, e) => ({
+    value: {
+      exitCode: 0,
+      stdout: e.argv.includes('rev-parse') ? 'fix/statusline-narrow-window\n' : ' M README.md\n',
+      stderr: '',
+      isStdoutTruncated: false,
+      isStderrTruncated: false,
+    },
+  }))
+  on('session.start', async (_$, e) => ({ cwd: e.cwd }))
+  await $.session.start({ cwd: `/home/me/${folder}`, surface: 'desktop', isInteractive: true })
+
+  const ui = await $.ui.mount({ ...BAND, surface: 'desktop' })
+  const part = async (key: string) => (await ui.find({ type: 'Box', key }))!
+
+  const identity = await part('identity')
+  expect(identity.props).toMatchObject({ flexShrink: 1, minWidth: 0, overflow: 'hidden' })
+
+  const texts = textsWithBoxes(identity as Drawn)
+  for (const name of ['Opus 5.5', 'high', folder, 'fix/statusline-narrow-window']) {
+    const found = texts.find(one => (one.text.children ?? []).join('') === name)
+    expect(found?.text.props).toMatchObject({ wrap: 'truncate-end' })
+    for (const box of found!.boxes) {
+      expect(box.props.minWidth).toBe(0)
+      expect((box.props.flexShrink as number | undefined) ?? 1).toBeGreaterThan(0)
+    }
+  }
+
+  const weight = async (key: string) => ((await part(key)).props.flexShrink as number) ?? 1
+  for (const [first, then] of [
+    ['place', 'head'],
+    ['effort', 'model'],
+    ['branch', 'folder'],
+  ]) {
+    expect(await weight(first!)).toBe(10_000)
+    expect(await weight(then!)).toBe(1)
+  }
+
+  for (const key of ['effort', 'place', 'branch']) {
+    expect((await part(key)).props).toMatchObject({ minWidth: 0, overflow: 'hidden' })
+  }
+  for (const key of ['effort', 'place']) {
+    const children = (await part(key)).children.filter(isDrawn)
+    expect(children[0]).toMatchObject({ type: 'Svg', props: { alt: 'divider' } })
+  }
+  const branch = (await part('branch')).children.filter(isDrawn)
+  expect(branch[0]?.children).toEqual(['|'])
+  expect(branch.at(-1)?.children).toEqual(['•'])
 
   await ui.unmount()
 })
